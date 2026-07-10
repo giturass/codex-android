@@ -409,13 +409,13 @@ private fun CodeBlock(text: String) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.inverseSurface,
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        contentColor = MaterialTheme.colorScheme.onSurface,
     ) {
         SelectionContainer {
             Text(
                 text,
                 modifier = Modifier.horizontalScroll(rememberScrollState()).padding(12.dp),
-                color = MaterialTheme.colorScheme.inverseOnSurface,
                 fontFamily = FontFamily.Monospace,
                 style = MaterialTheme.typography.bodySmall,
                 softWrap = false,

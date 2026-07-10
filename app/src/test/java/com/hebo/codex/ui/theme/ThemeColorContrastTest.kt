@@ -26,6 +26,22 @@ class ThemeColorContrastTest {
     }
 
     @Test
+    fun codeBlockTextMeetsContrastRequirement() {
+        assertContrast(
+            label = "浅色代码框文字",
+            foreground = LightColors.onSurface,
+            background = LightColors.surfaceContainerHighest,
+            minimum = TEXT_CONTRAST,
+        )
+        assertContrast(
+            label = "深色代码框文字",
+            foreground = DarkColors.onSurface,
+            background = DarkColors.surfaceContainerHighest,
+            minimum = TEXT_CONTRAST,
+        )
+    }
+
+    @Test
     fun semanticGraphicsMeetContrastRequirement() {
         assertStatusColors(
             theme = "浅色",
