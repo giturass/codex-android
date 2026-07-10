@@ -77,8 +77,16 @@ import com.hebo.codex.domain.ChangedFile
 import com.hebo.codex.domain.ConversationItem
 import com.hebo.codex.domain.PendingApproval
 import com.hebo.codex.ui.theme.statusColors
+import com.mikepenz.markdown.compose.components.markdownComponents
+import com.mikepenz.markdown.compose.elements.highlightedCodeBlock
+import com.mikepenz.markdown.compose.elements.highlightedCodeFence
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.model.rememberMarkdownState
+
+private val highlightedMarkdownComponents = markdownComponents(
+    codeBlock = highlightedCodeBlock,
+    codeFence = highlightedCodeFence,
+)
 
 @Composable
 fun ChatScreen(
@@ -243,6 +251,7 @@ private fun AgentMessage(item: ConversationItem.AgentMessage) {
             SelectionContainer {
                 Markdown(
                     markdownState = markdownState,
+                    components = highlightedMarkdownComponents,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
