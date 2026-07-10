@@ -77,6 +77,8 @@ import com.hebo.codex.domain.ChangedFile
 import com.hebo.codex.domain.ConversationItem
 import com.hebo.codex.domain.PendingApproval
 import com.hebo.codex.ui.theme.statusColors
+import com.mikepenz.markdown.m3.Markdown
+import com.mikepenz.markdown.model.rememberMarkdownState
 
 @Composable
 fun ChatScreen(
@@ -217,6 +219,11 @@ private fun UserMessage(item: ConversationItem.UserMessage) {
 
 @Composable
 private fun AgentMessage(item: ConversationItem.AgentMessage) {
+    val markdownState = rememberMarkdownState(
+        content = item.text.ifEmpty { "…" },
+        retainState = true,
+    )
+
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
         Box(
             modifier = Modifier.size(30.dp).background(MaterialTheme.colorScheme.inverseSurface, CircleShape),
@@ -234,7 +241,10 @@ private fun AgentMessage(item: ConversationItem.AgentMessage) {
             Text("Codex", style = MaterialTheme.typography.labelLarge)
             Spacer(Modifier.height(4.dp))
             SelectionContainer {
-                Text(item.text.ifEmpty { "…" }, style = MaterialTheme.typography.bodyLarge)
+                Markdown(
+                    markdownState = markdownState,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
     }
