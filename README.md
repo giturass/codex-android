@@ -72,7 +72,7 @@ app/src/main/java/com/hebo/codex
 
 ## 构建
 
-项目要求 JDK 17 和 Android SDK 36
+项目使用 JDK 26 运行 Gradle，源码和字节码目标为 Java 17，并要求 Android SDK 37
 
 ```bash
 ./gradlew :app:assembleDebug
