@@ -139,8 +139,8 @@ private const val CHAT_LIST_END_KEY = "chat-list-end"
 @Composable
 fun ChatScreen(
     viewModel: ChatViewModel,
+    showNavigationIcon: Boolean,
     onOpenNavigation: () -> Unit,
-    onNewConversation: () -> Unit,
     onOpenConversation: (String) -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -222,15 +222,14 @@ fun ChatScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onOpenNavigation) {
-                        Icon(Icons.Rounded.Menu, contentDescription = "打开导航")
+                    if (showNavigationIcon) {
+                        IconButton(onClick = onOpenNavigation) {
+                            Icon(Icons.Rounded.Menu, contentDescription = "打开导航")
+                        }
                     }
                 },
                 actions = {
                     if (conversation != null) {
-                        IconButton(onClick = onNewConversation) {
-                            Icon(Icons.Rounded.Add, contentDescription = "新建任务")
-                        }
                         IconButton(onClick = { dialog = ChatDialog.Actions }) {
                             Icon(Icons.Rounded.MoreVert, contentDescription = "会话操作")
                         }

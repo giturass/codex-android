@@ -11,10 +11,7 @@ import com.hebo.codex.domain.ConversationNotice
 import com.hebo.codex.domain.ModelOption
 import com.hebo.codex.domain.RecentProject
 import com.hebo.codex.domain.ServerProfile
-import com.hebo.codex.domain.SortDirection
 import com.hebo.codex.domain.ThreadOptions
-import com.hebo.codex.domain.ThreadSortKey
-import com.hebo.codex.domain.ThreadSourceKind
 import com.hebo.codex.domain.ThreadSummary
 import com.hebo.codex.domain.groupRecentProjects
 import com.hebo.codex.util.runSuspendCatching
@@ -34,18 +31,16 @@ data class HomeUiState(
     val connectionStatuses: Map<String, ConnectionStatus> = emptyMap(),
     val threads: List<ThreadSummary> = emptyList(),
     val projects: List<RecentProject> = emptyList(),
+    val recentProjects: List<RecentProject> = emptyList(),
     val models: List<ModelOption> = emptyList(),
     val serverNotices: List<ConversationNotice> = emptyList(),
     val searchTerm: String = "",
     val showArchived: Boolean = false,
-    val sortKey: ThreadSortKey = ThreadSortKey.RECENCY_AT,
-    val sortDirection: SortDirection = SortDirection.DESC,
-    val modelProviders: List<String> = emptyList(),
-    val sourceKinds: Set<ThreadSourceKind> = emptySet(),
     val nextCursor: String? = null,
     val isLoading: Boolean = false,
     val isLoadingMore: Boolean = false,
     val isCreatingConversation: Boolean = false,
+    val newTaskRevision: Int = 0,
     val errorMessage: String? = null,
 ) {
     val activeServer: ServerProfile?
@@ -89,11 +84,33 @@ class HomeViewModel(
         }
         viewModelScope.launch {
             repository.activeServerId.collect { serverId ->
+                refreshJob?.cancel()
+                searchJob?.cancel()
                 if (serverId == null) {
                     mutableState.update {
-                        it.copy(threads = emptyList(), projects = emptyList(), models = emptyList(), nextCursor = null)
+                        it.copy(
+                            threads = emptyList(),
+                            projects = emptyList(),
+                            recentProjects = emptyList(),
+                            models = emptyList(),
+                            nextCursor = null,
+                            isLoading = false,
+                            isLoadingMore = false,
+                        )
                     }
                 } else {
+                    mutableState.update {
+                        it.copy(
+                            threads = emptyList(),
+                            projects = emptyList(),
+                            recentProjects = emptyList(),
+                            models = emptyList(),
+                            searchTerm = "",
+                            showArchived = false,
+                            nextCursor = null,
+                            isLoadingMore = false,
+                        )
+                    }
                     requestLoad(serverId)
                     loadModels(serverId)
                 }
@@ -134,7 +151,16 @@ class HomeViewModel(
     }
 
     fun search(term: String) {
-        mutableState.update { it.copy(searchTerm = term) }
+        refreshJob?.cancel()
+        mutableState.update {
+            it.copy(
+                threads = emptyList(),
+                projects = emptyList(),
+                searchTerm = term,
+                nextCursor = null,
+                isLoading = true,
+            )
+        }
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
             delay(300)
@@ -143,22 +169,13 @@ class HomeViewModel(
     }
 
     fun setArchived(show: Boolean) {
-        mutableState.update { it.copy(showArchived = show) }
-        refresh()
-    }
-
-    fun setThreadFilters(
-        sortKey: ThreadSortKey,
-        sortDirection: SortDirection,
-        modelProviders: List<String>,
-        sourceKinds: Set<ThreadSourceKind>,
-    ) {
         mutableState.update {
             it.copy(
-                sortKey = sortKey,
-                sortDirection = sortDirection,
-                modelProviders = modelProviders,
-                sourceKinds = sourceKinds,
+                threads = emptyList(),
+                projects = emptyList(),
+                showArchived = show,
+                nextCursor = null,
+                isLoading = true,
             )
         }
         refresh()
@@ -177,18 +194,20 @@ class HomeViewModel(
                     cursor = cursor,
                     archived = state.showArchived,
                     searchTerm = state.searchTerm,
-                    sortKey = state.sortKey,
-                    sortDirection = state.sortDirection,
-                    modelProviders = state.modelProviders,
-                    sourceKinds = state.sourceKinds,
                 )
             }.onSuccess { page ->
                 if (mutableState.value.activeServerId == serverId) {
                     mutableState.update { current ->
                         val threads = (current.threads + page.data).distinctBy(ThreadSummary::id)
+                        val projects = groupRecentProjects(threads)
                         current.copy(
                             threads = threads,
-                            projects = groupRecentProjects(threads),
+                            projects = projects,
+                            recentProjects = if (!state.showArchived && state.searchTerm.isBlank()) {
+                                projects
+                            } else {
+                                current.recentProjects
+                            },
                             nextCursor = page.nextCursor,
                         )
                     }
@@ -198,14 +217,30 @@ class HomeViewModel(
         }
     }
 
-    fun startConversation(cwd: String, options: ThreadOptions = ThreadOptions()) {
+    fun startConversation(
+        cwd: String,
+        message: String,
+        options: ThreadOptions = ThreadOptions(),
+    ) {
         if (mutableState.value.isCreatingConversation) return
         val serverId = mutableState.value.activeServerId ?: return
+        val normalizedMessage = message.trim()
+        if (normalizedMessage.isEmpty()) {
+            showError(IllegalArgumentException("请输入任务内容"))
+            return
+        }
         viewModelScope.launch {
             mutableState.update { it.copy(isCreatingConversation = true, errorMessage = null) }
             val result = runSuspendCatching { repository.startConversation(serverId, cwd, options) }
             result.exceptionOrNull()?.let(::showError)
             result.getOrNull()?.let { threadId ->
+                runSuspendCatching { repository.sendMessage(serverId, threadId, normalizedMessage) }
+                mutableState.update {
+                    it.copy(
+                        isCreatingConversation = false,
+                        newTaskRevision = it.newTaskRevision + 1,
+                    )
+                }
                 mutableEvents.send(HomeEvent.OpenConversation(serverId, threadId))
             }
             mutableState.update { it.copy(isCreatingConversation = false) }
@@ -261,17 +296,19 @@ class HomeViewModel(
                 serverId = serverId,
                 archived = query.showArchived,
                 searchTerm = query.searchTerm,
-                sortKey = query.sortKey,
-                sortDirection = query.sortDirection,
-                modelProviders = query.modelProviders,
-                sourceKinds = query.sourceKinds,
             )
         }.onSuccess { page ->
             if (mutableState.value.activeServerId == serverId) {
                 mutableState.update {
+                    val projects = groupRecentProjects(page.data)
                     it.copy(
                         threads = page.data,
-                        projects = groupRecentProjects(page.data),
+                        projects = projects,
+                        recentProjects = if (!query.showArchived && query.searchTerm.isBlank()) {
+                            projects
+                        } else {
+                            it.recentProjects
+                        },
                         nextCursor = page.nextCursor,
                     )
                 }
