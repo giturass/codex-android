@@ -103,6 +103,39 @@ class CodexRepository(
         return profile
     }
 
+    suspend fun server(serverId: String): ServerProfile = awaitServer(serverId)
+
+    suspend fun updateServer(serverId: String, name: String, endpoint: String, token: String): ServerProfile {
+        val settings = serverStore.settings.first()
+        val current = settings.servers.singleOrNull { it.id == serverId } ?: error("服务器不存在")
+        val normalizedName = name.trim()
+        require(normalizedName.isNotEmpty()) { "请输入服务器名称" }
+        require(settings.servers.none { it.id != serverId && it.name == normalizedName }) { "服务器名称已存在" }
+        val normalizedEndpoint = validateWebSocketEndpoint(endpoint)
+        val replacementToken = token.trim().ifEmpty { null }
+        val connectionToken = replacementToken ?: serverStore.readToken(serverId)
+
+        testConnection(normalizedEndpoint, connectionToken)
+        val profile = current.copy(name = normalizedName, webSocketUrl = normalizedEndpoint)
+        serverStore.updateServer(profile, replacementToken)
+        serverSettings.first { stored -> stored.servers.singleOrNull { it.id == serverId } == profile }
+
+        connectionMutex.withLock {
+            closeConnectionLocked(serverId)
+        }
+        mutableConnectionStatuses.updateValue(serverId, ConnectionStatus.Disconnected)
+        conversations.entries
+            .filter { it.key.serverId == serverId }
+            .forEach { (_, conversation) ->
+                conversation.updateState { state -> state.copy(serverName = profile.name) }
+            }
+        applicationScope.launch {
+            runSuspendCatching { connect(serverId) }
+                .onSuccess { bumpThreadRevision(serverId) }
+        }
+        return profile
+    }
+
     suspend fun selectServer(serverId: String) {
         serverStore.selectServer(serverId)
         connect(serverId)
@@ -110,9 +143,7 @@ class CodexRepository(
 
     suspend fun removeServer(serverId: String) {
         connectionMutex.withLock {
-            connectionObservers.remove(serverId)?.forEach { it.cancel() }
-            connections.remove(serverId)?.close()
-            clearServerPendingRequests(serverId)
+            closeConnectionLocked(serverId)
         }
         mutableConnectionStatuses.updateValue(serverId, ConnectionStatus.Disconnected)
         conversations.keys.filter { it.serverId == serverId }.forEach { conversations.remove(it) }
@@ -552,10 +583,7 @@ class CodexRepository(
     private suspend fun api(serverId: String): AppServerApi = connectionMutex.withLock {
         val existing = connections[serverId]
         if (existing?.status?.value is ConnectionStatus.Connected) return@withLock AppServerApi(existing)
-        connectionObservers.remove(serverId)?.forEach { it.cancel() }
-        existing?.close()
-        connections.remove(serverId)
-        clearServerPendingRequests(serverId)
+        closeConnectionLocked(serverId)
 
         val server = awaitServer(serverId)
         mutableConnectionStatuses.updateValue(serverId, ConnectionStatus.Connecting)
@@ -590,6 +618,12 @@ class CodexRepository(
         } finally {
             connection.close()
         }
+    }
+
+    private fun closeConnectionLocked(serverId: String) {
+        connectionObservers.remove(serverId)?.forEach { it.cancel() }
+        connections.remove(serverId)?.close()
+        clearServerPendingRequests(serverId)
     }
 
     private suspend fun restoreConversations(

@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.AlertDialog
@@ -48,6 +49,7 @@ fun ServerSelector(
     statuses: Map<String, ConnectionStatus>,
     onSelect: (String) -> Unit,
     onReconnect: (String) -> Unit,
+    onEdit: (String) -> Unit,
     onDelete: (String) -> Unit,
     onAdd: () -> Unit,
     modifier: Modifier = Modifier,
@@ -136,6 +138,15 @@ fun ServerSelector(
                                 modifier = Modifier.size(40.dp),
                             ) {
                                 Icon(Icons.Rounded.Refresh, contentDescription = "重新连接 ${server.name}")
+                            }
+                            IconButton(
+                                onClick = {
+                                    expanded = false
+                                    onEdit(server.id)
+                                },
+                                modifier = Modifier.size(40.dp),
+                            ) {
+                                Icon(Icons.Rounded.Edit, contentDescription = "编辑 ${server.name}")
                             }
                             IconButton(
                                 onClick = {

@@ -4,7 +4,7 @@ Codex Android 是 Codex app-server 协议的原生 Android 客户端
 
 ## 功能
 
-- 保存并切换多个 Codex 服务端
+- 添加、编辑、删除并切换多个 Codex 服务端
 - 使用 Android Keystore 加密保存 capability token
 - 在侧边栏按项目组织并搜索会话
 - 选择服务端项目目录并直接提交新任务

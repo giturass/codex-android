@@ -28,8 +28,8 @@ import com.hebo.codex.ui.screens.home.HomeScreen
 import com.hebo.codex.ui.screens.home.HomeViewModel
 import com.hebo.codex.ui.screens.hub.ServerHubScreen
 import com.hebo.codex.ui.screens.hub.ServerHubViewModel
-import com.hebo.codex.ui.screens.servers.AddServerScreen
-import com.hebo.codex.ui.screens.servers.AddServerViewModel
+import com.hebo.codex.ui.screens.servers.ServerEditorScreen
+import com.hebo.codex.ui.screens.servers.ServerEditorViewModel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
@@ -41,7 +41,7 @@ private val PermanentDrawerThreshold = 840.dp
 private data object NewTaskRoute
 
 @Serializable
-private data object AddServerRoute
+private data class ServerEditorRoute(val serverId: String? = null)
 
 @Serializable
 private data class ChatRoute(val serverId: String, val threadId: String)
@@ -138,6 +138,10 @@ fun CodexApp(
                     openNewTask()
                 },
                 onReconnectServer = homeViewModel::reconnectServer,
+                onEditServer = { serverId ->
+                    closeDrawer()
+                    navController.navigate(ServerEditorRoute(serverId))
+                },
                 onRemoveServer = { serverId ->
                     homeViewModel.removeServer(serverId)
                     closeDrawer()
@@ -145,7 +149,7 @@ fun CodexApp(
                 },
                 onAddServer = {
                     closeDrawer()
-                    navController.navigate(AddServerRoute)
+                    navController.navigate(ServerEditorRoute())
                 },
                 onOpenSettings = {
                     closeDrawer()
@@ -160,12 +164,16 @@ fun CodexApp(
                         viewModel = homeViewModel,
                         showNavigationIcon = !isPermanent,
                         onOpenNavigation = { scope.launch { drawerState.open() } },
-                        onAddServer = { navController.navigate(AddServerRoute) },
+                        onAddServer = { navController.navigate(ServerEditorRoute()) },
                     )
                 }
-                composable<AddServerRoute> {
-                    val viewModel: AddServerViewModel = viewModel(factory = AddServerViewModel.factory(repository))
-                    AddServerScreen(viewModel = viewModel, onBack = navController::popBackStack)
+                composable<ServerEditorRoute> { entry ->
+                    val route = entry.toRoute<ServerEditorRoute>()
+                    val viewModel: ServerEditorViewModel = viewModel(
+                        key = "server-editor:${route.serverId.orEmpty()}",
+                        factory = ServerEditorViewModel.factory(repository, route.serverId),
+                    )
+                    ServerEditorScreen(viewModel = viewModel, onBack = navController::popBackStack)
                 }
                 composable<ChatRoute> { entry ->
                     val route = entry.toRoute<ChatRoute>()

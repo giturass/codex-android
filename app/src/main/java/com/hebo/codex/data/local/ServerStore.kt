@@ -44,6 +44,24 @@ class ServerStore(
         }
     }
 
+    suspend fun updateServer(profile: ServerProfile, token: String?) {
+        val encryptedToken = token?.let { value ->
+            withContext(Dispatchers.IO) { tokenCipher.encrypt(value) }
+        }
+        update { current ->
+            require(current.servers.any { it.id == profile.id }) { "服务器不存在" }
+            current.copy(
+                servers = current.servers.map { server ->
+                    if (server.id == profile.id) {
+                        profile.toStored(encryptedToken ?: server.token)
+                    } else {
+                        server
+                    }
+                },
+            )
+        }
+    }
+
     suspend fun removeServer(serverId: String) {
         update { current ->
             val remaining = current.servers.filterNot { it.id == serverId }
