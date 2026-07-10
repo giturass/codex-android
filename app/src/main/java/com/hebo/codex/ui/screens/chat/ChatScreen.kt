@@ -76,8 +76,7 @@ import com.hebo.codex.domain.ApprovalType
 import com.hebo.codex.domain.ChangedFile
 import com.hebo.codex.domain.ConversationItem
 import com.hebo.codex.domain.PendingApproval
-import com.hebo.codex.ui.theme.Danger
-import com.hebo.codex.ui.theme.Success
+import com.hebo.codex.ui.theme.statusColors
 
 @Composable
 fun ChatScreen(
@@ -389,8 +388,8 @@ private fun ActivityStatusIcon(status: ActivityStatus) {
     }
     val tint = when (status) {
         ActivityStatus.IN_PROGRESS -> MaterialTheme.colorScheme.primary
-        ActivityStatus.COMPLETED -> Success
-        ActivityStatus.FAILED, ActivityStatus.DECLINED -> Danger
+        ActivityStatus.COMPLETED -> MaterialTheme.statusColors.success
+        ActivityStatus.FAILED, ActivityStatus.DECLINED -> MaterialTheme.colorScheme.error
     }
     Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(19.dp))
 }

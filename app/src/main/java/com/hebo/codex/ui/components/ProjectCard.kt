@@ -18,7 +18,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.hebo.codex.domain.RecentProject
 
@@ -39,7 +38,7 @@ fun ProjectCard(
             Icon(
                 Icons.Rounded.Folder,
                 contentDescription = null,
-                tint = Color(0xFF7A5AF8),
+                tint = MaterialTheme.colorScheme.primary,
             )
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
@@ -60,4 +59,3 @@ fun ProjectCard(
         }
     }
 }
-
