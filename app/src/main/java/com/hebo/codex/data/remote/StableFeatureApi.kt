@@ -1,6 +1,12 @@
 package com.hebo.codex.data.remote
 
 import com.hebo.codex.domain.AccountOverview
+import com.hebo.codex.domain.AccountPlan
+import com.hebo.codex.domain.AccountRateLimit
+import com.hebo.codex.domain.AccountRateLimits
+import com.hebo.codex.domain.AccountType
+import com.hebo.codex.domain.AccountUsage
+import com.hebo.codex.domain.CreditBalance
 import com.hebo.codex.domain.FeatureAction
 import com.hebo.codex.domain.FeatureActionResult
 import com.hebo.codex.domain.FeatureArea
@@ -10,8 +16,10 @@ import com.hebo.codex.domain.FeatureKind
 import com.hebo.codex.domain.LoginChallenge
 import com.hebo.codex.domain.ModelOption
 import com.hebo.codex.domain.OptionValue
+import com.hebo.codex.domain.RateLimitWindow
 import com.hebo.codex.domain.ServerConfiguration
 import com.hebo.codex.domain.WorkspaceMessage
+import com.hebo.codex.domain.WorkspaceMessageType
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -67,20 +75,34 @@ class StableFeatureApi(
             buildJsonObject { put("refreshToken", false) },
         ).jsonObject
         val account = response["account"] as? JsonObject
-        val accountType = account?.optionalString("type")
-        val rateLimits = if (accountType == "chatgpt") optionalRequest(StableRpcMethod.ACCOUNT_RATE_LIMITS) else null
-        val usage = if (accountType == "chatgpt") optionalRequest(StableRpcMethod.ACCOUNT_USAGE) else null
-        val messagesResponse = if (accountType == "chatgpt") {
+        val accountTypeValue = account?.optionalString("type")
+        val accountType = accountTypeValue?.toAccountType()
+        val rateLimitsResponse = if (accountType == AccountType.CHATGPT) {
+            optionalRequest(StableRpcMethod.ACCOUNT_RATE_LIMITS) as? JsonObject
+        } else {
+            null
+        }
+        val usageResponse = if (accountType == AccountType.CHATGPT) {
+            optionalRequest(StableRpcMethod.ACCOUNT_USAGE) as? JsonObject
+        } else {
+            null
+        }
+        val messagesResponse = if (accountType == AccountType.CHATGPT) {
             optionalRequest(StableRpcMethod.ACCOUNT_WORKSPACE_MESSAGES) as? JsonObject
         } else {
             null
         }
-        val messages = messagesResponse?.array("messages").orEmpty().map { element ->
+        val messages = messagesResponse?.requiredArray("messages").orEmpty().map { element ->
             val message = element.jsonObject
             WorkspaceMessage(
                 id = message.requiredString("messageId"),
                 body = message.requiredString("messageBody"),
-                type = message.requiredString("messageType"),
+                type = when (message.requiredString("messageType")) {
+                    "headline" -> WorkspaceMessageType.HEADLINE
+                    "announcement" -> WorkspaceMessageType.ANNOUNCEMENT
+                    "unknown" -> WorkspaceMessageType.UNKNOWN
+                    else -> throw ProtocolException("未知账号消息类型：${message.requiredString("messageType")}")
+                },
                 createdAt = message.optionalLong("createdAt"),
             )
         }
@@ -88,10 +110,10 @@ class StableFeatureApi(
             signedIn = account != null,
             type = accountType,
             email = account?.optionalString("email"),
-            planType = account?.optionalString("planType"),
+            planType = account?.optionalString("planType")?.toAccountPlan(),
             requiresOpenAiAuth = response.optionalBoolean("requiresOpenaiAuth") ?: false,
-            rateLimitsJson = rateLimits?.pretty(),
-            usageJson = usage?.pretty(),
+            rateLimits = rateLimitsResponse?.toAccountRateLimits(),
+            usage = usageResponse?.toAccountUsage(),
             workspaceMessages = messages,
         )
     }
@@ -137,7 +159,7 @@ class StableFeatureApi(
 
     suspend fun sendCreditsNudge(creditType: String): FeatureActionResult {
         require(creditType == "credits" || creditType == "usage_limit") {
-            "额度类型必须是 credits 或 usage_limit"
+            "请选择有效的额度类型"
         }
         return api.request(
             StableRpcMethod.ACCOUNT_SEND_CREDITS_NUDGE,
@@ -254,7 +276,7 @@ class StableFeatureApi(
                 StableRpcMethod.PLUGIN_SHARE_UPDATE_TARGETS,
                 buildJsonObject {
                     require(action.discoverability in setOf("UNLISTED", "PRIVATE")) {
-                        "可发现性必须是 UNLISTED 或 PRIVATE"
+                        "请选择有效的插件可见范围"
                     }
                     val targets = Json.parseToJsonElement(action.shareTargetsJson) as? JsonArray
                         ?: throw IllegalArgumentException("共享目标必须是 JSON 数组")
@@ -413,7 +435,7 @@ class StableFeatureApi(
                     rawJson = value.pretty(),
                 )
             }
-            warnings += group.array("errors").map { it.pretty() }
+            warnings += group.array("errors").map { it.humanReadableLoadError("path") }
         }
         return FeatureCatalog(entries, warnings)
     }
@@ -451,7 +473,7 @@ class StableFeatureApi(
                 )
             }
             warnings += group.array("warnings").map { it.primitiveContent() }
-            warnings += group.array("errors").map { it.pretty() }
+            warnings += group.array("errors").map { it.humanReadableLoadError("path") }
         }
         return FeatureCatalog(entries, warnings)
     }
@@ -546,7 +568,7 @@ class StableFeatureApi(
                 )
             }
         }
-        val warnings = array("marketplaceLoadErrors").map { it.pretty() }
+        val warnings = array("marketplaceLoadErrors").map { it.humanReadableLoadError("marketplacePath") }
         return FeatureCatalog(entries, warnings)
     }
 
@@ -570,7 +592,7 @@ class StableFeatureApi(
                     kind = FeatureKind.MCP_SERVER,
                     id = serverName,
                     title = serverName,
-                    description = "认证：${server.optionalString("authStatus").orEmpty()}",
+                    description = "认证：${server.optionalString("authStatus").orEmpty().toMcpAuthStatusLabel()}",
                     metadata = mapOf("authStatus" to server.optionalString("authStatus").orEmpty()),
                     rawJson = server.pretty(),
                 )
@@ -638,7 +660,7 @@ class StableFeatureApi(
                     title = plugin.requiredString("name"),
                     description = listOfNotNull(
                         plugin.optionalString("version"),
-                        shareContext?.optionalString("discoverability"),
+                        shareContext?.optionalString("discoverability")?.toShareDiscoverabilityLabel(),
                     ).joinToString(" · "),
                     path = value.optionalString("localPluginPath"),
                     metadata = mapOf(
@@ -651,6 +673,103 @@ class StableFeatureApi(
                 )
             },
         )
+    }
+
+    private fun JsonObject.toAccountRateLimits(): AccountRateLimits {
+        val rateLimitsById = this["rateLimitsByLimitId"] as? JsonObject
+        val limits = if (rateLimitsById.isNullOrEmpty()) {
+            listOf(requiredObject("rateLimits").toAccountRateLimit())
+        } else {
+            rateLimitsById.map { (id, value) -> value.jsonObject.toAccountRateLimit(id) }
+        }
+        return AccountRateLimits(
+            limits = limits,
+            availableResetCredits = (this["rateLimitResetCredits"] as? JsonObject)
+                ?.optionalLong("availableCount"),
+            technicalDetails = pretty(),
+        )
+    }
+
+    private fun JsonObject.toAccountRateLimit(fallbackId: String? = null) = AccountRateLimit(
+        id = optionalString("limitId") ?: fallbackId,
+        name = optionalString("limitName"),
+        primary = (this["primary"] as? JsonObject)?.toRateLimitWindow(),
+        secondary = (this["secondary"] as? JsonObject)?.toRateLimitWindow(),
+        credits = (this["credits"] as? JsonObject)?.let { credits ->
+            CreditBalance(
+                hasCredits = credits.optionalBoolean("hasCredits")
+                    ?: throw ProtocolException("额度信息缺少 hasCredits"),
+                unlimited = credits.optionalBoolean("unlimited")
+                    ?: throw ProtocolException("额度信息缺少 unlimited"),
+                balance = credits.optionalString("balance"),
+            )
+        },
+    )
+
+    private fun JsonObject.toRateLimitWindow() = RateLimitWindow(
+        usedPercent = requiredDouble("usedPercent"),
+        windowDurationMinutes = optionalLong("windowDurationMins"),
+        resetsAt = optionalLong("resetsAt"),
+    )
+
+    private fun JsonObject.toAccountUsage(): AccountUsage {
+        val summary = requiredObject("summary")
+        return AccountUsage(
+            lifetimeTokens = summary.optionalLong("lifetimeTokens"),
+            peakDailyTokens = summary.optionalLong("peakDailyTokens"),
+            longestRunningTurnSeconds = summary.optionalLong("longestRunningTurnSec"),
+            currentStreakDays = summary.optionalLong("currentStreakDays"),
+            longestStreakDays = summary.optionalLong("longestStreakDays"),
+            technicalDetails = pretty(),
+        )
+    }
+
+    private fun String.toAccountType(): AccountType = when (this) {
+        "apiKey" -> AccountType.API_KEY
+        "chatgpt" -> AccountType.CHATGPT
+        "amazonBedrock" -> AccountType.AMAZON_BEDROCK
+        else -> throw ProtocolException("未知账号类型：$this")
+    }
+
+    private fun String.toAccountPlan(): AccountPlan = when (this) {
+        "free" -> AccountPlan.FREE
+        "go" -> AccountPlan.GO
+        "plus" -> AccountPlan.PLUS
+        "pro" -> AccountPlan.PRO
+        "prolite" -> AccountPlan.PRO_LITE
+        "team" -> AccountPlan.TEAM
+        "self_serve_business_usage_based" -> AccountPlan.BUSINESS_USAGE_BASED
+        "business" -> AccountPlan.BUSINESS
+        "enterprise_cbp_usage_based" -> AccountPlan.ENTERPRISE_USAGE_BASED
+        "enterprise" -> AccountPlan.ENTERPRISE
+        "edu" -> AccountPlan.EDUCATION
+        "unknown" -> AccountPlan.UNKNOWN
+        else -> throw ProtocolException("未知账号计划：$this")
+    }
+
+    private fun String.toShareDiscoverabilityLabel(): String = when (this) {
+        "LISTED" -> "公开展示"
+        "UNLISTED" -> "仅通过链接访问"
+        "PRIVATE" -> "仅指定成员访问"
+        else -> throw ProtocolException("未知插件可发现性：$this")
+    }
+
+    private fun String.toMcpAuthStatusLabel(): String = when (this) {
+        "notLoggedIn" -> "待登录"
+        "bearerToken" -> "令牌认证"
+        "oAuth" -> "OAuth 已认证"
+        "unsupported" -> "无需认证"
+        else -> throw ProtocolException("未知 MCP 认证状态：$this")
+    }
+
+    private fun String.toReasoningEffortLabel(): String = when (this) {
+        "none" -> "不使用推理"
+        "minimal" -> "最少"
+        "low" -> "较低"
+        "medium" -> "中等"
+        "high" -> "较高"
+        "xhigh" -> "最高"
+        else -> "自定义强度"
     }
 
     private suspend fun optionalRequest(method: StableRpcMethod): JsonElement? = try {
@@ -671,7 +790,7 @@ class StableFeatureApi(
         reasoningEfforts = array("supportedReasoningEfforts").map { element ->
             val value = element.jsonObject
             val effort = value.requiredString("reasoningEffort")
-            OptionValue(effort, effort, value.requiredString("description"))
+            OptionValue(effort, effort.toReasoningEffortLabel(), value.requiredString("description"))
         },
         defaultReasoningEffort = requiredString("defaultReasoningEffort"),
         serviceTiers = array("serviceTiers").map { element ->
@@ -696,6 +815,13 @@ class StableFeatureApi(
     private fun JsonObject.array(name: String): JsonArray = this[name] as? JsonArray ?: JsonArray(emptyList())
 
     private fun JsonElement.primitiveContent(): String = (this as? JsonPrimitive)?.content ?: pretty()
+
+    private fun JsonElement.humanReadableLoadError(pathField: String): String {
+        val error = jsonObject
+        return listOf(error.requiredString("message"), error.requiredString(pathField))
+            .filter(String::isNotBlank)
+            .joinToString(" · ")
+    }
 
     private fun JsonElement.toResult(message: String) = FeatureActionResult(message, pretty())
 

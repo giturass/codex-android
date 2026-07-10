@@ -1,12 +1,17 @@
 package com.hebo.codex.data.remote
 
 import com.hebo.codex.domain.ActivityStatus
+import com.hebo.codex.domain.CommandAction
 import com.hebo.codex.domain.ConversationItem
 import com.hebo.codex.domain.FileChangeKind
+import com.hebo.codex.domain.FileSystemAccessMode
+import com.hebo.codex.domain.FileSystemPermissionTarget
 import com.hebo.codex.domain.ThreadRuntimeStatus
+import com.hebo.codex.domain.UserMessagePart
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -69,7 +74,10 @@ class ProtocolMapperTest {
         assertEquals(ThreadRuntimeStatus.ACTIVE, snapshot.summary.status)
         assertEquals("turn-1", snapshot.activeTurnId)
         assertEquals(3, snapshot.items.size)
-        assertEquals("定位空指针", (snapshot.items[0] as ConversationItem.UserMessage).text)
+        assertEquals(
+            listOf(UserMessagePart.Text("定位空指针")),
+            (snapshot.items[0] as ConversationItem.UserMessage).content,
+        )
         assertEquals(ActivityStatus.COMPLETED, (snapshot.items[2] as ConversationItem.CommandExecution).status)
     }
 
@@ -132,5 +140,100 @@ class ProtocolMapperTest {
             mapped.changes[2].kind,
         )
         assertEquals(ActivityStatus.IN_PROGRESS, mapped.status)
+    }
+
+    @Test
+    fun preservesStructuredUserInputsWithoutFlatteningPayloads() {
+        val item = json.parseToJsonElement(
+            """
+            {
+              "type": "userMessage",
+              "id": "user-1",
+              "clientId": null,
+              "content": [
+                { "type": "text", "text": "分析截图" },
+                { "type": "image", "url": "data:image/png;base64,AAAA" },
+                { "type": "localImage", "path": "/tmp/screenshot.png" },
+                { "type": "skill", "name": "review", "path": "/skills/review/SKILL.md" },
+                { "type": "mention", "name": "Demo App", "path": "app://demo" }
+              ]
+            }
+            """.trimIndent(),
+        ).jsonObject
+
+        val mapped = ProtocolMapper.conversationItem(item, "turn-1", isCompleted = true)
+            as ConversationItem.UserMessage
+
+        assertEquals(UserMessagePart.Text("分析截图"), mapped.content[0])
+        assertEquals(UserMessagePart.Image("data:image/png;base64,AAAA"), mapped.content[1])
+        assertEquals(UserMessagePart.LocalImage("/tmp/screenshot.png"), mapped.content[2])
+        assertEquals(UserMessagePart.Skill("review", "/skills/review/SKILL.md"), mapped.content[3])
+        assertEquals(UserMessagePart.Mention("Demo App", "app://demo"), mapped.content[4])
+    }
+
+    @Test
+    fun mapsActivityToHumanSummaryAndKeepsProtocolAsTechnicalDetails() {
+        val item = json.parseToJsonElement(
+            """{
+              "type":"webSearch",
+              "id":"search-1",
+              "query":"Android Compose",
+              "action":{"type":"search","query":"Compose Material 3"}
+            }""",
+        ).jsonObject
+
+        val mapped = ProtocolMapper.conversationItem(item, "turn-1", isCompleted = true)
+            as ConversationItem.Activity
+
+        assertEquals("网页搜索", mapped.title)
+        assertEquals("搜索：Compose Material 3", mapped.summary)
+        assertTrue(mapped.technicalDetails.orEmpty().contains("webSearch"))
+    }
+
+    @Test
+    fun mapsApprovalPayloadsToTypedModels() {
+        val actions = ProtocolMapper.commandActions(
+            json.parseToJsonElement(
+                """[
+                  {"type":"read","command":"cat README.md","name":"README.md","path":"/workspace/README.md"},
+                  {"type":"search","command":"rg TODO","query":"TODO","path":"/workspace"}
+                ]""",
+            ),
+        )
+        val permissions = ProtocolMapper.requestedPermissions(
+            json.parseToJsonElement(
+                """{
+                  "network":{"enabled":true},
+                  "fileSystem":{
+                    "read":null,
+                    "write":null,
+                    "entries":[
+                      {"path":{"type":"path","path":"/workspace"},"access":"write"}
+                    ]
+                  }
+                }""",
+            ).jsonObject,
+        )
+
+        assertTrue(actions[0] is CommandAction.Read)
+        assertEquals("TODO", (actions[1] as CommandAction.Search).query)
+        assertEquals(true, permissions.networkEnabled)
+        assertEquals(FileSystemAccessMode.WRITE, permissions.fileSystem?.entries?.single()?.access)
+        assertEquals(
+            FileSystemPermissionTarget.Path("/workspace"),
+            permissions.fileSystem?.entries?.single()?.target,
+        )
+    }
+
+    @Test
+    fun rejectsMalformedApprovalPayloadsInsteadOfHidingThem() {
+        assertThrows(ProtocolException::class.java) {
+            ProtocolMapper.commandActions(json.parseToJsonElement("{}"))
+        }
+        assertThrows(ProtocolException::class.java) {
+            ProtocolMapper.requestedPermissions(
+                json.parseToJsonElement("""{"network":null}""").jsonObject,
+            )
+        }
     }
 }

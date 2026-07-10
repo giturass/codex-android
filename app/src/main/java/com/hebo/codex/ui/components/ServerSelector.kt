@@ -170,7 +170,7 @@ fun ServerSelector(
         AlertDialog(
             onDismissRequest = { deletingServer = null },
             title = { Text("删除服务器") },
-            text = { Text("确定删除 ${server.name} 吗？本机保存的连接信息和 Token 将被移除") },
+            text = { Text("确定删除 ${server.name} 吗？本机保存的连接信息和能力令牌将被移除") },
             confirmButton = {
                 Button(
                     onClick = {

@@ -15,8 +15,13 @@ sealed interface ConnectionStatus {
     data object Disconnected : ConnectionStatus
     data object Connecting : ConnectionStatus
     data object Connected : ConnectionStatus
-    data class Failed(val message: String) : ConnectionStatus
+    data class Failed(val error: UserFacingError) : ConnectionStatus
 }
+
+data class UserFacingError(
+    val summary: String,
+    val technicalDetails: String? = null,
+)
 
 data class ThreadSummary(
     val id: String,
@@ -100,7 +105,7 @@ data class ConversationState(
     val approvalPolicy: String? = null,
     val approvalsReviewer: String? = null,
     val sandbox: String? = null,
-    val errorMessage: String? = null,
+    val errorMessage: UserFacingError? = null,
 )
 
 sealed interface ConversationItem {
@@ -111,7 +116,7 @@ sealed interface ConversationItem {
         override val id: String,
         override val turnId: String,
         val clientId: String?,
-        val text: String,
+        val content: List<UserMessagePart>,
         val isPending: Boolean = false,
     ) : ConversationItem
 
@@ -151,9 +156,23 @@ sealed interface ConversationItem {
         override val id: String,
         override val turnId: String,
         val title: String,
-        val details: String,
+        val summary: String? = null,
+        val details: String = "",
+        val technicalDetails: String? = null,
         val status: ActivityStatus,
     ) : ConversationItem
+}
+
+sealed interface UserMessagePart {
+    data class Text(val text: String) : UserMessagePart
+
+    data class Image(val source: String) : UserMessagePart
+
+    data class LocalImage(val path: String) : UserMessagePart
+
+    data class Skill(val name: String, val path: String) : UserMessagePart
+
+    data class Mention(val name: String, val path: String) : UserMessagePart
 }
 
 data class ChangedFile(
@@ -191,10 +210,10 @@ sealed interface PendingServerRequest {
         val cwd: String?,
         val environmentId: String?,
         val networkHost: String?,
-        val commandActions: String?,
+        val commandActions: List<CommandAction>,
         val grantRoot: String?,
-        val proposedExecPolicy: String?,
-        val proposedNetworkPolicies: String?,
+        val proposedExecPolicy: ExecPolicyAmendment?,
+        val proposedNetworkPolicies: List<NetworkPolicyAmendment>,
     ) : PendingServerRequest
 
     data class Questions(
@@ -222,8 +241,87 @@ sealed interface PendingServerRequest {
         val environmentId: String?,
         val cwd: String,
         val reason: String?,
-        val requestedPermissions: String,
+        val requestedPermissions: RequestedPermissions,
     ) : PendingServerRequest
+}
+
+sealed interface CommandAction {
+    val command: String
+
+    data class Read(
+        override val command: String,
+        val name: String,
+        val path: String,
+    ) : CommandAction
+
+    data class ListFiles(
+        override val command: String,
+        val path: String?,
+    ) : CommandAction
+
+    data class Search(
+        override val command: String,
+        val query: String?,
+        val path: String?,
+    ) : CommandAction
+
+    data class Unknown(override val command: String) : CommandAction
+}
+
+data class ExecPolicyAmendment(
+    val command: List<String>,
+    val responseJson: String,
+)
+
+data class NetworkPolicyAmendment(
+    val host: String,
+    val action: NetworkPolicyRuleAction,
+    val responseJson: String,
+)
+
+enum class NetworkPolicyRuleAction {
+    ALLOW,
+    DENY,
+}
+
+data class RequestedPermissions(
+    val networkEnabled: Boolean?,
+    val fileSystem: RequestedFileSystemPermissions?,
+    val responseJson: String,
+)
+
+data class RequestedFileSystemPermissions(
+    val entries: List<FileSystemPermissionEntry>,
+    val globScanMaxDepth: Int?,
+)
+
+data class FileSystemPermissionEntry(
+    val target: FileSystemPermissionTarget,
+    val access: FileSystemAccessMode,
+)
+
+sealed interface FileSystemPermissionTarget {
+    data class Path(val path: String) : FileSystemPermissionTarget
+
+    data class GlobPattern(val pattern: String) : FileSystemPermissionTarget
+
+    data object Root : FileSystemPermissionTarget
+
+    data object Minimal : FileSystemPermissionTarget
+
+    data class ProjectRoots(val subpath: String?) : FileSystemPermissionTarget
+
+    data object TempDirectory : FileSystemPermissionTarget
+
+    data object SlashTmp : FileSystemPermissionTarget
+
+    data class Unknown(val path: String, val subpath: String?) : FileSystemPermissionTarget
+}
+
+enum class FileSystemAccessMode {
+    READ,
+    WRITE,
+    DENY,
 }
 
 data class UserQuestion(
@@ -281,6 +379,7 @@ data class ConversationNotice(
     val id: String,
     val level: NoticeLevel,
     val message: String,
+    val technicalDetails: String? = null,
 )
 
 enum class NoticeLevel {
@@ -379,7 +478,7 @@ enum class ReviewDelivery(val wireValue: String) {
 
 data class ThreadGoal(
     val objective: String,
-    val status: String,
+    val status: ThreadGoalStatus,
     val tokenBudget: Long?,
     val tokensUsed: Long,
     val timeUsedSeconds: Long,

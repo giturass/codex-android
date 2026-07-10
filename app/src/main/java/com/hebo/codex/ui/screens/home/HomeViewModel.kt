@@ -13,8 +13,10 @@ import com.hebo.codex.domain.RecentProject
 import com.hebo.codex.domain.ServerProfile
 import com.hebo.codex.domain.ThreadOptions
 import com.hebo.codex.domain.ThreadSummary
+import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.domain.groupRecentProjects
 import com.hebo.codex.util.runSuspendCatching
+import com.hebo.codex.util.toUserFacingError
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
@@ -41,7 +43,7 @@ data class HomeUiState(
     val isLoadingMore: Boolean = false,
     val isCreatingConversation: Boolean = false,
     val newTaskRevision: Int = 0,
-    val errorMessage: String? = null,
+    val errorMessage: UserFacingError? = null,
 ) {
     val activeServer: ServerProfile?
         get() = servers.singleOrNull { it.id == activeServerId }
@@ -332,7 +334,7 @@ class HomeViewModel(
     }
 
     private fun showError(error: Throwable) {
-        mutableState.update { it.copy(errorMessage = error.message ?: "操作失败") }
+        mutableState.update { it.copy(errorMessage = error.toUserFacingError()) }
     }
 
     private data class HomeDependencies(

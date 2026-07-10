@@ -16,7 +16,9 @@ import com.hebo.codex.domain.LoginChallenge
 import com.hebo.codex.domain.ModelOption
 import com.hebo.codex.domain.ServerConfiguration
 import com.hebo.codex.domain.ServerProfile
+import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.util.runSuspendCatching
+import com.hebo.codex.util.toUserFacingError
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -53,7 +55,7 @@ sealed interface HubData {
 data class HubSectionUiState(
     val data: HubData? = null,
     val isLoading: Boolean = false,
-    val errorMessage: String? = null,
+    val errorMessage: UserFacingError? = null,
 )
 
 enum class ActionResultPresentation {
@@ -71,7 +73,7 @@ data class ServerHubUiState(
     val loginChallenge: LoginChallenge? = null,
     val actionResult: FeatureActionResult? = null,
     val detailResult: FeatureActionResult? = null,
-    val errorMessage: String? = null,
+    val errorMessage: UserFacingError? = null,
 )
 
 class ServerHubViewModel(
@@ -122,7 +124,7 @@ class ServerHubViewModel(
                 }
                 .onFailure { error ->
                     updateSection(section) {
-                        it.copy(isLoading = false, errorMessage = error.message ?: "加载失败")
+                        it.copy(isLoading = false, errorMessage = error.toUserFacingError("加载失败"))
                     }
                 }
         }
@@ -312,7 +314,7 @@ class ServerHubViewModel(
     }
 
     private fun showError(error: Throwable) {
-        mutableState.update { it.copy(errorMessage = error.message ?: "操作失败") }
+        mutableState.update { it.copy(errorMessage = error.toUserFacingError()) }
     }
 
     companion object {

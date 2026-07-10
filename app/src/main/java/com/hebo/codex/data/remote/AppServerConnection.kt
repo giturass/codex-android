@@ -2,6 +2,7 @@ package com.hebo.codex.data.remote
 
 import com.hebo.codex.BuildConfig
 import com.hebo.codex.domain.ConnectionStatus
+import com.hebo.codex.util.toUserFacingError
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -220,8 +221,7 @@ class AppServerConnection(
     private fun failConnection(error: Throwable) {
         if (closed.get()) return
         if (!failed.compareAndSet(false, true)) return
-        val message = error.message ?: "连接失败"
-        mutableStatus.value = ConnectionStatus.Failed(message)
+        mutableStatus.value = ConnectionStatus.Failed(error.toUserFacingError("连接服务器失败"))
         if (!ready.isCompleted) ready.completeExceptionally(error)
         failPending(error)
         eventChannel.close(error)
@@ -257,7 +257,7 @@ class AppServerConnection(
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-            val error = ProtocolException("连接已关闭：$reason")
+            val error = ConnectionException("连接已关闭：$reason")
             if (mutableStatus.value !is ConnectionStatus.Failed) {
                 mutableStatus.value = ConnectionStatus.Disconnected
             }
@@ -268,9 +268,9 @@ class AppServerConnection(
 
         override fun onFailure(webSocket: WebSocket, error: Throwable, response: Response?) {
             if (closed.get()) return
-            val statusCode = response?.code?.let { "HTTP $it" }
-            val message = statusCode ?: error.message ?: "WebSocket 连接失败"
-            failConnection(ProtocolException(message, error))
+            val statusCode = response?.code
+            val message = statusCode?.let { "HTTP $it" } ?: error.message ?: "WebSocket 连接失败"
+            failConnection(ConnectionException(message, error, rejected = statusCode != null))
         }
     }
 

@@ -17,7 +17,9 @@ import com.hebo.codex.domain.ThreadGoal
 import com.hebo.codex.domain.ThreadGoalStatus
 import com.hebo.codex.domain.TurnOptions
 import com.hebo.codex.domain.UserInputPart
+import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.util.runSuspendCatching
+import com.hebo.codex.util.toUserFacingError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,7 +39,7 @@ data class ChatUiState(
     val goal: ThreadGoal? = null,
     val isLoading: Boolean = true,
     val isLoadingResources: Boolean = false,
-    val screenError: String? = null,
+    val screenError: UserFacingError? = null,
 )
 
 sealed interface ChatEvent {
@@ -71,7 +73,7 @@ class ChatViewModel(
             } catch (error: Throwable) {
                 mutableState.value = ChatUiState(
                     isLoading = false,
-                    screenError = error.message ?: "无法打开会话",
+                    screenError = error.toUserFacingError("无法打开会话"),
                 )
             }
         }
@@ -175,7 +177,7 @@ class ChatViewModel(
                         plugins = plugins.getOrNull()?.entries.orEmpty(),
                     ),
                     isLoadingResources = false,
-                    screenError = failure?.message,
+                    screenError = failure?.toUserFacingError("无法加载输入资源"),
                 )
             }
         }
@@ -256,7 +258,7 @@ class ChatViewModel(
     }
 
     private fun showError(error: Throwable) {
-        mutableState.update { it.copy(screenError = error.message ?: "操作失败") }
+        mutableState.update { it.copy(screenError = error.toUserFacingError()) }
     }
 
     companion object {

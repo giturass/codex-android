@@ -161,21 +161,83 @@ data class FeatureActionResult(
 
 data class AccountOverview(
     val signedIn: Boolean,
-    val type: String?,
+    val type: AccountType?,
     val email: String?,
-    val planType: String?,
+    val planType: AccountPlan?,
     val requiresOpenAiAuth: Boolean,
-    val rateLimitsJson: String? = null,
-    val usageJson: String? = null,
+    val rateLimits: AccountRateLimits? = null,
+    val usage: AccountUsage? = null,
     val workspaceMessages: List<WorkspaceMessage> = emptyList(),
+)
+
+enum class AccountType {
+    API_KEY,
+    CHATGPT,
+    AMAZON_BEDROCK,
+}
+
+enum class AccountPlan {
+    FREE,
+    GO,
+    PLUS,
+    PRO,
+    PRO_LITE,
+    TEAM,
+    BUSINESS_USAGE_BASED,
+    BUSINESS,
+    ENTERPRISE_USAGE_BASED,
+    ENTERPRISE,
+    EDUCATION,
+    UNKNOWN,
+}
+
+data class AccountRateLimits(
+    val limits: List<AccountRateLimit>,
+    val availableResetCredits: Long?,
+    val technicalDetails: String,
+)
+
+data class AccountRateLimit(
+    val id: String?,
+    val name: String?,
+    val primary: RateLimitWindow?,
+    val secondary: RateLimitWindow?,
+    val credits: CreditBalance?,
+)
+
+data class RateLimitWindow(
+    val usedPercent: Double,
+    val windowDurationMinutes: Long?,
+    val resetsAt: Long?,
+)
+
+data class CreditBalance(
+    val hasCredits: Boolean,
+    val unlimited: Boolean,
+    val balance: String?,
+)
+
+data class AccountUsage(
+    val lifetimeTokens: Long?,
+    val peakDailyTokens: Long?,
+    val longestRunningTurnSeconds: Long?,
+    val currentStreakDays: Long?,
+    val longestStreakDays: Long?,
+    val technicalDetails: String,
 )
 
 data class WorkspaceMessage(
     val id: String,
     val body: String,
-    val type: String,
+    val type: WorkspaceMessageType,
     val createdAt: Long?,
 )
+
+enum class WorkspaceMessageType {
+    HEADLINE,
+    ANNOUNCEMENT,
+    UNKNOWN,
+}
 
 data class LoginChallenge(
     val loginId: String?,

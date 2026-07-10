@@ -47,6 +47,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -61,11 +62,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.hebo.codex.R
 import com.hebo.codex.domain.ApprovalPolicy
 import com.hebo.codex.domain.ApprovalReviewer
 import com.hebo.codex.domain.ModelOption
@@ -73,7 +76,11 @@ import com.hebo.codex.domain.Personality
 import com.hebo.codex.domain.RecentProject
 import com.hebo.codex.domain.SandboxMode
 import com.hebo.codex.domain.ThreadOptions
+import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.domain.projectName
+import com.hebo.codex.ui.components.UserFacingErrorDialog
+import com.hebo.codex.ui.displayDescriptionRes
+import com.hebo.codex.ui.displayLabelRes
 
 @Composable
 fun HomeScreen(
@@ -90,6 +97,8 @@ fun HomeScreen(
     var showProjectMenu by remember { mutableStateOf(false) }
     var showCustomPathDialog by remember { mutableStateOf(false) }
     var showOptions by remember { mutableStateOf(false) }
+    var technicalError by remember { mutableStateOf<UserFacingError?>(null) }
+    val detailsLabel = stringResource(R.string.common_details)
 
     LifecycleResumeEffect(viewModel) {
         viewModel.refresh()
@@ -113,8 +122,12 @@ fun HomeScreen(
         if (state.newTaskRevision > 0) message = ""
     }
     LaunchedEffect(state.errorMessage) {
-        state.errorMessage?.let {
-            snackbarHostState.showSnackbar(it)
+        state.errorMessage?.let { error ->
+            val result = snackbarHostState.showSnackbar(
+                message = error.summary,
+                actionLabel = error.technicalDetails?.let { detailsLabel },
+            )
+            if (result == SnackbarResult.ActionPerformed) technicalError = error
             viewModel.clearError()
         }
     }
@@ -209,6 +222,9 @@ fun HomeScreen(
                 showOptions = false
             },
         )
+    }
+    technicalError?.let { error ->
+        UserFacingErrorDialog(error = error, onDismiss = { technicalError = null })
     }
 }
 
@@ -526,22 +542,32 @@ private fun ThreadOptionsSheet(
                         SandboxMode.DANGER_FULL_ACCESS,
                     ),
                     selected = sandbox,
-                    label = { it?.wireValue ?: "服务器默认" },
+                    label = { it?.let { value -> stringResource(value.displayLabelRes) }
+                        ?: stringResource(R.string.common_server_default) },
                     onSelect = { sandbox = it },
                 )
+                sandbox?.let {
+                    OptionDescription(
+                        stringResource(it.displayDescriptionRes),
+                        critical = it == SandboxMode.DANGER_FULL_ACCESS,
+                    )
+                }
                 Text("审批", style = MaterialTheme.typography.labelLarge)
                 ChoiceRow(
                     values = listOf(null, ApprovalPolicy.UNTRUSTED, ApprovalPolicy.ON_REQUEST, ApprovalPolicy.NEVER),
                     selected = approval,
-                    label = { it?.wireValue ?: "服务器默认" },
+                    label = { it?.let { value -> stringResource(value.displayLabelRes) }
+                        ?: stringResource(R.string.common_server_default) },
                     onSelect = { approval = it },
                 )
+                approval?.let { OptionDescription(stringResource(it.displayDescriptionRes)) }
                 if (selectedModel?.supportsPersonality == true) {
                     Text("人格", style = MaterialTheme.typography.labelLarge)
                     ChoiceRow(
                         values = listOf(null, Personality.FRIENDLY, Personality.PRAGMATIC, Personality.NONE),
                         selected = personality,
-                        label = { it?.wireValue ?: "服务器默认" },
+                        label = { it?.let { value -> stringResource(value.displayLabelRes) }
+                            ?: stringResource(R.string.common_server_default) },
                         onSelect = { personality = it },
                     )
                 }
@@ -549,9 +575,11 @@ private fun ThreadOptionsSheet(
                 ChoiceRow(
                     values = listOf<ApprovalReviewer?>(null) + ApprovalReviewer.entries,
                     selected = approvalReviewer,
-                    label = { it?.wireValue ?: "服务器默认" },
+                    label = { it?.let { value -> stringResource(value.displayLabelRes) }
+                        ?: stringResource(R.string.common_server_default) },
                     onSelect = { approvalReviewer = it },
                 )
+                approvalReviewer?.let { OptionDescription(stringResource(it.displayDescriptionRes)) }
                 OutlinedTextField(
                     value = baseInstructions,
                     onValueChange = { baseInstructions = it },
@@ -606,10 +634,19 @@ private fun ThreadOptionsSheet(
 }
 
 @Composable
+private fun OptionDescription(text: String, critical: Boolean = false) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        color = if (critical) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
 private fun <T> ChoiceRow(
     values: List<T>,
     selected: T,
-    label: (T) -> String,
+    label: @Composable (T) -> String,
     onSelect: (T) -> Unit,
 ) {
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
@@ -636,7 +673,7 @@ private fun NoServers(modifier: Modifier, onAddServer: () -> Unit) {
         Text("连接 Codex 服务端", style = MaterialTheme.typography.titleLarge)
         Spacer(Modifier.height(8.dp))
         Text(
-            "添加服务端地址和 capability token 后即可开始任务",
+            "添加服务端地址和能力令牌后即可开始任务",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )

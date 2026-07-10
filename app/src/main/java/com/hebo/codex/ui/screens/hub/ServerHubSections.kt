@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -55,8 +54,10 @@ import androidx.compose.ui.unit.dp
 import com.hebo.codex.domain.FeatureAction
 import com.hebo.codex.domain.FeatureCatalog
 import com.hebo.codex.domain.FeatureEntry
-import com.hebo.codex.domain.FeatureKind
 import com.hebo.codex.domain.ModelOption
+import com.hebo.codex.ui.featureScopeLabel
+import com.hebo.codex.ui.featureTrustLabel
+import com.hebo.codex.ui.hookEventLabel
 
 @Composable
 fun HubDataContent(
@@ -336,7 +337,7 @@ private fun SkillsContent(
                             FilterChip(
                                 selected = selectedScope == scope,
                                 onClick = { selectedScope = scope },
-                                label = { Text(scopeLabel(scope)) },
+                            label = { Text(featureScopeLabel(scope)) },
                             )
                         }
                     }
@@ -358,7 +359,7 @@ private fun SkillsContent(
                     Column {
                         Text(entry.description, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         entry.metadata["scope"]?.takeIf(String::isNotBlank)?.let {
-                            Text(scopeLabel(it), style = MaterialTheme.typography.labelSmall)
+                            Text(featureScopeLabel(it), style = MaterialTheme.typography.labelSmall)
                         }
                     }
                 },
@@ -409,8 +410,8 @@ private fun HooksContent(
                         }
                         Text(
                             listOfNotNull(
-                                entry.metadata["event"]?.ifBlank { null },
-                                trust.ifBlank { null }?.let(::trustLabel),
+                                entry.metadata["event"]?.ifBlank { null }?.let(::hookEventLabel),
+                                trust.ifBlank { null }?.let(::featureTrustLabel),
                             ).joinToString(" · "),
                             style = MaterialTheme.typography.labelSmall,
                         )
@@ -596,21 +597,6 @@ fun StatusBadge(label: String, tone: StatusTone) {
 fun FeatureEntry.searchText(): String = listOf(title, description, path, parentId)
     .filterNotNull()
     .joinToString(" ")
-
-private fun scopeLabel(scope: String): String = when (scope.lowercase()) {
-    "system" -> "系统"
-    "user", "personal" -> "个人"
-    "project", "repo" -> "项目"
-    "admin", "managed" -> "管理员"
-    else -> scope
-}
-
-private fun trustLabel(trust: String): String = when (trust.lowercase()) {
-    "trusted" -> "可信"
-    "untrusted" -> "不可信"
-    "unknown" -> "信任状态未知"
-    else -> trust
-}
 
 private fun String.toConfigKeySegment(): String = if (all { it.isLetterOrDigit() || it == '_' || it == '-' }) {
     this

@@ -4,7 +4,6 @@ package com.hebo.codex.ui.screens.chat
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
@@ -28,7 +27,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
@@ -72,6 +70,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -93,11 +92,12 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.hebo.codex.R
 import com.hebo.codex.domain.ActivityStatus
 import com.hebo.codex.domain.ApprovalDecision
 import com.hebo.codex.domain.ApprovalPolicy
@@ -110,6 +110,7 @@ import com.hebo.codex.domain.FileChangeKind
 import com.hebo.codex.domain.FeatureEntry
 import com.hebo.codex.domain.FeatureKind
 import com.hebo.codex.domain.ModelOption
+import com.hebo.codex.domain.NetworkPolicyRuleAction
 import com.hebo.codex.domain.PendingServerRequest
 import com.hebo.codex.domain.Personality
 import com.hebo.codex.domain.PlanStepStatus
@@ -122,7 +123,16 @@ import com.hebo.codex.domain.ThreadGoalStatus
 import com.hebo.codex.domain.TurnOptions
 import com.hebo.codex.domain.TurnPlan
 import com.hebo.codex.domain.UserInputPart
+import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.domain.projectName
+import com.hebo.codex.ui.displayDescriptionRes
+import com.hebo.codex.ui.displayLabelRes
+import com.hebo.codex.ui.formatCount
+import com.hebo.codex.ui.formatDurationSeconds
+import com.hebo.codex.ui.formatPercent
+import com.hebo.codex.ui.featureScopeLabel
+import com.hebo.codex.ui.components.ExpandableErrorDetails
+import com.hebo.codex.ui.components.UserFacingErrorDialog
 import com.hebo.codex.ui.theme.statusColors
 import com.mikepenz.markdown.compose.components.markdownComponents
 import com.mikepenz.markdown.compose.elements.highlightedCodeBlock
@@ -133,8 +143,6 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
 
 private val highlightedMarkdownComponents = markdownComponents(
     codeBlock = highlightedCodeBlock,
@@ -158,6 +166,8 @@ fun ChatScreen(
     var autoFollow by rememberSaveable(conversation?.threadId) { mutableStateOf(true) }
     var dialog by remember { mutableStateOf<ChatDialog?>(null) }
     var activeRequestKey by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
+    var technicalError by remember { mutableStateOf<UserFacingError?>(null) }
+    val detailsLabel = stringResource(R.string.common_details)
     val activeRequest = conversation?.pendingRequests?.firstOrNull { it.requestKey == activeRequestKey }
     val userScrollConnection = remember(conversation?.threadId) {
         object : NestedScrollConnection {
@@ -184,7 +194,11 @@ fun ChatScreen(
     LaunchedEffect(state.screenError, conversation?.errorMessage) {
         val error = state.screenError ?: conversation?.errorMessage
         if (error != null) {
-            snackbarHostState.showSnackbar(error)
+            val result = snackbarHostState.showSnackbar(
+                message = error.summary,
+                actionLabel = error.technicalDetails?.let { detailsLabel },
+            )
+            if (result == SnackbarResult.ActionPerformed) technicalError = error
             viewModel.clearError()
         }
     }
@@ -319,7 +333,14 @@ fun ChatScreen(
                             color = MaterialTheme.colorScheme.surfaceContainerLow,
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         ) {
-                            Text(notice.message, modifier = Modifier.fillMaxWidth().padding(12.dp))
+                            if (notice.technicalDetails == null) {
+                                Text(notice.message, modifier = Modifier.fillMaxWidth().padding(12.dp))
+                            } else {
+                                ExpandableErrorDetails(
+                                    error = UserFacingError(notice.message, notice.technicalDetails),
+                                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                )
+                            }
                         }
                     }
                 }
@@ -338,9 +359,15 @@ fun ChatScreen(
                 }
                 conversation.tokenUsage?.let { usage ->
                     item("token-usage") {
+                        val contextUsage = usage.modelContextWindow
+                            ?.takeIf { it > 0 }
+                            ?.let { formatPercent(usage.totalTokens * 100.0 / it) }
                         Text(
-                            "Token ${usage.totalTokens} · 输入 ${usage.inputTokens} · 输出 ${usage.outputTokens}" +
-                                (usage.modelContextWindow?.let { " · 上下文 $it" } ?: ""),
+                            "已用 ${formatCount(usage.totalTokens)} Token" +
+                                " · 输入 ${formatCount(usage.inputTokens)}" +
+                                (usage.cachedInputTokens.takeIf { it > 0 }?.let { "（缓存 ${formatCount(it)}）" } ?: "") +
+                                " · 输出 ${formatCount(usage.outputTokens)}" +
+                                (contextUsage?.let { " · 占上下文 $it" } ?: ""),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -432,6 +459,9 @@ fun ChatScreen(
             }
         }
     }
+    technicalError?.let { error ->
+        UserFacingErrorDialog(error = error, onDismiss = { technicalError = null })
+    }
 }
 
 @Composable
@@ -443,25 +473,6 @@ private fun ConversationItemView(item: ConversationItem) {
         is ConversationItem.CommandExecution -> CommandCard(item)
         is ConversationItem.FileChange -> FileChangeCard(item)
         is ConversationItem.Activity -> ActivityCard(item)
-    }
-}
-
-@Composable
-private fun UserMessage(item: ConversationItem.UserMessage) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-        Surface(
-            modifier = Modifier.fillMaxWidth(0.88f),
-            shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        ) {
-            SelectionContainer {
-                Text(
-                    item.text,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-            }
-        }
     }
 }
 
@@ -564,9 +575,9 @@ private fun ActivityCard(item: ConversationItem.Activity) {
     ActivitySurface(
         icon = { Icon(Icons.Rounded.HourglassTop, contentDescription = null) },
         title = item.title,
-        summary = item.details.lineSequence().firstOrNull()?.take(120),
+        summary = item.summary ?: item.details.lineSequence().firstOrNull()?.take(120),
         status = item.status,
-        hasDetails = item.details.isNotBlank(),
+        hasDetails = item.details.isNotBlank() || !item.technicalDetails.isNullOrBlank(),
     ) {
         if (item.details.isNotBlank()) {
             SelectionContainer {
@@ -578,6 +589,7 @@ private fun ActivityCard(item: ConversationItem.Activity) {
                 )
             }
         }
+        item.technicalDetails?.takeIf(String::isNotBlank)?.let { ExpandableTechnicalDetails(it) }
     }
 }
 
@@ -752,7 +764,13 @@ private fun PendingRequestCard(
         }
 
         is PendingServerRequest.Permissions -> PermissionsCard(request) { grant, session, strictAutoReview ->
-            onPermissions(request.requestKey, request.requestedPermissions, grant, session, strictAutoReview)
+            onPermissions(
+                request.requestKey,
+                request.requestedPermissions.responseJson,
+                grant,
+                session,
+                strictAutoReview,
+            )
         }
     }
 }
@@ -764,11 +782,6 @@ private fun ApprovalCard(
     onExecPolicy: (String) -> Unit,
     onNetworkPolicy: (String) -> Unit,
 ) {
-    val networkAmendments = remember(approval.proposedNetworkPolicies) {
-        runCatching {
-            Json.parseToJsonElement(approval.proposedNetworkPolicies.orEmpty()) as? JsonArray
-        }.getOrNull().orEmpty()
-    }
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
@@ -781,19 +794,37 @@ private fun ApprovalCard(
             approval.cwd?.takeIf(String::isNotBlank)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             approval.networkHost?.let { Text("网络主机：$it") }
             approval.grantRoot?.let { Text("授权目录：$it") }
-            approval.commandActions?.let { JsonText(it) }
+            if (approval.commandActions.isNotEmpty()) {
+                Text("这条命令将执行", style = MaterialTheme.typography.labelLarge)
+                approval.commandActions.forEach { CommandActionView(it) }
+            }
             approval.proposedExecPolicy?.let { amendment ->
-                JsonText(amendment)
-                OutlinedButton(onClick = { onExecPolicy(amendment) }, modifier = Modifier.fillMaxWidth()) {
-                    Text("应用命令规则并允许")
+                PolicyProposal(
+                    title = "以后允许执行同类命令",
+                    description = amendment.command.joinToString(" "),
+                    technicalDetails = amendment.responseJson,
+                )
+                OutlinedButton(
+                    onClick = { onExecPolicy(amendment.responseJson) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("保存命令规则并允许本次操作")
                 }
             }
-            networkAmendments.forEach { amendment ->
-                JsonText(amendment.toString())
+            approval.proposedNetworkPolicies.forEach { amendment ->
+                PolicyProposal(
+                    title = if (amendment.action == NetworkPolicyRuleAction.ALLOW) {
+                        "以后允许访问此主机"
+                    } else {
+                        "以后阻止访问此主机"
+                    },
+                    description = amendment.host,
+                    technicalDetails = amendment.responseJson,
+                )
                 OutlinedButton(
-                    onClick = { onNetworkPolicy(amendment.toString()) },
+                    onClick = { onNetworkPolicy(amendment.responseJson) },
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("应用此网络规则并允许") }
+                ) { Text("保存网络规则并允许本次操作") }
             }
             Button(
                 onClick = { onDecision(ApprovalDecision.ACCEPT) },
@@ -885,13 +916,13 @@ private fun McpElicitationCard(
             Text("${request.serverName} 请求确认", style = MaterialTheme.typography.titleMedium)
             Text(request.message)
             request.requestedSchema?.let {
-                Text("响应结构", style = MaterialTheme.typography.labelLarge)
-                JsonText(it)
+                Text("该服务需要结构化响应", style = MaterialTheme.typography.labelLarge)
+                ExpandableTechnicalDetails(it)
                 OutlinedTextField(
                     value = content,
                     onValueChange = { content = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("响应 JSON") },
+                    label = { Text("响应内容（JSON 格式）") },
                     minLines = 3,
                 )
             }
@@ -927,7 +958,7 @@ private fun PermissionsCard(
             Text("权限请求", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.error)
             request.reason?.let { Text(it) }
             Text(request.cwd, style = MaterialTheme.typography.labelSmall)
-            JsonText(request.requestedPermissions)
+            PermissionSummary(request.requestedPermissions)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("本回合后续命令严格自动审查", modifier = Modifier.weight(1f))
                 Switch(checked = strictAutoReview, onCheckedChange = { strictAutoReview = it })
@@ -952,34 +983,25 @@ private fun PermissionsCard(
 }
 
 @Composable
-private fun JsonText(value: String) {
-    SelectionContainer {
-        Text(
-            value,
-            modifier = Modifier.fillMaxWidth().background(
-                MaterialTheme.colorScheme.inverseSurface,
-                RoundedCornerShape(8.dp),
-            ).padding(10.dp),
-            color = MaterialTheme.colorScheme.inverseOnSurface,
-            fontFamily = FontFamily.Monospace,
-            style = MaterialTheme.typography.bodySmall,
-        )
-    }
-}
-
-@Composable
 private fun PlanCard(plan: TurnPlan) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("执行计划", style = MaterialTheme.typography.titleMedium)
             plan.explanation?.takeIf(String::isNotBlank)?.let { Text(it) }
             plan.steps.forEach { step ->
-                val mark = when (step.status) {
-                    PlanStepStatus.PENDING -> "○"
-                    PlanStepStatus.IN_PROGRESS -> "◉"
-                    PlanStepStatus.COMPLETED -> "✓"
+                val statusLabel = when (step.status) {
+                    PlanStepStatus.PENDING -> "待处理"
+                    PlanStepStatus.IN_PROGRESS -> "进行中"
+                    PlanStepStatus.COMPLETED -> "已完成"
                 }
-                Text("$mark ${step.text}")
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(step.text, modifier = Modifier.weight(1f))
+                    Text(
+                        statusLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }
@@ -989,11 +1011,11 @@ private fun PlanCard(plan: TurnPlan) {
 private fun GoalCard(goal: ThreadGoal) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("目标 · ${goal.status}", style = MaterialTheme.typography.titleMedium)
+            Text("目标 · ${stringResource(goal.status.displayLabelRes)}", style = MaterialTheme.typography.titleMedium)
             Text(goal.objective)
             Text(
-                "已用 ${goal.tokensUsed} Token · ${goal.timeUsedSeconds} 秒" +
-                    (goal.tokenBudget?.let { " · 预算 $it" } ?: ""),
+                "已用 ${formatCount(goal.tokensUsed)} Token · ${formatDurationSeconds(goal.timeUsedSeconds)}" +
+                    (goal.tokenBudget?.let { " · 预算 ${formatCount(it)}" } ?: ""),
                 style = MaterialTheme.typography.labelSmall,
             )
         }
@@ -1031,7 +1053,9 @@ private fun ChatComposer(
     var dialog by remember { mutableStateOf<ComposerDialog?>(null) }
     val selectedModel = models.firstOrNull { it.model == options.model }
     val modeLabel = options.reasoningEffort
-        ?.let { effort -> selectedModel?.reasoningEfforts?.firstOrNull { it.value == effort }?.label ?: effort }
+        ?.let { effort ->
+            selectedModel?.reasoningEfforts?.firstOrNull { it.value == effort }?.label ?: "自定义推理强度"
+        }
         ?: selectedModel?.displayName
         ?: options.model
         ?: "默认"
@@ -1388,7 +1412,8 @@ private fun TurnOptionsSheet(
                 OptionRow(
                     values = listOf<ReasoningSummary?>(null) + ReasoningSummary.entries,
                     selected = options.reasoningSummary,
-                    label = { it?.wireValue ?: "默认" },
+                    label = { it?.let { value -> stringResource(value.displayLabelRes) }
+                        ?: stringResource(R.string.common_default) },
                     onSelect = { options = options.copy(reasoningSummary = it) },
                 )
                 if (model == null || model.supportsPersonality) {
@@ -1396,7 +1421,8 @@ private fun TurnOptionsSheet(
                     OptionRow(
                         values = listOf<Personality?>(null) + Personality.entries,
                         selected = options.personality,
-                        label = { it?.wireValue ?: "默认" },
+                        label = { it?.let { value -> stringResource(value.displayLabelRes) }
+                            ?: stringResource(R.string.common_default) },
                         onSelect = { options = options.copy(personality = it) },
                     )
                 }
@@ -1404,9 +1430,16 @@ private fun TurnOptionsSheet(
                 OptionRow(
                     values = listOf<SandboxMode?>(null) + SandboxMode.entries,
                     selected = options.sandboxMode,
-                    label = { it?.wireValue ?: "默认" },
+                    label = { it?.let { value -> stringResource(value.displayLabelRes) }
+                        ?: stringResource(R.string.common_default) },
                     onSelect = { options = options.copy(sandboxMode = it) },
                 )
+                options.sandboxMode?.let {
+                    SettingDescription(
+                        stringResource(it.displayDescriptionRes),
+                        critical = it == SandboxMode.DANGER_FULL_ACCESS,
+                    )
+                }
                 if (options.sandboxMode == SandboxMode.READ_ONLY || options.sandboxMode == SandboxMode.WORKSPACE_WRITE) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("允许网络访问", modifier = Modifier.weight(1f))
@@ -1443,16 +1476,20 @@ private fun TurnOptionsSheet(
                 OptionRow(
                     values = listOf<ApprovalPolicy?>(null) + ApprovalPolicy.entries,
                     selected = options.approvalPolicy,
-                    label = { it?.wireValue ?: "默认" },
+                    label = { it?.let { value -> stringResource(value.displayLabelRes) }
+                        ?: stringResource(R.string.common_default) },
                     onSelect = { options = options.copy(approvalPolicy = it) },
                 )
+                options.approvalPolicy?.let { SettingDescription(stringResource(it.displayDescriptionRes)) }
                 Text("审批者", style = MaterialTheme.typography.labelLarge)
                 OptionRow(
                     values = listOf<ApprovalReviewer?>(null) + ApprovalReviewer.entries,
                     selected = options.approvalsReviewer,
-                    label = { it?.wireValue ?: "默认" },
+                    label = { it?.let { value -> stringResource(value.displayLabelRes) }
+                        ?: stringResource(R.string.common_default) },
                     onSelect = { options = options.copy(approvalsReviewer = it) },
                 )
+                options.approvalsReviewer?.let { SettingDescription(stringResource(it.displayDescriptionRes)) }
                 OutlinedTextField(
                     value = options.outputSchema.orEmpty(),
                     onValueChange = { options = options.copy(outputSchema = it.ifBlank { null }) },
@@ -1482,7 +1519,7 @@ private fun TurnOptionsSheet(
 private fun <T> OptionRow(
     values: List<T>,
     selected: T,
-    label: (T) -> String,
+    label: @Composable (T) -> String,
     onSelect: (T) -> Unit,
 ) {
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
@@ -1495,6 +1532,15 @@ private fun <T> OptionRow(
             )
         }
     }
+}
+
+@Composable
+private fun SettingDescription(text: String, critical: Boolean = false) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        color = if (critical) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable
@@ -1579,7 +1625,7 @@ private fun ReviewDialog(
                 OptionRow(
                     values = ReviewType.entries,
                     selected = type,
-                    label = ReviewType::label,
+                    label = { it.label },
                     onSelect = { type = it },
                 )
                 if (type != ReviewType.UNCOMMITTED) {
@@ -1624,9 +1670,7 @@ private fun GoalDialog(
 ) {
     var objective by rememberSaveable(goal?.objective) { mutableStateOf(goal?.objective.orEmpty()) }
     var budget by rememberSaveable(goal?.tokenBudget) { mutableStateOf(goal?.tokenBudget?.toString().orEmpty()) }
-    var status by rememberSaveable(goal?.status) {
-        mutableStateOf(ThreadGoalStatus.entries.firstOrNull { it.wireValue == goal?.status } ?: ThreadGoalStatus.ACTIVE)
-    }
+    var status by rememberSaveable(goal?.status) { mutableStateOf(goal?.status ?: ThreadGoalStatus.ACTIVE) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("目标管理") },
@@ -1643,7 +1687,7 @@ private fun GoalDialog(
                 OptionRow(
                     values = ThreadGoalStatus.entries,
                     selected = status,
-                    label = { it.wireValue },
+                    label = { stringResource(it.displayLabelRes) },
                     onSelect = { status = it },
                 )
                 OutlinedTextField(
@@ -1714,8 +1758,8 @@ private val UserInputPart.label: String
 
 private val FeatureEntry.resourceOrigin: String
     get() = when (kind) {
-        FeatureKind.SKILL -> metadata["scope"]?.ifBlank { null } ?: "Skill"
+        FeatureKind.SKILL -> metadata["scope"]?.ifBlank { null }?.let(::featureScopeLabel) ?: "Skill"
         FeatureKind.APP -> "App"
         FeatureKind.PLUGIN -> parentId ?: "Plugin"
-        else -> kind.name
+        else -> "其他资源"
     }

@@ -26,6 +26,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -38,10 +39,22 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.hebo.codex.R
 import com.hebo.codex.domain.AccountOverview
+import com.hebo.codex.domain.AccountRateLimit
+import com.hebo.codex.domain.AccountRateLimits
+import com.hebo.codex.domain.AccountUsage
 import com.hebo.codex.domain.LoginChallenge
+import com.hebo.codex.domain.RateLimitWindow
 import com.hebo.codex.domain.ServerConfiguration
+import com.hebo.codex.ui.components.relativeTime
+import com.hebo.codex.ui.displayLabelRes
+import com.hebo.codex.ui.formatCount
+import com.hebo.codex.ui.formatDateTime
+import com.hebo.codex.ui.formatDurationSeconds
+import com.hebo.codex.ui.formatPercent
 
 @Composable
 fun AccountContent(
@@ -80,7 +93,10 @@ fun AccountContent(
                                 style = MaterialTheme.typography.titleMedium,
                             )
                             Text(
-                                listOfNotNull(account.type, account.planType).joinToString(" · ").ifBlank {
+                                listOfNotNull(
+                                    account.type?.let { stringResource(it.displayLabelRes) },
+                                    account.planType?.let { stringResource(it.displayLabelRes) },
+                                ).joinToString(" · ").ifBlank {
                                     if (account.signedIn) "Codex 账号" else "登录后可查看计划和额度"
                                 },
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -146,17 +162,24 @@ fun AccountContent(
             item("message:${message.id}") {
                 Card {
                     Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(message.type, style = MaterialTheme.typography.labelMedium)
+                        Text(stringResource(message.type.displayLabelRes), style = MaterialTheme.typography.labelMedium)
                         Text(message.body)
+                        message.createdAt?.let {
+                            Text(
+                                relativeTime(it),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }
         }
-        account.rateLimitsJson?.let { json ->
-            item("rate-limits") { ExpandableJsonSection("额度详情", json) }
+        account.rateLimits?.let { rateLimits ->
+            item("rate-limits") { AccountRateLimitsCard(rateLimits) }
         }
-        account.usageJson?.let { json ->
-            item("usage") { ExpandableJsonSection("用量详情", json) }
+        account.usage?.let { usage ->
+            item("usage") { AccountUsageCard(usage) }
         }
         if (account.signedIn) {
             item("credit-actions") {
@@ -182,6 +205,86 @@ fun AccountContent(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun AccountRateLimitsCard(rateLimits: AccountRateLimits) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("额度", style = MaterialTheme.typography.titleMedium)
+            rateLimits.limits.forEachIndexed { index, limit ->
+                if (index > 0) HorizontalDivider()
+                AccountRateLimitView(limit)
+            }
+            rateLimits.availableResetCredits?.let {
+                MetricValue("可用重置次数", formatCount(it))
+            }
+            ExpandableJsonSection("额度技术详情", rateLimits.technicalDetails)
+        }
+    }
+}
+
+@Composable
+private fun AccountRateLimitView(limit: AccountRateLimit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(limit.name ?: limit.id ?: "Codex", style = MaterialTheme.typography.labelLarge)
+        limit.primary?.let { RateLimitWindowView("主要额度", it) }
+        limit.secondary?.let { RateLimitWindowView("补充额度", it) }
+        limit.credits?.let { credits ->
+            val value = when {
+                credits.unlimited -> "不限量"
+                credits.hasCredits -> credits.balance ?: "可用"
+                else -> "无可用额度"
+            }
+            MetricValue("额外额度", value)
+        }
+    }
+}
+
+@Composable
+private fun RateLimitWindowView(label: String, window: RateLimitWindow) {
+    val duration = window.windowDurationMinutes?.let { formatDurationSeconds(it * 60) }
+    val reset = window.resetsAt?.let(::formatDateTime)
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(Modifier.fillMaxWidth()) {
+            Text(
+                listOfNotNull(label, duration).joinToString(" · "),
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Text("已使用 ${formatPercent(window.usedPercent)}", style = MaterialTheme.typography.labelMedium)
+        }
+        LinearProgressIndicator(
+            progress = { (window.usedPercent / 100.0).toFloat().coerceIn(0f, 1f) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        reset?.let {
+            Text("$it 重置", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun AccountUsageCard(usage: AccountUsage) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("用量概览", style = MaterialTheme.typography.titleMedium)
+            usage.lifetimeTokens?.let { MetricValue("累计 Token", formatCount(it)) }
+            usage.peakDailyTokens?.let { MetricValue("单日最高 Token", formatCount(it)) }
+            usage.longestRunningTurnSeconds?.let { MetricValue("最长任务", formatDurationSeconds(it)) }
+            usage.currentStreakDays?.let { MetricValue("当前连续使用", "$it 天") }
+            usage.longestStreakDays?.let { MetricValue("最长连续使用", "$it 天") }
+            ExpandableJsonSection("用量技术详情", usage.technicalDetails)
+        }
+    }
+}
+
+@Composable
+private fun MetricValue(label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.labelLarge)
     }
 }
 
@@ -238,7 +341,14 @@ fun ExpandableJsonSection(title: String, json: String) {
         Column {
             ListItem(
                 headlineContent = { Text(title) },
-                supportingContent = { Text(if (expanded) "点按收起技术详情" else "点按查看技术详情") },
+                supportingContent = {
+                    Text(
+                        stringResource(
+                            if (expanded) R.string.common_hide_technical_details
+                            else R.string.common_show_technical_details,
+                        ),
+                    )
+                },
                 leadingContent = { Icon(Icons.Rounded.Code, contentDescription = null) },
                 modifier = Modifier.clickable { expanded = !expanded },
             )

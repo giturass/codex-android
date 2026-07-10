@@ -6,7 +6,9 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.lifecycle.viewModelScope
 import com.hebo.codex.domain.CodexRepository
+import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.util.runSuspendCatching
+import com.hebo.codex.util.toUserFacingError
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -16,7 +18,7 @@ import kotlinx.coroutines.launch
 
 data class AddServerUiState(
     val isSaving: Boolean = false,
-    val errorMessage: String? = null,
+    val errorMessage: UserFacingError? = null,
 )
 
 class AddServerViewModel(
@@ -37,7 +39,7 @@ class AddServerViewModel(
             if (error == null) {
                 mutableEvents.send(Unit)
             } else {
-                mutableState.value = AddServerUiState(errorMessage = error.message ?: "添加失败")
+                mutableState.value = AddServerUiState(errorMessage = error.toUserFacingError("添加服务器失败"))
             }
             mutableState.update { it.copy(isSaving = false) }
         }

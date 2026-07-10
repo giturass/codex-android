@@ -4,6 +4,7 @@ package com.hebo.codex.ui.screens.hub
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -17,6 +18,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -29,13 +31,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import com.hebo.codex.R
 import com.hebo.codex.domain.FeatureAction
 import com.hebo.codex.domain.FeatureActionResult
 import com.hebo.codex.domain.FeatureEntry
+import com.hebo.codex.ui.featureScopeLabel
+import com.hebo.codex.ui.featureTrustLabel
+import com.hebo.codex.ui.hookEventLabel
+import com.hebo.codex.ui.mcpAuthStatusLabel
+import com.hebo.codex.ui.pluginDiscoverabilityLabel
 
 data class FeatureDetails(val entry: FeatureEntry)
 
@@ -82,21 +91,48 @@ fun HubInputDialog(
                 value.description?.let {
                     Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                value.firstLabel?.let { label ->
-                    OutlinedTextField(
-                        value = first,
-                        onValueChange = { first = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text(label) },
-                        minLines = if (
-                            value is HubDialog.McpTool || value == HubDialog.ConfigValue || value == HubDialog.ConfigBatch
-                        ) 3 else 1,
-                        visualTransformation = if (value == HubDialog.ApiKeyLogin) {
-                            PasswordVisualTransformation()
-                        } else {
-                            VisualTransformation.None
-                        },
+                when (value) {
+                    is HubDialog.SharedTargets -> ChoiceField(
+                        title = "可见范围",
+                        choices = listOf(
+                            "UNLISTED" to pluginDiscoverabilityLabel("UNLISTED"),
+                            "PRIVATE" to pluginDiscoverabilityLabel("PRIVATE"),
+                        ),
+                        selected = first,
+                        onSelect = { first = it },
                     )
+
+                    HubDialog.CreditsNudge -> ChoiceField(
+                        title = "需要补充的额度",
+                        choices = listOf(
+                            "credits" to "额外额度",
+                            "usage_limit" to "用量限制",
+                        ),
+                        selected = first,
+                        onSelect = { first = it },
+                    )
+
+                    else -> Unit
+                }
+                if (value !is HubDialog.SharedTargets && value != HubDialog.CreditsNudge) {
+                    value.firstLabel?.let { label ->
+                        OutlinedTextField(
+                            value = first,
+                            onValueChange = { first = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text(label) },
+                            minLines = if (
+                                value is HubDialog.McpTool ||
+                                value == HubDialog.ConfigValue ||
+                                value == HubDialog.ConfigBatch
+                            ) 3 else 1,
+                            visualTransformation = if (value == HubDialog.ApiKeyLogin) {
+                                PasswordVisualTransformation()
+                            } else {
+                                VisualTransformation.None
+                            },
+                        )
+                    }
                 }
                 value.secondLabel?.let { label ->
                     OutlinedTextField(
@@ -112,8 +148,8 @@ fun HubInputDialog(
                         Text(
                             text = when (value) {
                                 HubDialog.Feedback -> "附带日志"
-                                HubDialog.ConfigBatch -> "写入后热重载用户配置"
-                                else -> "使用 upsert 合并策略"
+                                HubDialog.ConfigBatch -> "写入后立即重新加载用户配置"
+                                else -> "保留未填写的现有配置"
                             },
                             modifier = Modifier.weight(1f),
                         )
@@ -132,6 +168,29 @@ fun HubInputDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
+}
+
+@Composable
+private fun ChoiceField(
+    title: String,
+    choices: List<Pair<String, String>>,
+    selected: String,
+    onSelect: (String) -> Unit,
+) {
+    Text(title, style = MaterialTheme.typography.labelLarge)
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        choices.forEach { (value, label) ->
+            FilterChip(
+                selected = selected == value,
+                onClick = { onSelect(value) },
+                label = { Text(label) },
+            )
+        }
+    }
 }
 
 @Composable
@@ -155,10 +214,15 @@ fun FeatureDetailsDialog(details: FeatureDetails, onDismiss: () -> Unit) {
                     .filterKeys { it in FEATURE_DETAIL_LABELS }
                     .filterValues(String::isNotBlank)
                     .forEach { (key, value) ->
-                        DetailValue(FEATURE_DETAIL_LABELS.getValue(key), value)
-                }
+                        DetailValue(FEATURE_DETAIL_LABELS.getValue(key), featureDetailValue(key, value))
+                    }
                 TextButton(onClick = { showTechnicalDetails = !showTechnicalDetails }) {
-                    Text(if (showTechnicalDetails) "隐藏技术详情" else "查看技术详情")
+                    Text(
+                        stringResource(
+                            if (showTechnicalDetails) R.string.common_hide_technical_details
+                            else R.string.common_show_technical_details,
+                        ),
+                    )
                 }
                 if (showTechnicalDetails) JsonBlock(entry.rawJson)
             }
@@ -169,6 +233,7 @@ fun FeatureDetailsDialog(details: FeatureDetails, onDismiss: () -> Unit) {
 
 @Composable
 fun RawResultDialog(result: FeatureActionResult, onDismiss: () -> Unit) {
+    var showTechnicalDetails by remember(result.rawJson) { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(result.message) },
@@ -176,7 +241,16 @@ fun RawResultDialog(result: FeatureActionResult, onDismiss: () -> Unit) {
             Column(
                 modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
             ) {
-                JsonBlock(result.rawJson)
+                Text("操作已完成，服务器响应可在技术详情中查看")
+                TextButton(onClick = { showTechnicalDetails = !showTechnicalDetails }) {
+                    Text(
+                        stringResource(
+                            if (showTechnicalDetails) R.string.common_hide_technical_details
+                            else R.string.common_show_technical_details,
+                        ),
+                    )
+                }
+                if (showTechnicalDetails) JsonBlock(result.rawJson)
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } },
@@ -296,11 +370,11 @@ private val HubDialog.description: String?
         HubDialog.ConfigValue, HubDialog.ConfigBatch -> "此操作会直接修改服务端配置，请确认键和值的作用域"
         HubDialog.Feedback -> "反馈由当前服务器上传"
         HubDialog.ApiKeyLogin -> "API Key 将发送至当前服务器完成登录"
-        HubDialog.RateLimitReset -> "Credit ID 可以留空，由服务器选择可用额度"
-        HubDialog.CreditsNudge -> null
+        HubDialog.RateLimitReset -> "可以不指定重置额度，由服务器自动选择"
+        HubDialog.CreditsNudge -> "选择需要补充的额度类型，系统会通知工作区所有者"
         is HubDialog.McpTool -> "参数必须是合法 JSON，并关联一个会话 ID"
         is HubDialog.PluginSkill -> "读取远程插件中指定的 Skill"
-        is HubDialog.SharedTargets -> "可发现性和共享目标必须符合服务端协议"
+        is HubDialog.SharedTargets -> "选择插件的可见范围，并填写需要共享到的目标"
     }
 
 private val HubDialog.confirmLabel: String
@@ -321,22 +395,22 @@ private val HubDialog.firstLabel: String?
         HubDialog.ConfigBatch -> "配置编辑 JSON 数组"
         HubDialog.Feedback -> "分类"
         HubDialog.ApiKeyLogin -> "API Key"
-        HubDialog.RateLimitReset -> "Credit ID，可留空"
-        HubDialog.CreditsNudge -> "额度类型"
+        HubDialog.RateLimitReset -> "重置额度 ID（可留空）"
+        HubDialog.CreditsNudge -> null
         is HubDialog.McpTool -> "参数 JSON"
         is HubDialog.PluginSkill -> "Skill 名称"
-        is HubDialog.SharedTargets -> "可发现性：UNLISTED 或 PRIVATE"
+        is HubDialog.SharedTargets -> null
         HubDialog.ReloadMcp -> null
     }
 
 private val HubDialog.secondLabel: String?
     get() = when (this) {
-        HubDialog.AddMarketplace -> "第一行分支或 Tag，后续行 sparse path，均可留空"
+        HubDialog.AddMarketplace -> "第一行分支或 Tag，后续行稀疏检出路径，均可留空"
         HubDialog.SharePlugin -> "分享选项 JSON 对象"
         HubDialog.ConfigValue -> "JSON 值"
         HubDialog.Feedback -> "原因"
         is HubDialog.McpTool -> "会话 ID"
-        is HubDialog.SharedTargets -> "共享目标 JSON 数组"
+        is HubDialog.SharedTargets -> "共享目标（JSON 格式）"
         else -> null
     }
 
@@ -363,7 +437,12 @@ private val HubDialog.defaultSecond: String
     }
 
 private fun HubDialog.isValid(first: String, second: String): Boolean {
-    val firstValid = firstLabel == null || this == HubDialog.RateLimitReset || first.isNotBlank()
+    val firstValid = when {
+        this is HubDialog.SharedTargets -> first == "UNLISTED" || first == "PRIVATE"
+        this == HubDialog.CreditsNudge -> first == "credits" || first == "usage_limit"
+        firstLabel == null || this == HubDialog.RateLimitReset -> true
+        else -> first.isNotBlank()
+    }
     val secondRequired = this == HubDialog.SharePlugin ||
         this == HubDialog.ConfigValue ||
         this is HubDialog.McpTool ||
@@ -421,3 +500,20 @@ private val FEATURE_DETAIL_LABELS = mapOf(
     "marketplaceName" to "插件来源",
     "discoverability" to "可发现性",
 )
+
+private fun featureDetailValue(key: String, value: String): String = when (key) {
+    "scope" -> featureScopeLabel(value)
+    "event" -> hookEventLabel(value)
+    "trust" -> featureTrustLabel(value)
+    "authStatus" -> mcpAuthStatusLabel(value)
+
+    "accessible" -> when (value) {
+        "true" -> "可访问"
+        "false" -> "不可访问"
+        else -> "状态未知"
+    }
+
+    "discoverability" -> pluginDiscoverabilityLabel(value)
+
+    else -> value
+}

@@ -3,6 +3,7 @@ package com.hebo.codex.data.remote
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import java.io.IOException
 
 sealed interface ServerEvent {
     data class Notification(
@@ -25,3 +26,8 @@ class RpcException(
 
 class ProtocolException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
+class ConnectionException(
+    message: String,
+    cause: Throwable? = null,
+    val rejected: Boolean = false,
+) : IOException(message, cause)

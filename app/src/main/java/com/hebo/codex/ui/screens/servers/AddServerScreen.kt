@@ -25,6 +25,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -35,11 +36,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.hebo.codex.R
+import com.hebo.codex.domain.UserFacingError
+import com.hebo.codex.ui.components.UserFacingErrorDialog
 
 @Composable
 fun AddServerScreen(
@@ -52,13 +57,19 @@ fun AddServerScreen(
     var endpoint by rememberSaveable { mutableStateOf("") }
     var token by remember { mutableStateOf("") }
     var showToken by rememberSaveable { mutableStateOf(false) }
+    var technicalError by remember { mutableStateOf<UserFacingError?>(null) }
+    val detailsLabel = stringResource(R.string.common_details)
 
     LaunchedEffect(viewModel) {
         viewModel.savedEvents.collect { onBack() }
     }
     LaunchedEffect(state.errorMessage) {
-        state.errorMessage?.let {
-            snackbarHostState.showSnackbar(it)
+        state.errorMessage?.let { error ->
+            val result = snackbarHostState.showSnackbar(
+                message = error.summary,
+                actionLabel = error.technicalDetails?.let { detailsLabel },
+            )
+            if (result == SnackbarResult.ActionPerformed) technicalError = error
             viewModel.clearError()
         }
     }
@@ -100,7 +111,7 @@ fun AddServerScreen(
                 enabled = !state.isSaving,
             )
             OutlinedTextField(
-                value = "capability-token",
+                value = stringResource(R.string.server_auth_capability_token),
                 onValueChange = {},
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("认证方式") },
@@ -111,7 +122,7 @@ fun AddServerScreen(
                 value = token,
                 onValueChange = { token = it },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Token") },
+                label = { Text(stringResource(R.string.server_auth_capability_token)) },
                 visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 singleLine = true,
@@ -120,13 +131,16 @@ fun AddServerScreen(
                     IconButton(onClick = { showToken = !showToken }) {
                         Icon(
                             if (showToken) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                            contentDescription = if (showToken) "隐藏 Token" else "显示 Token",
+                            contentDescription = stringResource(
+                                if (showToken) R.string.server_auth_hide_capability_token
+                                else R.string.server_auth_show_capability_token,
+                            ),
                         )
                     }
                 },
             )
             Text(
-                "Token 仅以 Android Keystore 加密后的形式保存在本机",
+                stringResource(R.string.server_auth_capability_token_storage),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -157,5 +171,8 @@ fun AddServerScreen(
                 }
             }
         }
+    }
+    technicalError?.let { error ->
+        UserFacingErrorDialog(error = error, onDismiss = { technicalError = null })
     }
 }

@@ -43,6 +43,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -57,12 +58,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.hebo.codex.R
 import com.hebo.codex.domain.ConnectionStatus
 import com.hebo.codex.domain.FeatureCatalog
+import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.ui.components.ConnectionIndicator
+import com.hebo.codex.ui.components.ExpandableErrorDetails
+import com.hebo.codex.ui.components.UserFacingErrorDialog
 import com.hebo.codex.ui.components.label
 
 private val TwoPaneThreshold = 760.dp
@@ -78,11 +84,17 @@ fun ServerHubScreen(
     var dialog by remember { mutableStateOf<HubDialog?>(null) }
     var details by remember { mutableStateOf<FeatureDetails?>(null) }
     var confirmation by remember { mutableStateOf<ConfirmationRequest?>(null) }
+    var technicalError by remember { mutableStateOf<UserFacingError?>(null) }
+    val detailsLabel = stringResource(R.string.common_details)
 
     LaunchedEffect(state.errorMessage) {
-        val message = state.errorMessage ?: return@LaunchedEffect
+        val error = state.errorMessage ?: return@LaunchedEffect
         viewModel.clearError()
-        snackbar.showSnackbar(message)
+        val result = snackbar.showSnackbar(
+            message = error.summary,
+            actionLabel = error.technicalDetails?.let { detailsLabel },
+        )
+        if (result == SnackbarResult.ActionPerformed) technicalError = error
     }
     LaunchedEffect(state.actionResult) {
         val result = state.actionResult ?: return@LaunchedEffect
@@ -239,6 +251,9 @@ fun ServerHubScreen(
             },
         )
     }
+    technicalError?.let { error ->
+        UserFacingErrorDialog(error = error, onDismiss = { technicalError = null })
+    }
 }
 
 @Composable
@@ -356,11 +371,10 @@ private fun ScopeHeader(state: ServerHubUiState, onReconnect: () -> Unit) {
                     }
                 }
             }
-            (state.connectionStatus as? ConnectionStatus.Failed)?.message?.let { message ->
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
+            (state.connectionStatus as? ConnectionStatus.Failed)?.error?.let { error ->
+                ExpandableErrorDetails(
+                    error = error,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
@@ -383,7 +397,7 @@ private fun HubDetailPane(
     when {
         data == null && sectionState.errorMessage != null -> {
             SectionErrorState(
-                message = sectionState.errorMessage,
+                error = sectionState.errorMessage,
                 onRetry = { viewModel.refresh(section) },
                 modifier = modifier,
             )
@@ -398,13 +412,13 @@ private fun HubDetailPane(
         else -> {
             Column(modifier) {
                 if (sectionState.isLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
-                sectionState.errorMessage?.let { message ->
+                sectionState.errorMessage?.let { error ->
                     Surface(color = MaterialTheme.colorScheme.errorContainer) {
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(message, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                            ExpandableErrorDetails(error, modifier = Modifier.weight(1f))
                             TextButton(onClick = { viewModel.refresh(section) }) { Text("重试") }
                         }
                     }
@@ -427,7 +441,7 @@ private fun HubDetailPane(
 
 @Composable
 private fun SectionErrorState(
-    message: String,
+    error: UserFacingError,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -438,11 +452,7 @@ private fun SectionErrorState(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text("无法加载内容", style = MaterialTheme.typography.titleMedium)
-            Text(
-                text = message,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            ExpandableErrorDetails(error)
             Button(onClick = onRetry) { Text("重试") }
         }
     }

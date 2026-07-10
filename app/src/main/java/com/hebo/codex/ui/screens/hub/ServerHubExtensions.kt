@@ -9,12 +9,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -59,6 +57,8 @@ import com.hebo.codex.domain.FeatureAction
 import com.hebo.codex.domain.FeatureCatalog
 import com.hebo.codex.domain.FeatureEntry
 import com.hebo.codex.domain.FeatureKind
+import com.hebo.codex.ui.components.ExpandableErrorDetails
+import com.hebo.codex.ui.mcpAuthStatusLabel
 
 private enum class PluginTab(val label: String) {
     BROWSE("浏览"),
@@ -184,9 +184,8 @@ fun PluginsContent(
                 sharedState?.errorMessage != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("无法加载共享插件")
-                        Text(
+                        ExpandableErrorDetails(
                             sharedState.errorMessage,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(12.dp),
                         )
                         TextButton(onClick = onRefreshShared) { Text("重试") }
@@ -225,7 +224,7 @@ private fun PluginRow(
                 if (entry.description.isNotBlank()) {
                     Text(entry.description, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
-                entry.parentId?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
+                entry.parentId?.let { Text("来源：$it", style = MaterialTheme.typography.labelSmall) }
             }
         },
         leadingContent = { Icon(Icons.Rounded.Extension, contentDescription = null) },
@@ -576,7 +575,7 @@ private fun McpServerBlock(
             ListItem(
                 headlineContent = { Text(server.title) },
                 supportingContent = {
-                    Text("${authStatusLabel(authStatus)} · $toolCount 个工具 · $resourceCount 个资源")
+                    Text("${mcpAuthStatusLabel(authStatus)} · $toolCount 个工具 · $resourceCount 个资源")
                 },
                 leadingContent = { Icon(Icons.Rounded.Hub, contentDescription = null) },
                 trailingContent = {
@@ -597,7 +596,7 @@ private fun McpServerBlock(
                                 Text("登录")
                             }
                         } else {
-                            StatusBadge(authStatusLabel(authStatus), authStatusTone(authStatus))
+                            StatusBadge(mcpAuthStatusLabel(authStatus), authStatusTone(authStatus))
                         }
                         Icon(
                             if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
@@ -690,17 +689,8 @@ private fun McpChildRow(
     )
 }
 
-private fun authStatusLabel(status: String): String = when (status) {
-    "notLoggedIn" -> "待登录"
-    "authenticated", "loggedIn" -> "已认证"
-    "notSupported" -> "无需认证"
-    "disabled" -> "已停用"
-    "" -> "状态未知"
-    else -> status
-}
-
 private fun authStatusTone(status: String): StatusTone = when (status) {
-    "authenticated", "loggedIn", "notSupported" -> StatusTone.POSITIVE
+    "bearerToken", "oAuth", "unsupported" -> StatusTone.POSITIVE
     "notLoggedIn" -> StatusTone.NEGATIVE
     else -> StatusTone.NEUTRAL
 }

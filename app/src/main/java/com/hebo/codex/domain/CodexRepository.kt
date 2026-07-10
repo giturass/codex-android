@@ -7,7 +7,6 @@ import com.hebo.codex.data.remote.AppServerClientFactory
 import com.hebo.codex.data.remote.AppServerConnection
 import com.hebo.codex.data.remote.ProtocolException
 import com.hebo.codex.data.remote.ProtocolMapper
-import com.hebo.codex.data.remote.RpcException
 import com.hebo.codex.data.remote.ServerEvent
 import com.hebo.codex.data.remote.StableFeatureApi
 import com.hebo.codex.data.remote.StableRpcMethod
@@ -18,6 +17,8 @@ import com.hebo.codex.data.remote.requiredArray
 import com.hebo.codex.data.remote.requiredObject
 import com.hebo.codex.data.remote.requiredString
 import com.hebo.codex.util.runSuspendCatching
+import com.hebo.codex.util.serverError
+import com.hebo.codex.util.toUserFacingError
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -188,16 +189,17 @@ class CodexRepository(
         val activeTurnId = state.value.activeTurnId
         val clientId = UUID.randomUUID().toString()
         val localItemId = "local:$clientId"
-        val displayText = input.joinToString("\n") { it.displayText() }
+        val messageContent = input.map { it.toMessagePart() }
+        val messageTitle = input.conversationTitle()
         state.updateState { current ->
             current.copy(
-                title = if (current.title == "新会话") displayText.lineSequence().first().take(72) else current.title,
+                title = if (current.title == "新会话") messageTitle.take(72) else current.title,
                 isRunning = true,
                 items = current.items + ConversationItem.UserMessage(
                     id = localItemId,
                     turnId = activeTurnId ?: "pending",
                     clientId = clientId,
-                    text = displayText,
+                    content = messageContent,
                     isPending = true,
                 ),
                 errorMessage = null,
@@ -233,7 +235,7 @@ class CodexRepository(
                 current.copy(
                     items = current.items.filterNot { it.id == localItemId },
                     isRunning = false,
-                    errorMessage = error.userMessage(),
+                    errorMessage = error.toUserFacingError("发送消息失败"),
                 )
             }
             throw error
@@ -562,7 +564,10 @@ class CodexRepository(
             api
         } catch (error: Throwable) {
             connection.close()
-            mutableConnectionStatuses.updateValue(serverId, ConnectionStatus.Failed(error.userMessage()))
+            mutableConnectionStatuses.updateValue(
+                serverId,
+                ConnectionStatus.Failed(error.toUserFacingError("连接服务器失败")),
+            )
             throw error
         }
     }
@@ -599,7 +604,7 @@ class CodexRepository(
                     }
                     .onFailure { error ->
                         state.updateState {
-                            it.copy(isRunning = false, errorMessage = error.userMessage())
+                            it.copy(isRunning = false, errorMessage = error.toUserFacingError("恢复会话失败"))
                         }
                     }
             }
@@ -619,7 +624,7 @@ class CodexRepository(
                     val threadId = event.paramsOrNull()?.optionalString("threadId")
                     if (threadId != null) {
                         conversations[ConversationKey(serverId, threadId)]?.updateState {
-                            it.copy(errorMessage = error.userMessage())
+                            it.copy(errorMessage = error.toUserFacingError("处理服务器事件失败"))
                         }
                     }
                 }
@@ -666,10 +671,14 @@ class CodexRepository(
                 cwd = request.params.optionalString("cwd"),
                 environmentId = request.params.optionalString("environmentId"),
                 networkHost = (request.params["networkApprovalContext"] as? JsonObject)?.optionalString("host"),
-                commandActions = request.params["commandActions"]?.toString(),
+                commandActions = ProtocolMapper.commandActions(request.params["commandActions"]),
                 grantRoot = null,
-                proposedExecPolicy = request.params["proposedExecpolicyAmendment"]?.toString(),
-                proposedNetworkPolicies = request.params["proposedNetworkPolicyAmendments"]?.toString(),
+                proposedExecPolicy = ProtocolMapper.execPolicyAmendment(
+                    request.params["proposedExecpolicyAmendment"],
+                ),
+                proposedNetworkPolicies = ProtocolMapper.networkPolicyAmendments(
+                    request.params["proposedNetworkPolicyAmendments"],
+                ),
             )
 
             "item/fileChange/requestApproval" -> PendingServerRequest.Approval(
@@ -682,10 +691,10 @@ class CodexRepository(
                 cwd = null,
                 environmentId = null,
                 networkHost = null,
-                commandActions = null,
+                commandActions = emptyList(),
                 grantRoot = request.params.optionalString("grantRoot"),
                 proposedExecPolicy = null,
-                proposedNetworkPolicies = null,
+                proposedNetworkPolicies = emptyList(),
             )
 
             "item/tool/requestUserInput" -> PendingServerRequest.Questions(
@@ -729,7 +738,9 @@ class CodexRepository(
                 environmentId = request.params.optionalString("environmentId"),
                 cwd = request.params.requiredString("cwd"),
                 reason = request.params.optionalString("reason"),
-                requestedPermissions = request.params.requiredObject("permissions").toString(),
+                requestedPermissions = ProtocolMapper.requestedPermissions(
+                    request.params.requiredObject("permissions"),
+                ),
             )
 
             else -> error("支持的服务端请求未实现：${request.method}")
@@ -853,6 +864,7 @@ class CodexRepository(
                 if (state == null) return
                 val turn = params.requiredObject("turn")
                 val errorMessage = (turn["error"] as? JsonObject)?.optionalString("message")
+                    ?.let { serverError("任务执行失败", it) }
                 state.updateState {
                     it.copy(
                         activeTurnId = null,
@@ -872,9 +884,9 @@ class CodexRepository(
             "error" -> {
                 val error = params.requiredObject("error")
                 val message = error.requiredString("message")
-                state?.addNotice(NoticeLevel.ERROR, message)
+                state?.addNotice(NoticeLevel.ERROR, "服务器报告错误", message)
                 if (!(params.optionalBoolean("willRetry") ?: false)) {
-                    state?.updateState { it.copy(errorMessage = message) }
+                    state?.updateState { it.copy(errorMessage = serverError("服务器报告错误", message)) }
                 }
             }
 
@@ -1058,10 +1070,19 @@ class CodexRepository(
         update(transform)
     }
 
-    private fun MutableStateFlow<ConversationState>.addNotice(level: NoticeLevel, message: String) {
+    private fun MutableStateFlow<ConversationState>.addNotice(
+        level: NoticeLevel,
+        message: String,
+        technicalDetails: String? = null,
+    ) {
         updateState { current ->
             current.copy(
-                notices = (current.notices + ConversationNotice(UUID.randomUUID().toString(), level, message))
+                notices = (current.notices + ConversationNotice(
+                    UUID.randomUUID().toString(),
+                    level,
+                    message,
+                    technicalDetails,
+                ))
                     .takeLast(MAX_NOTICES),
             )
         }
@@ -1095,17 +1116,33 @@ class CodexRepository(
         }
     }
 
-    private fun UserInputPart.displayText(): String = when (this) {
-        is UserInputPart.Text -> text
-        is UserInputPart.Image -> "[图片] $url"
-        is UserInputPart.LocalImage -> "[服务端图片] $path"
-        is UserInputPart.Skill -> "[Skill] $name"
-        is UserInputPart.Mention -> "[引用] $name"
+    private fun UserInputPart.toMessagePart(): UserMessagePart = when (this) {
+        is UserInputPart.Text -> UserMessagePart.Text(text)
+        is UserInputPart.Image -> UserMessagePart.Image(url)
+        is UserInputPart.LocalImage -> UserMessagePart.LocalImage(path)
+        is UserInputPart.Skill -> UserMessagePart.Skill(name, path)
+        is UserInputPart.Mention -> UserMessagePart.Mention(name, path)
     }
+
+    private fun List<UserInputPart>.conversationTitle(): String =
+        filterIsInstance<UserInputPart.Text>()
+            .firstNotNullOfOrNull { text ->
+                text.text.lineSequence().firstOrNull(String::isNotBlank)?.trim()
+            }
+            ?: firstNotNullOfOrNull { input ->
+                when (input) {
+                    is UserInputPart.Text -> null
+                    is UserInputPart.Image, is UserInputPart.LocalImage -> "图片"
+                    is UserInputPart.Skill -> "使用 Skill：${input.name}"
+                    is UserInputPart.Mention -> "提及：${input.name}"
+                }
+            }
+            ?: "新消息"
 
     private fun JsonObject.toThreadGoal() = ThreadGoal(
         objective = requiredString("objective"),
-        status = requiredString("status"),
+        status = ThreadGoalStatus.entries.singleOrNull { it.wireValue == requiredString("status") }
+            ?: throw ProtocolException("未知目标状态：${requiredString("status")}"),
         tokenBudget = optionalLong("tokenBudget"),
         tokensUsed = optionalLong("tokensUsed") ?: 0L,
         timeUsedSeconds = optionalLong("timeUsedSeconds") ?: 0L,
@@ -1131,13 +1168,6 @@ class CodexRepository(
                 ConversationNotice(UUID.randomUUID().toString(), level, message)
             current + (serverId to notices.takeLast(MAX_NOTICES))
         }
-    }
-
-    private fun Throwable.userMessage(): String = when (this) {
-        is RpcException -> message
-        is ProtocolException -> message ?: "协议错误"
-        is IllegalArgumentException, is IllegalStateException -> message ?: "操作失败"
-        else -> message ?: "网络连接失败"
     }
 
     private data class ConversationKey(val serverId: String, val threadId: String)
