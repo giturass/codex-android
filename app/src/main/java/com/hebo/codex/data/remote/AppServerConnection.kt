@@ -266,11 +266,11 @@ class AppServerConnection(
             eventChannel.close(error)
         }
 
-        override fun onFailure(webSocket: WebSocket, error: Throwable, response: Response?) {
+        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             if (closed.get()) return
             val statusCode = response?.code
-            val message = statusCode?.let { "HTTP $it" } ?: error.message ?: "WebSocket 连接失败"
-            failConnection(ConnectionException(message, error, rejected = statusCode != null))
+            val message = statusCode?.let { "HTTP $it" } ?: t.message ?: "WebSocket 连接失败"
+            failConnection(ConnectionException(message, t, rejected = statusCode != null))
         }
     }
 
