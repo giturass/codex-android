@@ -29,7 +29,7 @@ enum class HomeTab {
 data class HomeUiState(
     val servers: List<ServerProfile> = emptyList(),
     val activeServerId: String? = null,
-    val connectionStatus: ConnectionStatus = ConnectionStatus.Disconnected,
+    val connectionStatuses: Map<String, ConnectionStatus> = emptyMap(),
     val threads: List<ThreadSummary> = emptyList(),
     val projects: List<RecentProject> = emptyList(),
     val selectedTab: HomeTab = HomeTab.PROJECTS,
@@ -62,14 +62,13 @@ class HomeViewModel(
                 repository.activeServerId,
                 repository.connectionStatuses,
             ) { servers, activeServerId, statuses ->
-                val status = activeServerId?.let(statuses::get) ?: ConnectionStatus.Disconnected
-                Triple(servers, activeServerId, status)
-            }.collect { (servers, activeServerId, status) ->
+                Triple(servers, activeServerId, statuses)
+            }.collect { (servers, activeServerId, statuses) ->
                 mutableState.update {
                     it.copy(
                         servers = servers,
                         activeServerId = activeServerId,
-                        connectionStatus = status,
+                        connectionStatuses = statuses,
                     )
                 }
             }
@@ -92,6 +91,20 @@ class HomeViewModel(
     fun selectServer(serverId: String) {
         viewModelScope.launch {
             runSuspendCatching { repository.selectServer(serverId) }
+                .onFailure(::showError)
+        }
+    }
+
+    fun reconnectServer(serverId: String) {
+        viewModelScope.launch {
+            runSuspendCatching { repository.connect(serverId) }
+                .onFailure(::showError)
+        }
+    }
+
+    fun removeServer(serverId: String) {
+        viewModelScope.launch {
+            runSuspendCatching { repository.removeServer(serverId) }
                 .onFailure(::showError)
         }
     }

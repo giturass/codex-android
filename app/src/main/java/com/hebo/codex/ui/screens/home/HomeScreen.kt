@@ -19,7 +19,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Dns
-import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -61,7 +60,7 @@ import com.hebo.codex.ui.components.ThreadRow
 @Composable
 fun HomeScreen(
     viewModel: HomeViewModel,
-    onManageServers: () -> Unit,
+    onAddServer: () -> Unit,
     onOpenProject: (serverId: String, cwd: String) -> Unit,
     onOpenConversation: (serverId: String, threadId: String) -> Unit,
 ) {
@@ -95,11 +94,6 @@ fun HomeScreen(
         topBar = {
             TopAppBar(
                 title = { Text("Codex") },
-                navigationIcon = {
-                    IconButton(onClick = onManageServers) {
-                        Icon(Icons.Rounded.Menu, contentDescription = "管理服务器")
-                    }
-                },
                 actions = {
                     if (state.activeServer != null) {
                         IconButton(onClick = viewModel::refresh) {
@@ -124,19 +118,15 @@ fun HomeScreen(
         when {
             state.servers.isEmpty() -> NoServers(
                 modifier = Modifier.fillMaxSize().padding(padding),
-                onAddServer = onManageServers,
+                onAddServer = onAddServer,
             )
-
-            state.activeServer == null -> Box(
-                Modifier.fillMaxSize().padding(padding),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("请选择服务器")
-            }
 
             else -> HomeContent(
                 state = state,
                 onSelectServer = viewModel::selectServer,
+                onReconnectServer = viewModel::reconnectServer,
+                onRemoveServer = viewModel::removeServer,
+                onAddServer = onAddServer,
                 onSelectTab = viewModel::selectTab,
                 onOpenProject = { cwd -> onOpenProject(state.activeServerId.orEmpty(), cwd) },
                 onOpenConversation = { threadId ->
@@ -163,6 +153,9 @@ fun HomeScreen(
 private fun HomeContent(
     state: HomeUiState,
     onSelectServer: (String) -> Unit,
+    onReconnectServer: (String) -> Unit,
+    onRemoveServer: (String) -> Unit,
+    onAddServer: () -> Unit,
     onSelectTab: (HomeTab) -> Unit,
     onOpenProject: (String) -> Unit,
     onOpenConversation: (String) -> Unit,
@@ -171,53 +164,62 @@ private fun HomeContent(
     Column(modifier) {
         ServerSelector(
             servers = state.servers,
-            activeServer = requireNotNull(state.activeServer),
-            status = state.connectionStatus,
+            activeServer = state.activeServer,
+            statuses = state.connectionStatuses,
             onSelect = onSelectServer,
+            onReconnect = onReconnectServer,
+            onDelete = onRemoveServer,
+            onAdd = onAddServer,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         )
         Spacer(Modifier.height(16.dp))
-        HomeTabs(
-            selected = state.selectedTab,
-            onSelect = onSelectTab,
-            modifier = Modifier.padding(horizontal = 16.dp),
-        )
-        if (state.isLoading) {
-            LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
-        }
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 16.dp, top = 20.dp, end = 16.dp, bottom = 100.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            when (state.selectedTab) {
-                HomeTab.PROJECTS -> {
-                    item { SectionTitle("最近项目") }
-                    if (!state.isLoading && state.projects.isEmpty()) {
-                        item { EmptyContent("还没有项目记录", "新建会话时输入服务端项目路径") }
+        if (state.activeServer == null) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("请选择服务器")
+            }
+        } else {
+            HomeTabs(
+                selected = state.selectedTab,
+                onSelect = onSelectTab,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+            if (state.isLoading) {
+                LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
+            }
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 16.dp, top = 20.dp, end = 16.dp, bottom = 100.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                when (state.selectedTab) {
+                    HomeTab.PROJECTS -> {
+                        item { SectionTitle("最近项目") }
+                        if (!state.isLoading && state.projects.isEmpty()) {
+                            item { EmptyContent("还没有项目记录", "新建会话时输入服务端项目路径") }
+                        }
+                        items(state.projects, key = RecentProject::path) { project ->
+                            ProjectCard(project, onClick = { onOpenProject(project.path) })
+                        }
                     }
-                    items(state.projects, key = RecentProject::path) { project ->
-                        ProjectCard(project, onClick = { onOpenProject(project.path) })
-                    }
-                }
 
-                HomeTab.CONVERSATIONS -> {
-                    item { SectionTitle("最近会话") }
-                    if (!state.isLoading && state.threads.isEmpty()) {
-                        item { EmptyContent("还没有历史会话", "点击下方按钮开始第一个会话") }
-                    }
-                    item {
-                        Card(
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                            ),
-                        ) {
-                            state.threads.forEach { thread ->
-                                ThreadRow(
-                                    thread = thread,
-                                    showProjectPath = true,
-                                    onClick = { onOpenConversation(thread.id) },
-                                )
+                    HomeTab.CONVERSATIONS -> {
+                        item { SectionTitle("最近会话") }
+                        if (!state.isLoading && state.threads.isEmpty()) {
+                            item { EmptyContent("还没有历史会话", "点击下方按钮开始第一个会话") }
+                        }
+                        item {
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                                ),
+                            ) {
+                                state.threads.forEach { thread ->
+                                    ThreadRow(
+                                        thread = thread,
+                                        showProjectPath = true,
+                                        onClick = { onOpenConversation(thread.id) },
+                                    )
+                                }
                             }
                         }
                     }

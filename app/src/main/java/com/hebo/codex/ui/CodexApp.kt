@@ -16,15 +16,10 @@ import com.hebo.codex.ui.screens.project.ProjectScreen
 import com.hebo.codex.ui.screens.project.ProjectViewModel
 import com.hebo.codex.ui.screens.servers.AddServerScreen
 import com.hebo.codex.ui.screens.servers.AddServerViewModel
-import com.hebo.codex.ui.screens.servers.ServersScreen
-import com.hebo.codex.ui.screens.servers.ServersViewModel
 import kotlinx.serialization.Serializable
 
 @Serializable
 private data object HomeRoute
-
-@Serializable
-private data object ServersRoute
 
 @Serializable
 private data object AddServerRoute
@@ -45,21 +40,13 @@ fun CodexApp(
             val viewModel: HomeViewModel = viewModel(factory = HomeViewModel.factory(repository))
             HomeScreen(
                 viewModel = viewModel,
-                onManageServers = { navController.navigate(ServersRoute) },
+                onAddServer = { navController.navigate(AddServerRoute) },
                 onOpenProject = { serverId, cwd ->
                     navController.navigate(ProjectRoute(serverId, cwd))
                 },
                 onOpenConversation = { serverId, threadId ->
                     navController.navigate(ChatRoute(serverId, threadId))
                 },
-            )
-        }
-        composable<ServersRoute> {
-            val viewModel: ServersViewModel = viewModel(factory = ServersViewModel.factory(repository))
-            ServersScreen(
-                viewModel = viewModel,
-                onBack = navController::popBackStack,
-                onAddServer = { navController.navigate(AddServerRoute) },
             )
         }
         composable<AddServerRoute> {
