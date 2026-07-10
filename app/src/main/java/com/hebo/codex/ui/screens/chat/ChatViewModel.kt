@@ -7,6 +7,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.lifecycle.viewModelScope
 import com.hebo.codex.domain.ApprovalDecision
 import com.hebo.codex.domain.CodexRepository
+import com.hebo.codex.domain.ConnectionStatus
 import com.hebo.codex.domain.ConversationState
 import com.hebo.codex.domain.FeatureArea
 import com.hebo.codex.domain.FeatureEntry
@@ -21,6 +22,7 @@ import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.util.runSuspendCatching
 import com.hebo.codex.util.toUserFacingError
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -31,14 +33,30 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import java.util.UUID
+
+data class ChatDraft(
+    val message: String = "",
+    val attachments: List<DraftAttachment> = emptyList(),
+    val options: TurnOptions = TurnOptions(),
+)
+
+data class DraftAttachment(
+    val id: String,
+    val input: UserInputPart,
+    val previewUri: String? = null,
+)
 
 data class ChatUiState(
     val conversation: ConversationState? = null,
     val models: List<ModelOption> = emptyList(),
     val inputResources: List<FeatureEntry> = emptyList(),
     val goal: ThreadGoal? = null,
+    val draft: ChatDraft = ChatDraft(),
+    val connectionStatus: ConnectionStatus = ConnectionStatus.Disconnected,
     val isLoading: Boolean = true,
     val isLoadingResources: Boolean = false,
+    val isSendingDraft: Boolean = false,
     val screenError: UserFacingError? = null,
 )
 
@@ -55,15 +73,23 @@ class ChatViewModel(
     private val mutableEvents = Channel<ChatEvent>(Channel.BUFFERED)
     val state: StateFlow<ChatUiState> = mutableState
     val events = mutableEvents.receiveAsFlow()
+    private var draftInitialized = false
 
     init {
         viewModelScope.launch {
             try {
                 repository.openConversation(serverId, threadId).collectLatest { value ->
+                    val initialDraft = if (draftInitialized) {
+                        null
+                    } else {
+                        draftInitialized = true
+                        ChatDraft(options = value.defaultTurnOptions())
+                    }
                     mutableState.update {
                         it.copy(
                             conversation = value,
                             goal = if (value.goalLoaded) value.goal else it.goal,
+                            draft = initialDraft ?: it.draft,
                             isLoading = false,
                         )
                     }
@@ -81,17 +107,83 @@ class ChatViewModel(
             runSuspendCatching { repository.getGoal(serverId, threadId) }
                 .onSuccess { goal -> mutableState.update { it.copy(goal = goal) } }
         }
-    }
-
-    fun send(input: List<UserInputPart>, options: TurnOptions = TurnOptions()) {
         viewModelScope.launch {
-            runSuspendCatching { repository.sendMessage(serverId, threadId, input, options) }
-                .onFailure(::showError)
+            repository.connectionStatuses.collectLatest { statuses ->
+                mutableState.update {
+                    it.copy(connectionStatus = statuses[serverId] ?: ConnectionStatus.Disconnected)
+                }
+            }
         }
     }
 
-    fun send(message: String) {
-        send(listOf(UserInputPart.Text(message)))
+    fun updateDraftMessage(message: String) {
+        mutableState.update { it.copy(draft = it.draft.copy(message = message)) }
+    }
+
+    fun updateDraftOptions(options: TurnOptions) {
+        mutableState.update { it.copy(draft = it.draft.copy(options = options)) }
+    }
+
+    fun addDraftAttachment(input: UserInputPart, previewUri: String? = null) {
+        mutableState.update {
+            it.copy(
+                draft = it.draft.copy(
+                    attachments = it.draft.attachments + DraftAttachment(
+                        id = UUID.randomUUID().toString(),
+                        input = input,
+                        previewUri = previewUri,
+                    ),
+                ),
+            )
+        }
+    }
+
+    fun removeDraftAttachment(id: String) {
+        mutableState.update {
+            it.copy(draft = it.draft.copy(attachments = it.draft.attachments.filterNot { item -> item.id == id }))
+        }
+    }
+
+    fun appendToDraft(value: String) {
+        mutableState.update {
+            val separator = if (it.draft.message.isBlank()) "" else "\n\n"
+            it.copy(draft = it.draft.copy(message = it.draft.message + separator + value))
+        }
+    }
+
+    fun sendDraft() {
+        val current = mutableState.value
+        if (current.isSendingDraft || current.connectionStatus !is ConnectionStatus.Connected) return
+        val draft = current.draft
+        val input = buildList {
+            draft.message.takeIf(String::isNotBlank)?.let { add(UserInputPart.Text(it)) }
+            addAll(draft.attachments.map(DraftAttachment::input))
+        }
+        if (input.isEmpty()) return
+        mutableState.update { it.copy(isSendingDraft = true, screenError = null) }
+        viewModelScope.launch {
+            runSuspendCatching { repository.sendMessage(serverId, threadId, input, draft.options) }
+                .onSuccess {
+                    mutableState.update { state ->
+                        state.copy(
+                            draft = if (state.draft == draft) {
+                                ChatDraft(options = state.conversation.defaultTurnOptions())
+                            } else {
+                                state.draft
+                            },
+                            isSendingDraft = false,
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    mutableState.update { it.copy(isSendingDraft = false) }
+                    showError(error)
+                }
+        }
+    }
+
+    fun reportInputError(error: Throwable) {
+        mutableState.update { it.copy(screenError = error.toUserFacingError("无法添加输入")) }
     }
 
     fun interrupt() {
@@ -154,16 +246,26 @@ class ChatViewModel(
         if (mutableState.value.isLoadingResources) return
         viewModelScope.launch {
             mutableState.update { it.copy(isLoadingResources = true) }
-            val models = runSuspendCatching { repository.models(serverId) }
-            val skills = runSuspendCatching {
-                repository.featureCatalog(serverId, FeatureArea.SKILLS, conversation.cwd, threadId, forceRefresh)
+            val modelsDeferred = async { runSuspendCatching { repository.models(serverId) } }
+            val skillsDeferred = async {
+                runSuspendCatching {
+                    repository.featureCatalog(serverId, FeatureArea.SKILLS, conversation.cwd, threadId, forceRefresh)
+                }
             }
-            val apps = runSuspendCatching {
-                repository.featureCatalog(serverId, FeatureArea.APPS, conversation.cwd, threadId, forceRefresh)
+            val appsDeferred = async {
+                runSuspendCatching {
+                    repository.featureCatalog(serverId, FeatureArea.APPS, conversation.cwd, threadId, forceRefresh)
+                }
             }
-            val plugins = runSuspendCatching {
-                repository.featureCatalog(serverId, FeatureArea.PLUGINS, conversation.cwd, threadId, forceRefresh)
+            val pluginsDeferred = async {
+                runSuspendCatching {
+                    repository.featureCatalog(serverId, FeatureArea.PLUGINS, conversation.cwd, threadId, forceRefresh)
+                }
             }
+            val models = modelsDeferred.await()
+            val skills = skillsDeferred.await()
+            val apps = appsDeferred.await()
+            val plugins = pluginsDeferred.await()
             val failure = models.exceptionOrNull()
                 ?: skills.exceptionOrNull()
                 ?: apps.exceptionOrNull()
@@ -271,6 +373,14 @@ class ChatViewModel(
         }
     }
 }
+
+private fun ConversationState?.defaultTurnOptions(): TurnOptions = this?.let {
+    TurnOptions(
+        model = it.model,
+        serviceTier = it.serviceTier,
+        reasoningEffort = it.reasoningEffort,
+    )
+} ?: TurnOptions()
 
 internal fun availableInputResources(
     skills: List<FeatureEntry>,

@@ -20,10 +20,12 @@ class AppContainer(context: Context) {
         tokenCipher = TokenCipher(),
         json = json,
     )
+    val notifications = ConversationNotificationController(context)
 
     val repository = CodexRepository(
         serverStore = serverStore,
         clientFactory = AppServerClientFactory(json),
         applicationScope = applicationScope,
+        notifyConversation = notifications::notify,
     )
 }

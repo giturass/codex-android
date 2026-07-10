@@ -12,6 +12,7 @@ import com.hebo.codex.domain.ModelOption
 import com.hebo.codex.domain.RecentProject
 import com.hebo.codex.domain.ServerProfile
 import com.hebo.codex.domain.ThreadOptions
+import com.hebo.codex.domain.ThreadAttention
 import com.hebo.codex.domain.ThreadSummary
 import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.domain.groupRecentProjects
@@ -36,6 +37,7 @@ data class HomeUiState(
     val recentProjects: List<RecentProject> = emptyList(),
     val models: List<ModelOption> = emptyList(),
     val serverNotices: List<ConversationNotice> = emptyList(),
+    val threadAttention: Map<String, ThreadAttention> = emptyMap(),
     val searchTerm: String = "",
     val showArchived: Boolean = false,
     val nextCursor: String? = null,
@@ -71,8 +73,15 @@ class HomeViewModel(
                 repository.activeServerId,
                 repository.connectionStatuses,
                 repository.serverNotices,
-            ) { servers, activeServerId, connectionStatuses, notices ->
-                HomeDependencies(servers, activeServerId, connectionStatuses, notices[activeServerId].orEmpty())
+                repository.threadAttention,
+            ) { servers, activeServerId, connectionStatuses, notices, attention ->
+                HomeDependencies(
+                    servers,
+                    activeServerId,
+                    connectionStatuses,
+                    notices[activeServerId].orEmpty(),
+                    attention[activeServerId].orEmpty(),
+                )
             }.collect { value ->
                 mutableState.update {
                     it.copy(
@@ -80,6 +89,7 @@ class HomeViewModel(
                         activeServerId = value.activeServerId,
                         connectionStatuses = value.connectionStatuses,
                         serverNotices = value.notices,
+                        threadAttention = value.threadAttention,
                     )
                 }
             }
@@ -342,6 +352,7 @@ class HomeViewModel(
         val activeServerId: String?,
         val connectionStatuses: Map<String, ConnectionStatus>,
         val notices: List<ConversationNotice>,
+        val threadAttention: Map<String, ThreadAttention>,
     )
 
     companion object {

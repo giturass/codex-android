@@ -19,6 +19,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import androidx.compose.ui.unit.dp
 import com.hebo.codex.domain.CodexRepository
+import com.hebo.codex.ConversationTarget
 import com.hebo.codex.ui.components.CodexNavigationDrawer
 import com.hebo.codex.ui.screens.chat.ChatScreen
 import com.hebo.codex.ui.screens.chat.ChatViewModel
@@ -30,6 +31,8 @@ import com.hebo.codex.ui.screens.hub.ServerHubViewModel
 import com.hebo.codex.ui.screens.servers.AddServerScreen
 import com.hebo.codex.ui.screens.servers.AddServerViewModel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.serialization.Serializable
 
 private val PermanentDrawerThreshold = 840.dp
@@ -49,6 +52,7 @@ private data class ServerHubRoute(val serverId: String, val cwd: String? = null)
 @Composable
 fun CodexApp(
     repository: CodexRepository,
+    notificationTargets: Flow<ConversationTarget> = emptyFlow(),
     navController: NavHostController = rememberNavController(),
 ) {
     val homeViewModel: HomeViewModel = viewModel(factory = HomeViewModel.factory(repository))
@@ -84,6 +88,12 @@ fun CodexApp(
             }
         }
     }
+    LaunchedEffect(notificationTargets) {
+        notificationTargets.collect { target ->
+            homeViewModel.selectServer(target.serverId)
+            openConversation(target.serverId, target.threadId)
+        }
+    }
 
     BoxWithConstraints {
         val isPermanent = maxWidth >= PermanentDrawerThreshold
@@ -94,6 +104,7 @@ fun CodexApp(
                 connectionStatuses = homeState.connectionStatuses,
                 projects = homeState.projects,
                 threads = homeState.threads,
+                threadAttention = homeState.threadAttention,
                 searchTerm = homeState.searchTerm,
                 showArchived = homeState.showArchived,
                 isLoading = homeState.isLoading,

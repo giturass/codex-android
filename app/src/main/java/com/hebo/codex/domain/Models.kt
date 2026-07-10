@@ -52,6 +52,21 @@ enum class ThreadRuntimeStatus {
     SYSTEM_ERROR,
 }
 
+enum class ThreadAttention {
+    RUNNING,
+    NEEDS_INPUT,
+    READY,
+    FAILED,
+}
+
+data class ConversationNotification(
+    val serverId: String,
+    val threadId: String,
+    val title: String,
+    val message: String,
+    val attention: ThreadAttention,
+)
+
 enum class ThreadSortKey(val wireValue: String) {
     CREATED_AT("created_at"),
     UPDATED_AT("updated_at"),
@@ -222,6 +237,7 @@ sealed interface PendingServerRequest {
         override val turnId: String,
         val questions: List<UserQuestion>,
         val autoResolutionMillis: Long?,
+        val receivedAtMillis: Long,
     ) : PendingServerRequest
 
     data class McpElicitation(

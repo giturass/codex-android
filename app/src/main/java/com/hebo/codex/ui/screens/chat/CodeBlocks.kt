@@ -1,19 +1,34 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package com.hebo.codex.ui.screens.chat
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
@@ -22,6 +37,8 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.hebo.codex.domain.ChangedFile
 import com.hebo.codex.domain.FileChangeKind
 import com.hebo.codex.ui.theme.statusColors
@@ -45,13 +62,13 @@ internal fun ShellCommandBlock(command: String) {
             buildShellHighlightedText(command, darkTheme)
         }
     }
-    CodeTextSurface(highlightedCommand)
+    CodeTextSurface(highlightedCommand, title = "完整命令")
 }
 
 @Composable
 internal fun TerminalOutputBlock(output: String) {
     val text = remember(output) { AnnotatedString(output) }
-    CodeTextSurface(text)
+    CodeTextSurface(text, title = "完整终端输出", previewFromEnd = true)
 }
 
 @Composable
@@ -76,26 +93,107 @@ internal fun FileDiffBlock(change: ChangedFile) {
             metadataColor = metadataColor,
         )
     }
-    CodeTextSurface(text)
+    CodeTextSurface(text, title = "完整文件差异")
 }
 
 @Composable
-private fun CodeTextSurface(text: AnnotatedString) {
+private fun CodeTextSurface(
+    text: AnnotatedString,
+    title: String,
+    previewFromEnd: Boolean = false,
+) {
+    var showFullText by remember(text) { mutableStateOf(false) }
+    val lineCount = remember(text) { text.text.count { it == '\n' } + 1 }
+    val isTruncated = lineCount > INLINE_CODE_LINE_LIMIT
+    val visibleText = remember(text, previewFromEnd, isTruncated) {
+        if (isTruncated) text.previewLines(INLINE_CODE_LINE_LIMIT, previewFromEnd) else text
+    }
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         contentColor = MaterialTheme.colorScheme.onSurface,
     ) {
-        SelectionContainer {
-            Text(
-                text = text,
-                modifier = Modifier.horizontalScroll(rememberScrollState()).padding(12.dp),
-                fontFamily = FontFamily.Monospace,
-                style = MaterialTheme.typography.bodySmall,
-                softWrap = false,
-            )
+        Column {
+            SelectionContainer {
+                Text(
+                    text = visibleText,
+                    modifier = Modifier.horizontalScroll(rememberScrollState()).padding(12.dp),
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodySmall,
+                    softWrap = false,
+                )
+            }
+            if (isTruncated) {
+                TextButton(onClick = { showFullText = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("查看全部 $lineCount 行")
+                }
+            }
         }
+    }
+    if (showFullText) {
+        FullCodeDialog(title = title, text = text, onDismiss = { showFullText = false })
+    }
+}
+
+@Composable
+private fun FullCodeDialog(title: String, text: AnnotatedString, onDismiss: () -> Unit) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            Column(Modifier.fillMaxSize().navigationBarsPadding()) {
+                TopAppBar(
+                    title = { Text(title) },
+                    navigationIcon = {
+                        IconButton(onClick = onDismiss) {
+                            Icon(Icons.Rounded.Close, contentDescription = "关闭")
+                        }
+                    },
+                )
+                Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                    SelectionContainer {
+                        Text(
+                            text = text,
+                            modifier = Modifier.horizontalScroll(rememberScrollState()).padding(16.dp),
+                            fontFamily = FontFamily.Monospace,
+                            style = MaterialTheme.typography.bodySmall,
+                            softWrap = false,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun AnnotatedString.previewLines(maxLines: Int, fromEnd: Boolean): AnnotatedString {
+    if (!fromEnd) {
+        var newlineCount = 0
+        val end = text.indexOfFirst { character ->
+            if (character == '\n') newlineCount += 1
+            newlineCount == maxLines
+        }.let { if (it == -1) length else it }
+        return buildAnnotatedString {
+            append(subSequence(0, end))
+            append("\n…")
+        }
+    }
+    var newlineCount = 0
+    var start = 0
+    for (index in text.indices.reversed()) {
+        if (text[index] == '\n') {
+            newlineCount += 1
+            if (newlineCount == maxLines) {
+                start = index + 1
+                break
+            }
+        }
+    }
+    return buildAnnotatedString {
+        append("…\n")
+        append(this@previewLines.subSequence(start, length))
     }
 }
 
@@ -174,3 +272,5 @@ internal enum class DiffLineKind {
     METADATA,
     CONTEXT,
 }
+
+private const val INLINE_CODE_LINE_LIMIT = 80

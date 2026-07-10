@@ -65,6 +65,7 @@ import com.hebo.codex.domain.ConnectionStatus
 import com.hebo.codex.domain.RecentProject
 import com.hebo.codex.domain.ServerProfile
 import com.hebo.codex.domain.ThreadRuntimeStatus
+import com.hebo.codex.domain.ThreadAttention
 import com.hebo.codex.domain.ThreadSummary
 import com.hebo.codex.ui.theme.statusColors
 
@@ -75,6 +76,7 @@ fun CodexNavigationDrawer(
     connectionStatuses: Map<String, ConnectionStatus>,
     projects: List<RecentProject>,
     threads: List<ThreadSummary>,
+    threadAttention: Map<String, ThreadAttention>,
     searchTerm: String,
     showArchived: Boolean,
     isLoading: Boolean,
@@ -108,6 +110,7 @@ fun CodexNavigationDrawer(
             connectionStatuses = connectionStatuses,
             projects = projects,
             threads = threads,
+            threadAttention = threadAttention,
             searchTerm = searchTerm,
             showArchived = showArchived,
             isLoading = isLoading,
@@ -155,6 +158,7 @@ private fun ColumnScope.DrawerContent(
     connectionStatuses: Map<String, ConnectionStatus>,
     projects: List<RecentProject>,
     threads: List<ThreadSummary>,
+    threadAttention: Map<String, ThreadAttention>,
     searchTerm: String,
     showArchived: Boolean,
     isLoading: Boolean,
@@ -284,6 +288,7 @@ private fun ColumnScope.DrawerContent(
                     items(threads, key = ThreadSummary::id) { thread ->
                         DrawerThreadItem(
                             thread = thread,
+                            attention = threadAttention[thread.id],
                             selected = thread.id == activeThreadId,
                             showProject = true,
                             onClick = { onOpenConversation(thread.id) },
@@ -322,6 +327,7 @@ private fun ColumnScope.DrawerContent(
                                 project.threads.forEach { thread ->
                                     DrawerThreadItem(
                                         thread = thread,
+                                        attention = threadAttention[thread.id],
                                         selected = thread.id == activeThreadId,
                                         showProject = false,
                                         onClick = { onOpenConversation(thread.id) },
@@ -453,11 +459,31 @@ private fun ProjectHeader(
 @Composable
 private fun DrawerThreadItem(
     thread: ThreadSummary,
+    attention: ThreadAttention?,
     selected: Boolean,
     showProject: Boolean,
     onClick: () -> Unit,
     onMenu: () -> Unit,
 ) {
+    val effectiveAttention = attention ?: if (thread.status == ThreadRuntimeStatus.ACTIVE) {
+        ThreadAttention.RUNNING
+    } else {
+        null
+    }
+    val attentionLabel = when (effectiveAttention) {
+        ThreadAttention.RUNNING -> "运行中"
+        ThreadAttention.NEEDS_INPUT -> "待处理"
+        ThreadAttention.READY -> "可审阅"
+        ThreadAttention.FAILED -> "失败"
+        null -> null
+    }
+    val attentionColor = when (effectiveAttention) {
+        ThreadAttention.RUNNING -> MaterialTheme.statusColors.success
+        ThreadAttention.NEEDS_INPUT -> MaterialTheme.statusColors.warning
+        ThreadAttention.READY -> MaterialTheme.colorScheme.primary
+        ThreadAttention.FAILED -> MaterialTheme.colorScheme.error
+        null -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -482,11 +508,11 @@ private fun DrawerThreadItem(
                         overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    if (thread.status == ThreadRuntimeStatus.ACTIVE) {
+                    if (attentionLabel != null) {
                         Text(
-                            "运行中",
+                            attentionLabel,
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.statusColors.success,
+                            color = attentionColor,
                         )
                     }
                     Text(

@@ -49,6 +49,7 @@ class CodexRepository(
     private val serverStore: ServerStore,
     private val clientFactory: AppServerClientFactory,
     private val applicationScope: CoroutineScope,
+    private val notifyConversation: (ConversationNotification) -> Unit = {},
 ) {
     private val connectionMutex = Mutex()
     private val conversationMutex = Mutex()
@@ -60,6 +61,7 @@ class CodexRepository(
     private val mutableThreadRevisions = MutableStateFlow<Map<String, Long>>(emptyMap())
     private val mutableFeatureRevisions = MutableStateFlow<Map<String, Long>>(emptyMap())
     private val mutableServerNotices = MutableStateFlow<Map<String, List<ConversationNotice>>>(emptyMap())
+    private val mutableThreadAttention = MutableStateFlow<Map<String, Map<String, ThreadAttention>>>(emptyMap())
 
     val serverSettings: StateFlow<ServerSettings> = serverStore.settings.stateIn(
         scope = applicationScope,
@@ -76,6 +78,7 @@ class CodexRepository(
     val threadRevisions: StateFlow<Map<String, Long>> = mutableThreadRevisions
     val featureRevisions: StateFlow<Map<String, Long>> = mutableFeatureRevisions
     val serverNotices: StateFlow<Map<String, List<ConversationNotice>>> = mutableServerNotices
+    val threadAttention: StateFlow<Map<String, Map<String, ThreadAttention>>> = mutableThreadAttention
 
     suspend fun addServer(name: String, endpoint: String, token: String): ServerProfile {
         val normalizedName = name.trim()
@@ -166,14 +169,17 @@ class CodexRepository(
 
     suspend fun openConversation(serverId: String, threadId: String): StateFlow<ConversationState> {
         val key = ConversationKey(serverId, threadId)
-        conversations[key]?.let { return it }
+        conversations[key]?.let {
+            markThreadViewed(serverId, threadId)
+            return it
+        }
         return conversationMutex.withLock {
             conversations[key]?.let { return@withLock it }
             val snapshot = ProtocolMapper.threadSnapshot(api(serverId).resumeThread(threadId))
             val state = MutableStateFlow(snapshot.toConversationState(awaitServer(serverId)))
             conversations[key] = state
             state
-        }
+        }.also { markThreadViewed(serverId, threadId) }
     }
 
     suspend fun sendMessage(
@@ -205,6 +211,7 @@ class CodexRepository(
                 errorMessage = null,
             )
         }
+        setThreadAttention(serverId, threadId, ThreadAttention.RUNNING)
 
         try {
             val result = if (activeTurnId == null) {
@@ -238,6 +245,7 @@ class CodexRepository(
                     errorMessage = error.toUserFacingError("发送消息失败"),
                 )
             }
+            setThreadAttention(serverId, threadId, ThreadAttention.FAILED)
             throw error
         }
     }
@@ -378,6 +386,9 @@ class CodexRepository(
 
     fun clearConversationError(serverId: String, threadId: String) {
         conversations[ConversationKey(serverId, threadId)]?.updateState { it.copy(errorMessage = null) }
+        if (mutableThreadAttention.value[serverId]?.get(threadId) == ThreadAttention.FAILED) {
+            setThreadAttention(serverId, threadId, null)
+        }
     }
 
     fun respondToApproval(
@@ -719,6 +730,7 @@ class CodexRepository(
                     )
                 },
                 autoResolutionMillis = request.params.optionalLong("autoResolutionMs"),
+                receivedAtMillis = System.currentTimeMillis(),
             )
 
             "mcpServer/elicitation/request" -> PendingServerRequest.McpElicitation(
@@ -749,6 +761,16 @@ class CodexRepository(
         conversation.updateState { current ->
             current.copy(pendingRequests = current.pendingRequests + pending)
         }
+        setThreadAttention(serverId, threadId, ThreadAttention.NEEDS_INPUT)
+        notifyConversation(
+            ConversationNotification(
+                serverId = serverId,
+                threadId = threadId,
+                title = conversation.value.title,
+                message = pending.notificationMessage(),
+                attention = ThreadAttention.NEEDS_INPUT,
+            ),
+        )
     }
 
     private fun handleNotification(serverId: String, method: String, params: JsonObject) {
@@ -789,6 +811,13 @@ class CodexRepository(
             "thread/status/changed" -> state?.updateState { current ->
                 val status = params.requiredObject("status").requiredString("type")
                 current.copy(isRunning = status == "active")
+            }.also {
+                val status = params.requiredObject("status").requiredString("type")
+                when (status) {
+                    "active" -> setThreadAttention(serverId, threadId, ThreadAttention.RUNNING)
+                    "systemError" -> setThreadAttention(serverId, threadId, ThreadAttention.FAILED)
+                    else -> Unit
+                }
             }
 
             "thread/name/updated" -> state?.updateState { current ->
@@ -858,6 +887,7 @@ class CodexRepository(
                         errorMessage = null,
                     )
                 }
+                setThreadAttention(serverId, threadId, ThreadAttention.RUNNING)
             }
 
             "turn/completed" -> {
@@ -873,6 +903,17 @@ class CodexRepository(
                         errorMessage = errorMessage,
                     )
                 }
+                val attention = if (errorMessage == null) ThreadAttention.READY else ThreadAttention.FAILED
+                setThreadAttention(serverId, threadId, attention)
+                notifyConversation(
+                    ConversationNotification(
+                        serverId = serverId,
+                        threadId = threadId,
+                        title = state.value.title,
+                        message = if (errorMessage == null) "任务已完成，可以查看结果" else errorMessage.summary,
+                        attention = attention,
+                    ),
+                )
                 removePendingRequests(serverId, threadId)
                 bumpThreadRevision(serverId)
             }
@@ -995,6 +1036,14 @@ class CodexRepository(
                 state?.updateState { current ->
                     current.copy(pendingRequests = current.pendingRequests.filterNot { it.requestKey == key })
                 }
+                state?.value?.let { current ->
+                    setThreadAttention(
+                        serverId,
+                        threadId,
+                        if (current.pendingRequests.isNotEmpty()) ThreadAttention.NEEDS_INPUT
+                        else if (current.isRunning) ThreadAttention.RUNNING else null,
+                    )
+                }
             }
         }
     }
@@ -1013,6 +1062,7 @@ class CodexRepository(
         conversations.entries
             .filter { it.key.serverId == serverId }
             .forEach { it.value.updateState { state -> state.copy(pendingRequests = emptyList()) } }
+        mutableThreadAttention.update { it - serverId }
     }
 
     private fun requireConversation(serverId: String, threadId: String): MutableStateFlow<ConversationState> =
@@ -1111,9 +1161,17 @@ class CodexRepository(
         val connection = connections[serverId] ?: error("服务器未连接")
         connection.respond(route.id, result)
         pendingRequestRoutes.remove(key)
-        conversations[ConversationKey(serverId, threadId)]?.updateState { current ->
+        val conversation = conversations[ConversationKey(serverId, threadId)] ?: return
+        conversation.updateState { current ->
             current.copy(pendingRequests = current.pendingRequests.filterNot { it.requestKey == key })
         }
+        val current = conversation.value
+        setThreadAttention(
+            serverId,
+            threadId,
+            if (current.pendingRequests.isNotEmpty()) ThreadAttention.NEEDS_INPUT
+            else if (current.isRunning) ThreadAttention.RUNNING else null,
+        )
     }
 
     private fun UserInputPart.toMessagePart(): UserMessagePart = when (this) {
@@ -1168,6 +1226,34 @@ class CodexRepository(
                 ConversationNotice(UUID.randomUUID().toString(), level, message)
             current + (serverId to notices.takeLast(MAX_NOTICES))
         }
+    }
+
+    private fun setThreadAttention(serverId: String, threadId: String, attention: ThreadAttention?) {
+        mutableThreadAttention.update { current ->
+            val serverAttention = current[serverId].orEmpty()
+            val updated = if (attention == null) serverAttention - threadId
+            else serverAttention + (threadId to attention)
+            if (updated.isEmpty()) current - serverId else current + (serverId to updated)
+        }
+    }
+
+    private fun markThreadViewed(serverId: String, threadId: String) {
+        val attention = mutableThreadAttention.value[serverId]?.get(threadId)
+        if (attention == ThreadAttention.READY || attention == ThreadAttention.FAILED) {
+            setThreadAttention(serverId, threadId, null)
+        }
+    }
+
+    private fun PendingServerRequest.notificationMessage(): String = when (this) {
+        is PendingServerRequest.Approval -> if (type == ApprovalType.COMMAND_EXECUTION) {
+            "命令等待确认"
+        } else {
+            "文件修改等待确认"
+        }
+
+        is PendingServerRequest.Questions -> "Codex 需要你的回答"
+        is PendingServerRequest.McpElicitation -> "$serverName 请求确认"
+        is PendingServerRequest.Permissions -> "权限请求等待处理"
     }
 
     private data class ConversationKey(val serverId: String, val threadId: String)
