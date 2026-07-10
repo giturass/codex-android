@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -474,7 +475,10 @@ private fun ChatComposer(
     onStop: () -> Unit,
 ) {
     var message by rememberSaveable { mutableStateOf("") }
-    Surface(shadowElevation = 8.dp) {
+    Surface(
+        modifier = Modifier.imePadding(),
+        shadowElevation = 8.dp,
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.Bottom,
