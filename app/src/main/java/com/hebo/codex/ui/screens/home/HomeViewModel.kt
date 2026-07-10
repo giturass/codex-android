@@ -17,7 +17,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -76,7 +75,7 @@ class HomeViewModel(
             }
         }
         viewModelScope.launch {
-            repository.activeServerId.distinctUntilChanged().collect { serverId ->
+            repository.activeServerId.collect { serverId ->
                 if (serverId == null) {
                     mutableState.update { it.copy(threads = emptyList(), projects = emptyList()) }
                 } else {

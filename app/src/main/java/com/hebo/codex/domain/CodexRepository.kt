@@ -54,10 +54,10 @@ class CodexRepository(
         initialValue = ServerSettings(servers = emptyList(), activeServerId = null),
     )
     val servers: StateFlow<List<ServerProfile>> = serverSettings
-        .map(ServerSettings::servers)
+        .map { it.servers }
         .stateIn(applicationScope, SharingStarted.Eagerly, emptyList())
     val activeServerId: StateFlow<String?> = serverSettings
-        .map(ServerSettings::activeServerId)
+        .map { it.activeServerId }
         .stateIn(applicationScope, SharingStarted.Eagerly, null)
     val connectionStatuses: StateFlow<Map<String, ConnectionStatus>> = mutableConnectionStatuses
 
