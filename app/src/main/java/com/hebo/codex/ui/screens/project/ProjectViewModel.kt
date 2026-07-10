@@ -21,7 +21,9 @@ data class ProjectUiState(
     val projectName: String,
     val cwd: String,
     val threads: List<ThreadSummary> = emptyList(),
+    val nextCursor: String? = null,
     val isLoading: Boolean = true,
+    val isLoadingMore: Boolean = false,
     val isCreatingConversation: Boolean = false,
     val errorMessage: String? = null,
 )
@@ -50,10 +52,32 @@ class ProjectViewModel(
         refreshJob?.cancel()
         refreshJob = viewModelScope.launch {
             mutableState.update { it.copy(isLoading = true, errorMessage = null) }
-            runSuspendCatching { repository.recentThreads(serverId, mutableState.value.cwd) }
-                .onSuccess { threads -> mutableState.update { it.copy(threads = threads) } }
+            runSuspendCatching { repository.threadPage(serverId, cwd = mutableState.value.cwd) }
+                .onSuccess { page ->
+                    mutableState.update { it.copy(threads = page.data, nextCursor = page.nextCursor) }
+                }
                 .onFailure(::showError)
             mutableState.update { it.copy(isLoading = false) }
+        }
+    }
+
+    fun loadMore() {
+        val current = mutableState.value
+        val cursor = current.nextCursor ?: return
+        if (current.isLoading || current.isLoadingMore) return
+        viewModelScope.launch {
+            mutableState.update { it.copy(isLoadingMore = true) }
+            runSuspendCatching { repository.threadPage(serverId, cursor = cursor, cwd = current.cwd) }
+                .onSuccess { page ->
+                    mutableState.update {
+                        it.copy(
+                            threads = (it.threads + page.data).distinctBy(ThreadSummary::id),
+                            nextCursor = page.nextCursor,
+                        )
+                    }
+                }
+                .onFailure(::showError)
+            mutableState.update { it.copy(isLoadingMore = false) }
         }
     }
 

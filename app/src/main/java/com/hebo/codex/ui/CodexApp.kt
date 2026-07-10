@@ -12,6 +12,8 @@ import com.hebo.codex.ui.screens.chat.ChatScreen
 import com.hebo.codex.ui.screens.chat.ChatViewModel
 import com.hebo.codex.ui.screens.home.HomeScreen
 import com.hebo.codex.ui.screens.home.HomeViewModel
+import com.hebo.codex.ui.screens.hub.ServerHubScreen
+import com.hebo.codex.ui.screens.hub.ServerHubViewModel
 import com.hebo.codex.ui.screens.project.ProjectScreen
 import com.hebo.codex.ui.screens.project.ProjectViewModel
 import com.hebo.codex.ui.screens.servers.AddServerScreen
@@ -30,6 +32,9 @@ private data class ProjectRoute(val serverId: String, val cwd: String)
 @Serializable
 private data class ChatRoute(val serverId: String, val threadId: String)
 
+@Serializable
+private data class ServerHubRoute(val serverId: String, val cwd: String? = null)
+
 @Composable
 fun CodexApp(
     repository: CodexRepository,
@@ -46,6 +51,9 @@ fun CodexApp(
                 },
                 onOpenConversation = { serverId, threadId ->
                     navController.navigate(ChatRoute(serverId, threadId))
+                },
+                onOpenServerHub = { serverId ->
+                    navController.navigate(ServerHubRoute(serverId))
                 },
             )
         }
@@ -65,6 +73,9 @@ fun CodexApp(
                 onOpenConversation = { threadId ->
                     navController.navigate(ChatRoute(route.serverId, threadId))
                 },
+                onOpenServerHub = {
+                    navController.navigate(ServerHubRoute(route.serverId, route.cwd))
+                },
             )
         }
         composable<ChatRoute> { entry ->
@@ -73,7 +84,21 @@ fun CodexApp(
                 key = "chat:${route.serverId}:${route.threadId}",
                 factory = ChatViewModel.factory(repository, route.serverId, route.threadId),
             )
-            ChatScreen(viewModel = viewModel, onBack = navController::popBackStack)
+            ChatScreen(
+                viewModel = viewModel,
+                onBack = navController::popBackStack,
+                onOpenConversation = { threadId ->
+                    navController.navigate(ChatRoute(route.serverId, threadId))
+                },
+            )
+        }
+        composable<ServerHubRoute> { entry ->
+            val route = entry.toRoute<ServerHubRoute>()
+            val viewModel: ServerHubViewModel = viewModel(
+                key = "hub:${route.serverId}:${route.cwd.orEmpty()}",
+                factory = ServerHubViewModel.factory(repository, route.serverId, route.cwd),
+            )
+            ServerHubScreen(viewModel = viewModel, onBack = navController::popBackStack)
         }
     }
 }

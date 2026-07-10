@@ -16,9 +16,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -27,6 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -49,6 +51,7 @@ fun ProjectScreen(
     viewModel: ProjectViewModel,
     onBack: () -> Unit,
     onOpenConversation: (threadId: String) -> Unit,
+    onOpenServerHub: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -89,10 +92,13 @@ fun ProjectScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Rounded.ArrowBack, contentDescription = "返回")
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
                     }
                 },
                 actions = {
+                    IconButton(onClick = onOpenServerHub) {
+                        Icon(Icons.Rounded.Settings, contentDescription = "服务器能力")
+                    }
                     IconButton(onClick = viewModel::refresh) {
                         Icon(Icons.Rounded.Refresh, contentDescription = "刷新")
                     }
@@ -163,6 +169,18 @@ fun ProjectScreen(
                         state.threads.forEach { thread ->
                             ThreadRow(thread = thread, onClick = { onOpenConversation(thread.id) })
                         }
+                    }
+                }
+            }
+            if (state.nextCursor != null) {
+                item {
+                    OutlinedButton(
+                        onClick = viewModel::loadMore,
+                        enabled = !state.isLoadingMore,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        if (state.isLoadingMore) CircularProgressIndicator(strokeWidth = 2.dp)
+                        else Text("加载更多")
                     }
                 }
             }

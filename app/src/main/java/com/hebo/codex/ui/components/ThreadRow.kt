@@ -7,8 +7,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,6 +27,7 @@ fun ThreadRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     showProjectPath: Boolean = false,
+    onMenu: (() -> Unit)? = null,
 ) {
     Column(modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Row(
@@ -72,7 +75,13 @@ fun ThreadRow(
                     )
                 }
             }
-            Icon(Icons.Rounded.ChevronRight, contentDescription = "继续会话")
+            if (onMenu == null) {
+                Icon(Icons.Rounded.ChevronRight, contentDescription = "继续会话")
+            } else {
+                IconButton(onClick = onMenu) {
+                    Icon(Icons.Rounded.MoreVert, contentDescription = "会话操作")
+                }
+            }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
     }

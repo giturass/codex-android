@@ -71,7 +71,7 @@ class AppServerConnection(
         withTimeout(CONNECT_TIMEOUT_MILLIS) { ready.await() }
     }
 
-    suspend fun request(method: String, params: JsonObject): JsonElement {
+    suspend fun request(method: String, params: JsonObject? = null): JsonElement {
         ready.await()
         var attempt = 0
         while (true) {
@@ -149,7 +149,7 @@ class AppServerConnection(
         ready.complete(Unit)
     }
 
-    private suspend fun requestOnce(method: String, params: JsonObject): JsonElement {
+    private suspend fun requestOnce(method: String, params: JsonObject?): JsonElement {
         val id = requestIds.getAndIncrement()
         val response = CompletableDeferred<JsonElement>()
         pendingRequests[id] = response
@@ -158,7 +158,7 @@ class AppServerConnection(
                 buildJsonObject {
                     put("method", method)
                     put("id", id)
-                    put("params", params)
+                    if (params != null) put("params", params)
                 },
             )
             return withTimeout(REQUEST_TIMEOUT_MILLIS) { response.await() }

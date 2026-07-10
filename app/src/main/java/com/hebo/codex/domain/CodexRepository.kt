@@ -9,6 +9,10 @@ import com.hebo.codex.data.remote.ProtocolException
 import com.hebo.codex.data.remote.ProtocolMapper
 import com.hebo.codex.data.remote.RpcException
 import com.hebo.codex.data.remote.ServerEvent
+import com.hebo.codex.data.remote.StableFeatureApi
+import com.hebo.codex.data.remote.StableRpcMethod
+import com.hebo.codex.data.remote.optionalBoolean
+import com.hebo.codex.data.remote.optionalLong
 import com.hebo.codex.data.remote.optionalString
 import com.hebo.codex.data.remote.requiredArray
 import com.hebo.codex.data.remote.requiredObject
@@ -29,8 +33,13 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -45,8 +54,11 @@ class CodexRepository(
     private val connections = ConcurrentHashMap<String, AppServerConnection>()
     private val connectionObservers = mutableMapOf<String, List<Job>>()
     private val conversations = ConcurrentHashMap<ConversationKey, MutableStateFlow<ConversationState>>()
-    private val approvalRequests = ConcurrentHashMap<String, ApprovalRequest>()
+    private val pendingRequestRoutes = ConcurrentHashMap<String, PendingRequestRoute>()
     private val mutableConnectionStatuses = MutableStateFlow<Map<String, ConnectionStatus>>(emptyMap())
+    private val mutableThreadRevisions = MutableStateFlow<Map<String, Long>>(emptyMap())
+    private val mutableFeatureRevisions = MutableStateFlow<Map<String, Long>>(emptyMap())
+    private val mutableServerNotices = MutableStateFlow<Map<String, List<ConversationNotice>>>(emptyMap())
 
     val serverSettings: StateFlow<ServerSettings> = serverStore.settings.stateIn(
         scope = applicationScope,
@@ -60,6 +72,9 @@ class CodexRepository(
         .map { it.activeServerId }
         .stateIn(applicationScope, SharingStarted.Eagerly, null)
     val connectionStatuses: StateFlow<Map<String, ConnectionStatus>> = mutableConnectionStatuses
+    val threadRevisions: StateFlow<Map<String, Long>> = mutableThreadRevisions
+    val featureRevisions: StateFlow<Map<String, Long>> = mutableFeatureRevisions
+    val serverNotices: StateFlow<Map<String, List<ConversationNotice>>> = mutableServerNotices
 
     suspend fun addServer(name: String, endpoint: String, token: String): ServerProfile {
         val normalizedName = name.trim()
@@ -93,7 +108,7 @@ class CodexRepository(
         connectionMutex.withLock {
             connectionObservers.remove(serverId)?.forEach { it.cancel() }
             connections.remove(serverId)?.close()
-            clearServerApprovals(serverId)
+            clearServerPendingRequests(serverId)
         }
         mutableConnectionStatuses.updateValue(serverId, ConnectionStatus.Disconnected)
         conversations.keys.filter { it.serverId == serverId }.forEach { conversations.remove(it) }
@@ -104,13 +119,44 @@ class CodexRepository(
         api(serverId)
     }
 
-    suspend fun recentThreads(serverId: String, cwd: String? = null): List<ThreadSummary> =
-        api(serverId).listRecentThreads(cwd).map(ProtocolMapper::threadSummary)
+    suspend fun threadPage(
+        serverId: String,
+        cursor: String? = null,
+        cwd: String? = null,
+        archived: Boolean = false,
+        searchTerm: String? = null,
+        sortKey: ThreadSortKey = ThreadSortKey.RECENCY_AT,
+        sortDirection: SortDirection = SortDirection.DESC,
+        modelProviders: List<String> = emptyList(),
+        sourceKinds: Set<ThreadSourceKind> = emptySet(),
+    ): ThreadPage {
+        val response = api(serverId).listThreads(
+            cursor = cursor,
+            cwd = cwd,
+            archived = archived,
+            searchTerm = searchTerm,
+            sortKey = sortKey,
+            sortDirection = sortDirection,
+            modelProviders = modelProviders,
+            sourceKinds = sourceKinds,
+        )
+        return ThreadPage(
+            data = response.requiredArray("data").map { ProtocolMapper.threadSummary(it.jsonObject) },
+            nextCursor = response.optionalString("nextCursor"),
+        )
+    }
 
-    suspend fun startConversation(serverId: String, cwd: String): String {
+    suspend fun recentThreads(serverId: String, cwd: String? = null): List<ThreadSummary> =
+        threadPage(serverId = serverId, cwd = cwd).data
+
+    suspend fun startConversation(
+        serverId: String,
+        cwd: String,
+        options: ThreadOptions = ThreadOptions(),
+    ): String {
         val normalizedCwd = cwd.trim()
         require(normalizedCwd.isNotEmpty()) { "请输入服务端项目路径" }
-        val snapshot = ProtocolMapper.threadSnapshot(api(serverId).startThread(normalizedCwd))
+        val snapshot = ProtocolMapper.threadSnapshot(api(serverId).startThread(normalizedCwd, options))
         val profile = awaitServer(serverId)
         val state = snapshot.toConversationState(profile)
         conversations[ConversationKey(serverId, snapshot.summary.id)] = MutableStateFlow(state)
@@ -129,22 +175,29 @@ class CodexRepository(
         }
     }
 
-    suspend fun sendMessage(serverId: String, threadId: String, message: String) {
-        val text = message.trim()
-        require(text.isNotEmpty()) { "消息不能为空" }
+    suspend fun sendMessage(
+        serverId: String,
+        threadId: String,
+        input: List<UserInputPart>,
+        options: TurnOptions = TurnOptions(),
+    ) {
+        require(input.isNotEmpty()) { "消息内容不能为空" }
+        val text = input.filterIsInstance<UserInputPart.Text>().joinToString("\n") { it.text }.trim()
+        require(text.isNotEmpty() || input.any { it !is UserInputPart.Text }) { "消息内容不能为空" }
         val state = requireConversation(serverId, threadId)
-        check(!state.value.isRunning) { "当前任务仍在运行" }
+        val activeTurnId = state.value.activeTurnId
         val clientId = UUID.randomUUID().toString()
         val localItemId = "local:$clientId"
+        val displayText = input.joinToString("\n") { it.displayText() }
         state.updateState { current ->
             current.copy(
-                title = if (current.title == "新会话") text.lineSequence().first().take(72) else current.title,
+                title = if (current.title == "新会话") displayText.lineSequence().first().take(72) else current.title,
                 isRunning = true,
                 items = current.items + ConversationItem.UserMessage(
                     id = localItemId,
-                    turnId = "pending",
+                    turnId = activeTurnId ?: "pending",
                     clientId = clientId,
-                    text = text,
+                    text = displayText,
                     isPending = true,
                 ),
                 errorMessage = null,
@@ -152,8 +205,16 @@ class CodexRepository(
         }
 
         try {
-            val result = api(serverId).startTurn(threadId, clientId, text)
-            val turnId = result.requiredObject("turn").requiredString("id")
+            val result = if (activeTurnId == null) {
+                api(serverId).startTurn(threadId, clientId, input, options)
+            } else {
+                api(serverId).steerTurn(threadId, activeTurnId, clientId, input)
+            }
+            val turnId = if (activeTurnId == null) {
+                result.requiredObject("turn").requiredString("id")
+            } else {
+                result.requiredString("turnId")
+            }
             state.updateState { current ->
                 current.copy(
                     items = current.items.map { item ->
@@ -179,10 +240,138 @@ class CodexRepository(
         }
     }
 
+    suspend fun sendMessage(serverId: String, threadId: String, message: String) =
+        sendMessage(serverId, threadId, listOf(UserInputPart.Text(message)))
+
     suspend fun interrupt(serverId: String, threadId: String) {
         val state = requireConversation(serverId, threadId)
         val turnId = state.value.activeTurnId ?: return
         api(serverId).interruptTurn(threadId, turnId)
+    }
+
+    suspend fun forkConversation(serverId: String, threadId: String, lastTurnId: String? = null): String {
+        val snapshot = ProtocolMapper.threadSnapshot(api(serverId).forkThread(threadId, lastTurnId))
+        conversations[ConversationKey(serverId, snapshot.summary.id)] =
+            MutableStateFlow(snapshot.toConversationState(awaitServer(serverId)))
+        bumpThreadRevision(serverId)
+        return snapshot.summary.id
+    }
+
+    suspend fun renameConversation(serverId: String, threadId: String, name: String) {
+        val normalized = name.trim()
+        require(normalized.isNotEmpty()) { "会话名称不能为空" }
+        api(serverId).request(
+            StableRpcMethod.THREAD_NAME_SET,
+            buildJsonObject {
+                put("threadId", threadId)
+                put("name", normalized)
+            },
+        )
+        conversations[ConversationKey(serverId, threadId)]?.updateState { it.copy(title = normalized) }
+        bumpThreadRevision(serverId)
+    }
+
+    suspend fun archiveConversation(serverId: String, threadId: String) {
+        api(serverId).request(
+            StableRpcMethod.THREAD_ARCHIVE,
+            buildJsonObject { put("threadId", threadId) },
+        )
+        conversations.remove(ConversationKey(serverId, threadId))
+        bumpThreadRevision(serverId)
+    }
+
+    suspend fun unarchiveConversation(serverId: String, threadId: String) {
+        api(serverId).request(
+            StableRpcMethod.THREAD_UNARCHIVE,
+            buildJsonObject { put("threadId", threadId) },
+        )
+        bumpThreadRevision(serverId)
+    }
+
+    suspend fun deleteConversation(serverId: String, threadId: String) {
+        api(serverId).request(
+            StableRpcMethod.THREAD_DELETE,
+            buildJsonObject { put("threadId", threadId) },
+        )
+        conversations.remove(ConversationKey(serverId, threadId))
+        removePendingRequests(serverId, threadId)
+        bumpThreadRevision(serverId)
+    }
+
+    suspend fun compactConversation(serverId: String, threadId: String) {
+        api(serverId).request(
+            StableRpcMethod.THREAD_COMPACT,
+            buildJsonObject { put("threadId", threadId) },
+        )
+    }
+
+    suspend fun reviewConversation(
+        serverId: String,
+        threadId: String,
+        target: ReviewTarget,
+        delivery: ReviewDelivery,
+    ): String {
+        val response = api(serverId).review(threadId, target, delivery)
+        return response.requiredString("reviewThreadId")
+    }
+
+    suspend fun getGoal(serverId: String, threadId: String): ThreadGoal? {
+        val response = api(serverId).request(
+            StableRpcMethod.THREAD_GOAL_GET,
+            buildJsonObject { put("threadId", threadId) },
+        ).jsonObject
+        val goal = (response["goal"] as? JsonObject)?.toThreadGoal()
+        conversations[ConversationKey(serverId, threadId)]?.updateState {
+            it.copy(goal = goal, goalLoaded = true)
+        }
+        return goal
+    }
+
+    suspend fun setGoal(
+        serverId: String,
+        threadId: String,
+        objective: String,
+        status: ThreadGoalStatus = ThreadGoalStatus.ACTIVE,
+        tokenBudget: Long? = null,
+    ): ThreadGoal {
+        require(objective.isNotBlank()) { "目标不能为空" }
+        val response = api(serverId).request(
+            StableRpcMethod.THREAD_GOAL_SET,
+            buildJsonObject {
+                put("threadId", threadId)
+                put("objective", objective.trim())
+                put("status", status.wireValue)
+                put("tokenBudget", tokenBudget?.let(::JsonPrimitive) ?: JsonNull)
+            },
+        ).jsonObject
+        return response.requiredObject("goal").toThreadGoal().also { goal ->
+            conversations[ConversationKey(serverId, threadId)]?.updateState {
+                it.copy(goal = goal, goalLoaded = true)
+            }
+        }
+    }
+
+    suspend fun clearGoal(serverId: String, threadId: String) {
+        api(serverId).request(
+            StableRpcMethod.THREAD_GOAL_CLEAR,
+            buildJsonObject { put("threadId", threadId) },
+        )
+        conversations[ConversationKey(serverId, threadId)]?.updateState {
+            it.copy(goal = null, goalLoaded = true)
+        }
+    }
+
+    fun closeConversation(serverId: String, threadId: String) {
+        applicationScope.launch {
+            runSuspendCatching {
+                api(serverId).request(
+                    StableRpcMethod.THREAD_UNSUBSCRIBE,
+                    buildJsonObject { put("threadId", threadId) },
+                )
+            }
+            conversations.remove(ConversationKey(serverId, threadId))
+            removePendingRequests(serverId, threadId)
+        }
     }
 
     fun clearConversationError(serverId: String, threadId: String) {
@@ -194,19 +383,158 @@ class CodexRepository(
         threadId: String,
         requestKey: String,
         decision: ApprovalDecision,
-    ) {
-        val request = approvalRequests[requestKey] ?: error("审批请求已失效")
-        check(request.threadId == threadId) { "审批请求不属于当前会话" }
-        val connection = connections[serverId] ?: error("服务器未连接")
-        connection.respond(
-            request.id,
-            buildJsonObject { put("decision", decision.wireValue) },
-        )
-        approvalRequests.remove(requestKey)
-        conversations[ConversationKey(serverId, threadId)]?.updateState { current ->
-            current.copy(approvals = current.approvals.filterNot { it.requestKey == requestKey })
-        }
-    }
+    ) = respondToServerRequest(
+        serverId,
+        threadId,
+        requestKey,
+        buildJsonObject { put("decision", decision.wireValue) },
+    )
+
+    fun respondToApprovalWithExecPolicy(
+        serverId: String,
+        threadId: String,
+        requestKey: String,
+        amendment: JsonElement,
+    ) = respondToServerRequest(
+        serverId,
+        threadId,
+        requestKey,
+        buildJsonObject {
+            put(
+                "decision",
+                buildJsonObject {
+                    put(
+                        "acceptWithExecpolicyAmendment",
+                        buildJsonObject { put("execpolicy_amendment", amendment) },
+                    )
+                },
+            )
+        },
+    )
+
+    fun respondToApprovalWithNetworkPolicy(
+        serverId: String,
+        threadId: String,
+        requestKey: String,
+        amendment: JsonElement,
+    ) = respondToServerRequest(
+        serverId,
+        threadId,
+        requestKey,
+        buildJsonObject {
+            put(
+                "decision",
+                buildJsonObject {
+                    put(
+                        "applyNetworkPolicyAmendment",
+                        buildJsonObject { put("network_policy_amendment", amendment) },
+                    )
+                },
+            )
+        },
+    )
+
+    fun respondToQuestions(
+        serverId: String,
+        threadId: String,
+        requestKey: String,
+        answers: Map<String, List<String>>,
+    ) = respondToServerRequest(
+        serverId,
+        threadId,
+        requestKey,
+        buildJsonObject {
+            put(
+                "answers",
+                buildJsonObject {
+                    answers.forEach { (questionId, values) ->
+                        put(
+                            questionId,
+                            buildJsonObject {
+                                put("answers", buildJsonArray { values.forEach { add(JsonPrimitive(it)) } })
+                            },
+                        )
+                    }
+                },
+            )
+        },
+    )
+
+    fun respondToMcpElicitation(
+        serverId: String,
+        threadId: String,
+        requestKey: String,
+        action: String,
+        content: JsonElement? = null,
+    ) = respondToServerRequest(
+        serverId,
+        threadId,
+        requestKey,
+        buildJsonObject {
+            put("action", action)
+            put("content", content ?: JsonNull)
+            put("_meta", JsonNull)
+        },
+    )
+
+    fun respondToPermissions(
+        serverId: String,
+        threadId: String,
+        requestKey: String,
+        permissions: JsonObject,
+        sessionScope: Boolean,
+        strictAutoReview: Boolean,
+    ) = respondToServerRequest(
+        serverId,
+        threadId,
+        requestKey,
+        buildJsonObject {
+            require(!sessionScope || !strictAutoReview) {
+                "严格自动审查只支持当前回合"
+            }
+            put("permissions", permissions)
+            put("scope", if (sessionScope) "session" else "turn")
+            if (strictAutoReview) put("strictAutoReview", true)
+        },
+    )
+
+    suspend fun models(serverId: String): List<ModelOption> = StableFeatureApi(api(serverId)).models()
+
+    suspend fun modelProviderCapabilities(serverId: String): FeatureActionResult =
+        StableFeatureApi(api(serverId)).modelProviderCapabilities()
+
+    suspend fun featureCatalog(
+        serverId: String,
+        area: FeatureArea,
+        cwd: String? = null,
+        threadId: String? = null,
+        forceRefresh: Boolean = false,
+    ): FeatureCatalog = StableFeatureApi(api(serverId)).catalog(area, cwd, threadId, forceRefresh)
+
+    suspend fun executeFeatureAction(serverId: String, action: FeatureAction): FeatureActionResult =
+        StableFeatureApi(api(serverId)).execute(action)
+
+    suspend fun account(serverId: String): AccountOverview = StableFeatureApi(api(serverId)).account()
+
+    suspend fun loginWithApiKey(serverId: String, apiKey: String): LoginChallenge =
+        StableFeatureApi(api(serverId)).loginWithApiKey(apiKey)
+
+    suspend fun loginWithChatGpt(serverId: String, deviceCode: Boolean): LoginChallenge =
+        StableFeatureApi(api(serverId)).loginWithChatGpt(deviceCode)
+
+    suspend fun cancelLogin(serverId: String, loginId: String) =
+        StableFeatureApi(api(serverId)).cancelLogin(loginId)
+
+    suspend fun logout(serverId: String) = StableFeatureApi(api(serverId)).logout()
+
+    suspend fun consumeRateLimitReset(serverId: String, creditId: String?): FeatureActionResult =
+        StableFeatureApi(api(serverId)).consumeRateLimitReset(creditId)
+
+    suspend fun sendCreditsNudge(serverId: String, creditType: String): FeatureActionResult =
+        StableFeatureApi(api(serverId)).sendCreditsNudge(creditType)
+
+    suspend fun configuration(serverId: String, cwd: String?): ServerConfiguration =
+        StableFeatureApi(api(serverId)).configuration(cwd)
 
     private suspend fun api(serverId: String): AppServerApi = connectionMutex.withLock {
         val existing = connections[serverId]
@@ -214,7 +542,7 @@ class CodexRepository(
         connectionObservers.remove(serverId)?.forEach { it.cancel() }
         existing?.close()
         connections.remove(serverId)
-        clearServerApprovals(serverId)
+        clearServerPendingRequests(serverId)
 
         val server = awaitServer(serverId)
         mutableConnectionStatuses.updateValue(serverId, ConnectionStatus.Connecting)
@@ -316,60 +644,265 @@ class CodexRepository(
         connection: AppServerConnection,
         request: ServerEvent.Request,
     ) {
-        val type = when (request.method) {
-            "item/commandExecution/requestApproval" -> ApprovalType.COMMAND_EXECUTION
-            "item/fileChange/requestApproval" -> ApprovalType.FILE_CHANGE
-            else -> {
-                connection.respondError(request.id, METHOD_NOT_FOUND, "客户端不支持服务端请求：${request.method}")
-                return
-            }
+        if (request.method !in SUPPORTED_SERVER_REQUESTS) {
+            connection.respondError(request.id, METHOD_NOT_FOUND, "客户端不支持服务端请求：${request.method}")
+            return
         }
         val threadId = request.params.requiredString("threadId")
-        val requestKey = approvalKey(serverId, request.id)
-        val approval = PendingApproval(
-            requestKey = requestKey,
-            itemId = request.params.requiredString("itemId"),
-            turnId = request.params.requiredString("turnId"),
-            type = type,
-            reason = request.params.optionalString("reason"),
-            command = request.params.optionalString("command"),
-            cwd = request.params.optionalString("cwd"),
-        )
         val conversation = conversations[ConversationKey(serverId, threadId)]
         if (conversation == null) {
             connection.respondError(request.id, INVALID_REQUEST, "会话尚未在客户端打开")
             return
         }
-        approvalRequests[requestKey] = ApprovalRequest(request.id, threadId)
-        conversation.updateState { current -> current.copy(approvals = current.approvals + approval) }
+        val requestKey = requestKey(serverId, request.id)
+        val pending = when (request.method) {
+            "item/commandExecution/requestApproval" -> PendingServerRequest.Approval(
+                requestKey = requestKey,
+                itemId = request.params.requiredString("itemId"),
+                turnId = request.params.requiredString("turnId"),
+                type = ApprovalType.COMMAND_EXECUTION,
+                reason = request.params.optionalString("reason"),
+                command = request.params.optionalString("command"),
+                cwd = request.params.optionalString("cwd"),
+                environmentId = request.params.optionalString("environmentId"),
+                networkHost = (request.params["networkApprovalContext"] as? JsonObject)?.optionalString("host"),
+                commandActions = request.params["commandActions"]?.toString(),
+                grantRoot = null,
+                proposedExecPolicy = request.params["proposedExecpolicyAmendment"]?.toString(),
+                proposedNetworkPolicies = request.params["proposedNetworkPolicyAmendments"]?.toString(),
+            )
+
+            "item/fileChange/requestApproval" -> PendingServerRequest.Approval(
+                requestKey = requestKey,
+                itemId = request.params.requiredString("itemId"),
+                turnId = request.params.requiredString("turnId"),
+                type = ApprovalType.FILE_CHANGE,
+                reason = request.params.optionalString("reason"),
+                command = null,
+                cwd = null,
+                environmentId = null,
+                networkHost = null,
+                commandActions = null,
+                grantRoot = request.params.optionalString("grantRoot"),
+                proposedExecPolicy = null,
+                proposedNetworkPolicies = null,
+            )
+
+            "item/tool/requestUserInput" -> PendingServerRequest.Questions(
+                requestKey = requestKey,
+                itemId = request.params.requiredString("itemId"),
+                turnId = request.params.requiredString("turnId"),
+                questions = request.params.requiredArray("questions").map { element ->
+                    val question = element.jsonObject
+                    UserQuestion(
+                        id = question.requiredString("id"),
+                        header = question.requiredString("header"),
+                        question = question.requiredString("question"),
+                        options = (question["options"] as? JsonArray).orEmpty().map { optionElement ->
+                            val option = optionElement.jsonObject
+                            UserQuestionOption(
+                                label = option.requiredString("label"),
+                                description = option.requiredString("description"),
+                            )
+                        },
+                        allowsOther = question.optionalBoolean("isOther") ?: false,
+                        isSecret = question.optionalBoolean("isSecret") ?: false,
+                    )
+                },
+                autoResolutionMillis = request.params.optionalLong("autoResolutionMs"),
+            )
+
+            "mcpServer/elicitation/request" -> PendingServerRequest.McpElicitation(
+                requestKey = requestKey,
+                turnId = request.params.optionalString("turnId"),
+                serverName = request.params.requiredString("serverName"),
+                mode = request.params.requiredString("mode"),
+                message = request.params.requiredString("message"),
+                url = request.params.optionalString("url"),
+                requestedSchema = request.params["requestedSchema"]?.toString(),
+            )
+
+            "item/permissions/requestApproval" -> PendingServerRequest.Permissions(
+                requestKey = requestKey,
+                itemId = request.params.requiredString("itemId"),
+                turnId = request.params.requiredString("turnId"),
+                environmentId = request.params.optionalString("environmentId"),
+                cwd = request.params.requiredString("cwd"),
+                reason = request.params.optionalString("reason"),
+                requestedPermissions = request.params.requiredObject("permissions").toString(),
+            )
+
+            else -> error("支持的服务端请求未实现：${request.method}")
+        }
+        pendingRequestRoutes[requestKey] = PendingRequestRoute(request.id, threadId)
+        conversation.updateState { current ->
+            current.copy(pendingRequests = current.pendingRequests + pending)
+        }
     }
 
     private fun handleNotification(serverId: String, method: String, params: JsonObject) {
-        val threadId = params.optionalString("threadId") ?: return
-        val state = conversations[ConversationKey(serverId, threadId)] ?: return
         when (method) {
+            "account/updated", "account/rateLimits/updated", "account/login/completed",
+            "app/list/updated", "skills/changed", "mcpServer/oauthLogin/completed",
+            "mcpServer/startupStatus/updated" -> bumpFeatureRevision(serverId)
+
+            "configWarning" -> addServerNotice(
+                serverId,
+                NoticeLevel.WARNING,
+                listOfNotNull(params.optionalString("summary"), params.optionalString("details")).joinToString("\n"),
+            )
+
+            "deprecationNotice" -> addServerNotice(
+                serverId,
+                NoticeLevel.WARNING,
+                listOfNotNull(params.optionalString("summary"), params.optionalString("details")).joinToString("\n"),
+            )
+
+            "warning" -> {
+                val message = params.requiredString("message")
+                val targetThreadId = params.optionalString("threadId")
+                if (targetThreadId == null) addServerNotice(serverId, NoticeLevel.WARNING, message)
+                else conversations[ConversationKey(serverId, targetThreadId)]?.addNotice(NoticeLevel.WARNING, message)
+            }
+        }
+
+        val threadId = params.optionalString("threadId")
+        if (method.startsWith("thread/") && method != "thread/tokenUsage/updated" && method != "thread/goal/updated") {
+            bumpThreadRevision(serverId)
+        }
+        if (threadId == null) return
+        val state = conversations[ConversationKey(serverId, threadId)]
+        when (method) {
+            "thread/started" -> bumpThreadRevision(serverId)
+
+            "thread/status/changed" -> state?.updateState { current ->
+                val status = params.requiredObject("status").requiredString("type")
+                current.copy(isRunning = status == "active")
+            }
+
+            "thread/name/updated" -> state?.updateState { current ->
+                current.copy(title = params.optionalString("threadName") ?: current.title)
+            }
+
+            "thread/archived", "thread/deleted", "thread/closed" -> {
+                removePendingRequests(serverId, threadId)
+                state?.updateState { current ->
+                    val message = when (method) {
+                        "thread/archived" -> "会话已归档"
+                        "thread/deleted" -> "会话已删除"
+                        else -> "服务端已关闭会话"
+                    }
+                    current.copy(
+                        isRunning = false,
+                        notices = (current.notices + ConversationNotice(
+                            UUID.randomUUID().toString(),
+                            NoticeLevel.WARNING,
+                            message,
+                        )).takeLast(MAX_NOTICES),
+                    )
+                }
+                conversations.remove(ConversationKey(serverId, threadId))
+            }
+
+            "thread/unarchived" -> bumpThreadRevision(serverId)
+
+            "thread/tokenUsage/updated" -> state?.updateState {
+                it.copy(tokenUsage = ProtocolMapper.tokenUsage(params))
+            }
+
+            "thread/goal/updated" -> state?.updateState { current ->
+                val goal = params.requiredObject("goal").toThreadGoal()
+                current.copy(
+                    goal = goal,
+                    goalLoaded = true,
+                    notices = (current.notices + ConversationNotice(
+                        UUID.randomUUID().toString(),
+                        NoticeLevel.INFO,
+                        "目标已更新：${goal.objective}",
+                    )).takeLast(MAX_NOTICES),
+                )
+            }
+
+            "thread/goal/cleared" -> state?.updateState { current ->
+                current.copy(
+                    goal = null,
+                    goalLoaded = true,
+                    notices = (current.notices + ConversationNotice(
+                        UUID.randomUUID().toString(),
+                        NoticeLevel.INFO,
+                        "目标已清除",
+                    )).takeLast(MAX_NOTICES),
+                )
+            }
+
             "turn/started" -> {
+                if (state == null) return
                 val turn = params.requiredObject("turn")
                 state.updateState {
-                    it.copy(activeTurnId = turn.requiredString("id"), isRunning = true, errorMessage = null)
+                    it.copy(
+                        activeTurnId = turn.requiredString("id"),
+                        isRunning = true,
+                        turnDiff = "",
+                        plan = null,
+                        errorMessage = null,
+                    )
                 }
             }
 
             "turn/completed" -> {
+                if (state == null) return
                 val turn = params.requiredObject("turn")
                 val errorMessage = (turn["error"] as? JsonObject)?.optionalString("message")
                 state.updateState {
                     it.copy(
                         activeTurnId = null,
                         isRunning = false,
-                        approvals = emptyList(),
+                        pendingRequests = emptyList(),
                         errorMessage = errorMessage,
                     )
                 }
-                removeApprovals(serverId, threadId)
+                removePendingRequests(serverId, threadId)
+                bumpThreadRevision(serverId)
             }
 
+            "turn/diff/updated" -> state?.updateState { it.copy(turnDiff = params.requiredString("diff")) }
+
+            "turn/plan/updated" -> state?.updateState { it.copy(plan = ProtocolMapper.turnPlan(params)) }
+
+            "error" -> {
+                val error = params.requiredObject("error")
+                val message = error.requiredString("message")
+                state?.addNotice(NoticeLevel.ERROR, message)
+                if (!(params.optionalBoolean("willRetry") ?: false)) {
+                    state?.updateState { it.copy(errorMessage = message) }
+                }
+            }
+
+            "guardianWarning" -> state?.addNotice(NoticeLevel.WARNING, params.requiredString("message"))
+
+            "model/rerouted" -> state?.addNotice(
+                NoticeLevel.WARNING,
+                "模型已从 ${params.requiredString("fromModel")} 切换为 ${params.requiredString("toModel")}",
+            )
+
+            "model/verification" -> state?.addNotice(NoticeLevel.WARNING, "模型请求需要额外账号验证")
+
+            "model/safetyBuffering/updated" -> if (params.optionalBoolean("showBufferingUi") == true) {
+                state?.addNotice(NoticeLevel.INFO, "模型正在进行安全检查")
+            }
+
+            "hook/started", "hook/completed" -> state?.addNotice(
+                NoticeLevel.INFO,
+                if (method == "hook/started") "Hook 开始执行" else "Hook 执行完成",
+            )
+
+            "item/autoApprovalReview/started", "item/autoApprovalReview/completed" -> state?.addNotice(
+                NoticeLevel.INFO,
+                if (method.endsWith("started")) "自动审批审查开始" else "自动审批审查完成",
+            )
+
             "item/started", "item/completed" -> {
+                if (state == null) return
                 val item = ProtocolMapper.conversationItem(
                     item = params.requiredObject("item"),
                     turnId = params.requiredString("turnId"),
@@ -378,31 +911,43 @@ class CodexRepository(
                 state.updateState { current -> current.copy(items = current.items.upsert(item)) }
             }
 
-            "item/agentMessage/delta" -> state.updateItem(params.requiredString("itemId")) { item ->
+            "item/agentMessage/delta" -> state?.updateItem(params.requiredString("itemId")) { item ->
                 val message = item as? ConversationItem.AgentMessage
                     ?: throw ProtocolException("agentMessage delta 的目标类型不正确")
                 message.copy(text = message.text + params.requiredString("delta"))
             }
 
-            "item/reasoning/summaryTextDelta" -> state.updateItem(params.requiredString("itemId")) { item ->
+            "item/reasoning/summaryTextDelta" -> state?.updateItem(params.requiredString("itemId")) { item ->
                 val reasoning = item as? ConversationItem.Reasoning
                     ?: throw ProtocolException("reasoning summary delta 的目标类型不正确")
                 reasoning.copy(summary = reasoning.summary + params.requiredString("delta"))
             }
 
-            "item/reasoning/textDelta" -> state.updateItem(params.requiredString("itemId")) { item ->
+            "item/reasoning/summaryPartAdded" -> state?.updateItem(params.requiredString("itemId")) { item ->
+                val reasoning = item as? ConversationItem.Reasoning
+                    ?: throw ProtocolException("reasoning summary part 的目标类型不正确")
+                reasoning.copy(summary = reasoning.summary.trimEnd() + "\n")
+            }
+
+            "item/reasoning/textDelta" -> state?.updateItem(params.requiredString("itemId")) { item ->
                 val reasoning = item as? ConversationItem.Reasoning
                     ?: throw ProtocolException("reasoning delta 的目标类型不正确")
                 reasoning.copy(details = reasoning.details + params.requiredString("delta"))
             }
 
-            "item/commandExecution/outputDelta" -> state.updateItem(params.requiredString("itemId")) { item ->
+            "item/commandExecution/outputDelta" -> state?.updateItem(params.requiredString("itemId")) { item ->
                 val command = item as? ConversationItem.CommandExecution
                     ?: throw ProtocolException("command output delta 的目标类型不正确")
                 command.copy(output = command.output + params.requiredString("delta"))
             }
 
-            "item/fileChange/patchUpdated" -> state.updateItem(params.requiredString("itemId")) { item ->
+            "item/commandExecution/terminalInteraction" -> state?.updateItem(params.requiredString("itemId")) { item ->
+                val command = item as? ConversationItem.CommandExecution
+                    ?: throw ProtocolException("terminal interaction 的目标类型不正确")
+                command.copy(output = command.output + params.requiredString("stdin"))
+            }
+
+            "item/fileChange/patchUpdated" -> state?.updateItem(params.requiredString("itemId")) { item ->
                 val fileChange = item as? ConversationItem.FileChange
                     ?: throw ProtocolException("fileChange patch 的目标类型不正确")
                 val replacement = ProtocolMapper.conversationItem(
@@ -418,37 +963,44 @@ class CodexRepository(
                 replacement
             }
 
-            "item/plan/delta" -> state.updateItem(params.requiredString("itemId")) { item ->
+            "item/plan/delta" -> state?.updateItem(params.requiredString("itemId")) { item ->
                 val activity = item as? ConversationItem.Activity
                     ?: throw ProtocolException("plan delta 的目标类型不正确")
                 activity.copy(details = activity.details + params.requiredString("delta"))
             }
 
+            "item/mcpToolCall/progress" -> state?.updateItem(params.requiredString("itemId")) { item ->
+                val activity = item as? ConversationItem.Activity
+                    ?: throw ProtocolException("MCP progress 的目标类型不正确")
+                activity.copy(details = listOf(activity.details, params.requiredString("message"))
+                    .filter(String::isNotBlank).joinToString("\n"))
+            }
+
             "serverRequest/resolved" -> {
                 val requestId = params["requestId"] as? JsonPrimitive ?: return
-                val requestKey = approvalKey(serverId, requestId)
-                approvalRequests.remove(requestKey)
-                state.updateState { current ->
-                    current.copy(approvals = current.approvals.filterNot { it.requestKey == requestKey })
+                val key = requestKey(serverId, requestId)
+                pendingRequestRoutes.remove(key)
+                state?.updateState { current ->
+                    current.copy(pendingRequests = current.pendingRequests.filterNot { it.requestKey == key })
                 }
             }
         }
     }
 
-    private fun removeApprovals(serverId: String, threadId: String) {
-        approvalRequests.entries
+    private fun removePendingRequests(serverId: String, threadId: String) {
+        pendingRequestRoutes.entries
             .filter { (key, request) -> key.startsWith("$serverId:") && request.threadId == threadId }
-            .forEach { approvalRequests.remove(it.key) }
-        conversations[ConversationKey(serverId, threadId)]?.updateState { it.copy(approvals = emptyList()) }
+            .forEach { pendingRequestRoutes.remove(it.key) }
+        conversations[ConversationKey(serverId, threadId)]?.updateState { it.copy(pendingRequests = emptyList()) }
     }
 
-    private fun clearServerApprovals(serverId: String) {
-        approvalRequests.keys
+    private fun clearServerPendingRequests(serverId: String) {
+        pendingRequestRoutes.keys
             .filter { it.startsWith("$serverId:") }
-            .forEach { approvalRequests.remove(it) }
+            .forEach { pendingRequestRoutes.remove(it) }
         conversations.entries
             .filter { it.key.serverId == serverId }
-            .forEach { it.value.updateState { state -> state.copy(approvals = emptyList()) } }
+            .forEach { it.value.updateState { state -> state.copy(pendingRequests = emptyList()) } }
     }
 
     private fun requireConversation(serverId: String, threadId: String): MutableStateFlow<ConversationState> =
@@ -472,6 +1024,12 @@ class CodexRepository(
         items = items,
         activeTurnId = activeTurnId,
         isRunning = summary.status == ThreadRuntimeStatus.ACTIVE,
+        model = model,
+        serviceTier = serviceTier,
+        reasoningEffort = reasoningEffort,
+        approvalPolicy = approvalPolicy,
+        approvalsReviewer = approvalsReviewer,
+        sandbox = sandbox,
     )
 
     private fun List<ConversationItem>.upsert(newItem: ConversationItem): List<ConversationItem> {
@@ -500,6 +1058,15 @@ class CodexRepository(
         update(transform)
     }
 
+    private fun MutableStateFlow<ConversationState>.addNotice(level: NoticeLevel, message: String) {
+        updateState { current ->
+            current.copy(
+                notices = (current.notices + ConversationNotice(UUID.randomUUID().toString(), level, message))
+                    .takeLast(MAX_NOTICES),
+            )
+        }
+    }
+
     private fun MutableStateFlow<Map<String, ConnectionStatus>>.updateValue(
         serverId: String,
         status: ConnectionStatus,
@@ -512,7 +1079,59 @@ class CodexRepository(
         is ServerEvent.Request -> params
     }
 
-    private fun approvalKey(serverId: String, id: JsonPrimitive): String = "$serverId:${id}"
+    private fun respondToServerRequest(
+        serverId: String,
+        threadId: String,
+        key: String,
+        result: JsonObject,
+    ) {
+        val route = pendingRequestRoutes[key] ?: error("服务端请求已失效")
+        check(route.threadId == threadId) { "服务端请求不属于当前会话" }
+        val connection = connections[serverId] ?: error("服务器未连接")
+        connection.respond(route.id, result)
+        pendingRequestRoutes.remove(key)
+        conversations[ConversationKey(serverId, threadId)]?.updateState { current ->
+            current.copy(pendingRequests = current.pendingRequests.filterNot { it.requestKey == key })
+        }
+    }
+
+    private fun UserInputPart.displayText(): String = when (this) {
+        is UserInputPart.Text -> text
+        is UserInputPart.Image -> "[图片] $url"
+        is UserInputPart.LocalImage -> "[服务端图片] $path"
+        is UserInputPart.Skill -> "[Skill] $name"
+        is UserInputPart.Mention -> "[引用] $name"
+    }
+
+    private fun JsonObject.toThreadGoal() = ThreadGoal(
+        objective = requiredString("objective"),
+        status = requiredString("status"),
+        tokenBudget = optionalLong("tokenBudget"),
+        tokensUsed = optionalLong("tokensUsed") ?: 0L,
+        timeUsedSeconds = optionalLong("timeUsedSeconds") ?: 0L,
+    )
+
+    private fun requestKey(serverId: String, id: JsonPrimitive): String = "$serverId:${id}"
+
+    private fun bumpThreadRevision(serverId: String) {
+        mutableThreadRevisions.increment(serverId)
+    }
+
+    private fun bumpFeatureRevision(serverId: String) {
+        mutableFeatureRevisions.increment(serverId)
+    }
+
+    private fun MutableStateFlow<Map<String, Long>>.increment(serverId: String) {
+        update { current -> current + (serverId to ((current[serverId] ?: 0L) + 1L)) }
+    }
+
+    private fun addServerNotice(serverId: String, level: NoticeLevel, message: String) {
+        mutableServerNotices.update { current ->
+            val notices = current[serverId].orEmpty() +
+                ConversationNotice(UUID.randomUUID().toString(), level, message)
+            current + (serverId to notices.takeLast(MAX_NOTICES))
+        }
+    }
 
     private fun Throwable.userMessage(): String = when (this) {
         is RpcException -> message
@@ -523,11 +1142,19 @@ class CodexRepository(
 
     private data class ConversationKey(val serverId: String, val threadId: String)
 
-    private data class ApprovalRequest(val id: JsonPrimitive, val threadId: String)
+    private data class PendingRequestRoute(val id: JsonPrimitive, val threadId: String)
 
     private companion object {
         const val METHOD_NOT_FOUND = -32601
         const val INVALID_REQUEST = -32600
         const val SERVER_LOAD_TIMEOUT_MILLIS = 5_000L
+        const val MAX_NOTICES = 20
+        val SUPPORTED_SERVER_REQUESTS = setOf(
+            "item/commandExecution/requestApproval",
+            "item/fileChange/requestApproval",
+            "item/tool/requestUserInput",
+            "mcpServer/elicitation/request",
+            "item/permissions/requestApproval",
+        )
     }
 }

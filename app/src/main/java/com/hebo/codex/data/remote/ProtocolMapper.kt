@@ -6,6 +6,10 @@ import com.hebo.codex.domain.ConversationItem
 import com.hebo.codex.domain.FileChangeKind
 import com.hebo.codex.domain.ThreadRuntimeStatus
 import com.hebo.codex.domain.ThreadSummary
+import com.hebo.codex.domain.TokenUsage
+import com.hebo.codex.domain.TurnPlan
+import com.hebo.codex.domain.TurnPlanStep
+import com.hebo.codex.domain.PlanStepStatus
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -21,6 +25,12 @@ data class ThreadSnapshot(
     val summary: ThreadSummary,
     val items: List<ConversationItem>,
     val activeTurnId: String?,
+    val model: String?,
+    val serviceTier: String?,
+    val reasoningEffort: String?,
+    val approvalPolicy: String?,
+    val approvalsReviewer: String?,
+    val sandbox: String?,
 )
 
 object ProtocolMapper {
@@ -29,6 +39,7 @@ object ProtocolMapper {
         val name = thread.optionalString("name")?.trim().orEmpty()
         return ThreadSummary(
             id = thread.requiredString("id"),
+            sessionId = thread.requiredString("sessionId"),
             title = name.ifEmpty { preview.lineSequence().firstOrNull().orEmpty().ifEmpty { "新会话" } },
             preview = preview,
             cwd = thread.requiredString("cwd"),
@@ -36,6 +47,11 @@ object ProtocolMapper {
             updatedAt = thread.requiredLong("updatedAt"),
             recencyAt = thread.optionalLong("recencyAt"),
             status = thread.requiredObject("status").toThreadStatus(),
+            parentThreadId = thread.optionalString("parentThreadId"),
+            forkedFromId = thread.optionalString("forkedFromId"),
+            ephemeral = thread.optionalBoolean("ephemeral") ?: false,
+            modelProvider = thread.optionalString("modelProvider").orEmpty(),
+            source = thread["source"].compactText(),
         )
     }
 
@@ -62,6 +78,41 @@ object ProtocolMapper {
             summary = threadSummary(thread),
             items = items,
             activeTurnId = activeTurnId,
+            model = response.optionalString("model"),
+            serviceTier = response.optionalString("serviceTier"),
+            reasoningEffort = response.optionalString("reasoningEffort"),
+            approvalPolicy = response["approvalPolicy"].compactText().ifEmpty { null },
+            approvalsReviewer = response.optionalString("approvalsReviewer"),
+            sandbox = response["sandbox"].compactText().ifEmpty { null },
+        )
+    }
+
+    fun turnPlan(params: JsonObject): TurnPlan = TurnPlan(
+        explanation = params.optionalString("explanation"),
+        steps = params.requiredArray("plan").map { element ->
+            val step = element.jsonObject
+            TurnPlanStep(
+                text = step.requiredString("step"),
+                status = when (step.requiredString("status")) {
+                    "pending" -> PlanStepStatus.PENDING
+                    "inProgress" -> PlanStepStatus.IN_PROGRESS
+                    "completed" -> PlanStepStatus.COMPLETED
+                    else -> throw ProtocolException("未知计划状态：${step.requiredString("status")}")
+                },
+            )
+        },
+    )
+
+    fun tokenUsage(params: JsonObject): TokenUsage {
+        val usage = params.requiredObject("tokenUsage")
+        val total = usage.requiredObject("total")
+        return TokenUsage(
+            totalTokens = total.optionalLong("totalTokens") ?: 0L,
+            inputTokens = total.optionalLong("inputTokens") ?: 0L,
+            cachedInputTokens = total.optionalLong("cachedInputTokens") ?: 0L,
+            outputTokens = total.optionalLong("outputTokens") ?: 0L,
+            reasoningOutputTokens = total.optionalLong("reasoningOutputTokens") ?: 0L,
+            modelContextWindow = usage.optionalLong("modelContextWindow"),
         )
     }
 
@@ -264,6 +315,9 @@ internal fun JsonObject.requiredLong(name: String): Long =
 
 internal fun JsonObject.optionalLong(name: String): Long? =
     (this[name] as? JsonPrimitive)?.longOrNull
+
+internal fun JsonObject.optionalBoolean(name: String): Boolean? =
+    (this[name] as? JsonPrimitive)?.contentOrNull?.toBooleanStrictOrNull()
 
 internal fun JsonObject.requiredObject(name: String): JsonObject =
     this[name] as? JsonObject ?: throw ProtocolException("协议字段 $name 缺失或不是对象")

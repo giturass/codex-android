@@ -20,6 +20,7 @@ class ProtocolMapperTest {
             {
               "thread": {
                 "id": "thr-1",
+                "sessionId": "session-1",
                 "preview": "修复登录问题",
                 "name": null,
                 "cwd": "/workspace/mobile",
@@ -63,12 +64,32 @@ class ProtocolMapperTest {
         val snapshot = ProtocolMapper.threadSnapshot(response)
 
         assertEquals("thr-1", snapshot.summary.id)
+        assertEquals("session-1", snapshot.summary.sessionId)
         assertEquals("修复登录问题", snapshot.summary.title)
         assertEquals(ThreadRuntimeStatus.ACTIVE, snapshot.summary.status)
         assertEquals("turn-1", snapshot.activeTurnId)
         assertEquals(3, snapshot.items.size)
         assertEquals("定位空指针", (snapshot.items[0] as ConversationItem.UserMessage).text)
         assertEquals(ActivityStatus.COMPLETED, (snapshot.items[2] as ConversationItem.CommandExecution).status)
+    }
+
+    @Test
+    fun mapsPlanAndTokenUsageNotifications() {
+        val plan = ProtocolMapper.turnPlan(
+            json.parseToJsonElement(
+                """{"explanation":"先检查","plan":[{"step":"定位问题","status":"inProgress"}]}""",
+            ).jsonObject,
+        )
+        val usage = ProtocolMapper.tokenUsage(
+            json.parseToJsonElement(
+                """{"tokenUsage":{"total":{"totalTokens":30,"inputTokens":20,"cachedInputTokens":5,"outputTokens":10,"reasoningOutputTokens":3},"last":{"totalTokens":10,"inputTokens":6,"cachedInputTokens":0,"outputTokens":4,"reasoningOutputTokens":1},"modelContextWindow":200000}}""",
+            ).jsonObject,
+        )
+
+        assertEquals("先检查", plan.explanation)
+        assertEquals("定位问题", plan.steps.single().text)
+        assertEquals(30L, usage.totalTokens)
+        assertEquals(200000L, usage.modelContextWindow)
     }
 
     @Test

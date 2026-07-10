@@ -20,6 +20,7 @@ sealed interface ConnectionStatus {
 
 data class ThreadSummary(
     val id: String,
+    val sessionId: String,
     val title: String,
     val preview: String,
     val cwd: String,
@@ -27,6 +28,16 @@ data class ThreadSummary(
     val updatedAt: Long,
     val recencyAt: Long?,
     val status: ThreadRuntimeStatus,
+    val parentThreadId: String? = null,
+    val forkedFromId: String? = null,
+    val ephemeral: Boolean = false,
+    val modelProvider: String = "",
+    val source: String = "",
+)
+
+data class ThreadPage(
+    val data: List<ThreadSummary>,
+    val nextCursor: String?,
 )
 
 enum class ThreadRuntimeStatus {
@@ -34,6 +45,30 @@ enum class ThreadRuntimeStatus {
     IDLE,
     ACTIVE,
     SYSTEM_ERROR,
+}
+
+enum class ThreadSortKey(val wireValue: String) {
+    CREATED_AT("created_at"),
+    UPDATED_AT("updated_at"),
+    RECENCY_AT("recency_at"),
+}
+
+enum class SortDirection(val wireValue: String) {
+    ASC("asc"),
+    DESC("desc"),
+}
+
+enum class ThreadSourceKind(val wireValue: String) {
+    CLI("cli"),
+    VSCODE("vscode"),
+    EXEC("exec"),
+    APP_SERVER("appServer"),
+    SUB_AGENT("subAgent"),
+    SUB_AGENT_REVIEW("subAgentReview"),
+    SUB_AGENT_COMPACT("subAgentCompact"),
+    SUB_AGENT_THREAD_SPAWN("subAgentThreadSpawn"),
+    SUB_AGENT_OTHER("subAgentOther"),
+    UNKNOWN("unknown"),
 }
 
 data class RecentProject(
@@ -52,7 +87,19 @@ data class ConversationState(
     val items: List<ConversationItem> = emptyList(),
     val activeTurnId: String? = null,
     val isRunning: Boolean = false,
-    val approvals: List<PendingApproval> = emptyList(),
+    val pendingRequests: List<PendingServerRequest> = emptyList(),
+    val plan: TurnPlan? = null,
+    val turnDiff: String = "",
+    val tokenUsage: TokenUsage? = null,
+    val goal: ThreadGoal? = null,
+    val goalLoaded: Boolean = false,
+    val notices: List<ConversationNotice> = emptyList(),
+    val model: String? = null,
+    val serviceTier: String? = null,
+    val reasoningEffort: String? = null,
+    val approvalPolicy: String? = null,
+    val approvalsReviewer: String? = null,
+    val sandbox: String? = null,
     val errorMessage: String? = null,
 )
 
@@ -130,14 +177,67 @@ enum class ActivityStatus {
     DECLINED,
 }
 
-data class PendingApproval(
-    val requestKey: String,
-    val itemId: String,
-    val turnId: String,
-    val type: ApprovalType,
-    val reason: String?,
-    val command: String?,
-    val cwd: String?,
+sealed interface PendingServerRequest {
+    val requestKey: String
+    val turnId: String?
+
+    data class Approval(
+        override val requestKey: String,
+        val itemId: String,
+        override val turnId: String,
+        val type: ApprovalType,
+        val reason: String?,
+        val command: String?,
+        val cwd: String?,
+        val environmentId: String?,
+        val networkHost: String?,
+        val commandActions: String?,
+        val grantRoot: String?,
+        val proposedExecPolicy: String?,
+        val proposedNetworkPolicies: String?,
+    ) : PendingServerRequest
+
+    data class Questions(
+        override val requestKey: String,
+        val itemId: String,
+        override val turnId: String,
+        val questions: List<UserQuestion>,
+        val autoResolutionMillis: Long?,
+    ) : PendingServerRequest
+
+    data class McpElicitation(
+        override val requestKey: String,
+        override val turnId: String?,
+        val serverName: String,
+        val mode: String,
+        val message: String,
+        val url: String?,
+        val requestedSchema: String?,
+    ) : PendingServerRequest
+
+    data class Permissions(
+        override val requestKey: String,
+        val itemId: String,
+        override val turnId: String,
+        val environmentId: String?,
+        val cwd: String,
+        val reason: String?,
+        val requestedPermissions: String,
+    ) : PendingServerRequest
+}
+
+data class UserQuestion(
+    val id: String,
+    val header: String,
+    val question: String,
+    val options: List<UserQuestionOption>,
+    val allowsOther: Boolean,
+    val isSecret: Boolean,
+)
+
+data class UserQuestionOption(
+    val label: String,
+    val description: String,
 )
 
 enum class ApprovalType {
@@ -150,4 +250,146 @@ enum class ApprovalDecision(val wireValue: String) {
     ACCEPT_FOR_SESSION("acceptForSession"),
     DECLINE("decline"),
     CANCEL("cancel"),
+}
+
+data class TurnPlan(
+    val explanation: String?,
+    val steps: List<TurnPlanStep>,
+)
+
+data class TurnPlanStep(
+    val text: String,
+    val status: PlanStepStatus,
+)
+
+enum class PlanStepStatus {
+    PENDING,
+    IN_PROGRESS,
+    COMPLETED,
+}
+
+data class TokenUsage(
+    val totalTokens: Long,
+    val inputTokens: Long,
+    val cachedInputTokens: Long,
+    val outputTokens: Long,
+    val reasoningOutputTokens: Long,
+    val modelContextWindow: Long?,
+)
+
+data class ConversationNotice(
+    val id: String,
+    val level: NoticeLevel,
+    val message: String,
+)
+
+enum class NoticeLevel {
+    INFO,
+    WARNING,
+    ERROR,
+}
+
+enum class ApprovalPolicy(val wireValue: String) {
+    UNTRUSTED("untrusted"),
+    ON_REQUEST("on-request"),
+    NEVER("never"),
+}
+
+enum class ApprovalReviewer(val wireValue: String) {
+    USER("user"),
+    AUTO_REVIEW("auto_review"),
+}
+
+enum class SandboxMode(val wireValue: String) {
+    READ_ONLY("read-only"),
+    WORKSPACE_WRITE("workspace-write"),
+    DANGER_FULL_ACCESS("danger-full-access"),
+}
+
+enum class Personality(val wireValue: String) {
+    NONE("none"),
+    FRIENDLY("friendly"),
+    PRAGMATIC("pragmatic"),
+}
+
+enum class ReasoningSummary(val wireValue: String) {
+    AUTO("auto"),
+    CONCISE("concise"),
+    DETAILED("detailed"),
+    NONE("none"),
+}
+
+data class ThreadOptions(
+    val model: String? = null,
+    val modelProvider: String? = null,
+    val serviceTier: String? = null,
+    val approvalPolicy: ApprovalPolicy? = null,
+    val approvalsReviewer: ApprovalReviewer? = null,
+    val sandboxMode: SandboxMode? = null,
+    val configJson: String? = null,
+    val baseInstructions: String? = null,
+    val developerInstructions: String? = null,
+    val personality: Personality? = null,
+    val ephemeral: Boolean = false,
+)
+
+data class TurnOptions(
+    val cwd: String? = null,
+    val model: String? = null,
+    val serviceTier: String? = null,
+    val reasoningEffort: String? = null,
+    val reasoningSummary: ReasoningSummary? = null,
+    val personality: Personality? = null,
+    val approvalPolicy: ApprovalPolicy? = null,
+    val approvalsReviewer: ApprovalReviewer? = null,
+    val sandboxMode: SandboxMode? = null,
+    val sandboxNetworkAccess: Boolean = false,
+    val sandboxWritableRoots: List<String> = emptyList(),
+    val sandboxExcludeTmpdirEnvVar: Boolean = false,
+    val sandboxExcludeSlashTmp: Boolean = false,
+    val outputSchema: String? = null,
+)
+
+sealed interface UserInputPart {
+    data class Text(val text: String) : UserInputPart
+
+    data class Image(val url: String) : UserInputPart
+
+    data class LocalImage(val path: String) : UserInputPart
+
+    data class Skill(val name: String, val path: String) : UserInputPart
+
+    data class Mention(val name: String, val path: String) : UserInputPart
+}
+
+sealed interface ReviewTarget {
+    data object UncommittedChanges : ReviewTarget
+
+    data class BaseBranch(val branch: String) : ReviewTarget
+
+    data class Commit(val sha: String, val title: String? = null) : ReviewTarget
+
+    data class Custom(val instructions: String) : ReviewTarget
+}
+
+enum class ReviewDelivery(val wireValue: String) {
+    INLINE("inline"),
+    DETACHED("detached"),
+}
+
+data class ThreadGoal(
+    val objective: String,
+    val status: String,
+    val tokenBudget: Long?,
+    val tokensUsed: Long,
+    val timeUsedSeconds: Long,
+)
+
+enum class ThreadGoalStatus(val wireValue: String) {
+    ACTIVE("active"),
+    PAUSED("paused"),
+    BLOCKED("blocked"),
+    USAGE_LIMITED("usageLimited"),
+    BUDGET_LIMITED("budgetLimited"),
+    COMPLETE("complete"),
 }

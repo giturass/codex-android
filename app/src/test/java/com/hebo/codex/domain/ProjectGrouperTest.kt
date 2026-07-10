@@ -25,6 +25,7 @@ class ProjectGrouperTest {
 
     private fun thread(id: String, cwd: String, updatedAt: Long) = ThreadSummary(
         id = id,
+        sessionId = "session-$id",
         title = id,
         preview = id,
         cwd = cwd,
@@ -34,4 +35,3 @@ class ProjectGrouperTest {
         status = ThreadRuntimeStatus.NOT_LOADED,
     )
 }
-
