@@ -1,5 +1,7 @@
 package com.hebo.codex.domain
 
+import java.time.LocalDate
+
 data class ModelOption(
     val id: String,
     val model: String,
@@ -193,8 +195,7 @@ enum class AccountPlan {
 
 data class AccountRateLimits(
     val limits: List<AccountRateLimit>,
-    val availableResetCredits: Long?,
-    val technicalDetails: String,
+    val resetCredits: RateLimitResetCredits?,
 )
 
 data class AccountRateLimit(
@@ -203,6 +204,9 @@ data class AccountRateLimit(
     val primary: RateLimitWindow?,
     val secondary: RateLimitWindow?,
     val credits: CreditBalance?,
+    val individualLimit: SpendControlLimit?,
+    val planType: AccountPlan?,
+    val reachedType: RateLimitReachedType?,
 )
 
 data class RateLimitWindow(
@@ -217,13 +221,60 @@ data class CreditBalance(
     val balance: String?,
 )
 
+data class SpendControlLimit(
+    val limit: String,
+    val used: String,
+    val remainingPercent: Double,
+    val resetsAt: Long,
+)
+
+enum class RateLimitReachedType {
+    RATE_LIMIT_REACHED,
+    WORKSPACE_OWNER_CREDITS_DEPLETED,
+    WORKSPACE_MEMBER_CREDITS_DEPLETED,
+    WORKSPACE_OWNER_USAGE_LIMIT_REACHED,
+    WORKSPACE_MEMBER_USAGE_LIMIT_REACHED,
+}
+
+data class RateLimitResetCredits(
+    val availableCount: Long,
+    val credits: List<RateLimitResetCredit>?,
+)
+
+data class RateLimitResetCredit(
+    val id: String,
+    val type: RateLimitResetType,
+    val status: RateLimitResetCreditStatus,
+    val grantedAt: Long,
+    val expiresAt: Long?,
+    val title: String?,
+    val description: String?,
+)
+
+enum class RateLimitResetType {
+    CODEX_RATE_LIMITS,
+    UNKNOWN,
+}
+
+enum class RateLimitResetCreditStatus {
+    AVAILABLE,
+    REDEEMING,
+    REDEEMED,
+    UNKNOWN,
+}
+
 data class AccountUsage(
     val lifetimeTokens: Long?,
     val peakDailyTokens: Long?,
     val longestRunningTurnSeconds: Long?,
     val currentStreakDays: Long?,
     val longestStreakDays: Long?,
-    val technicalDetails: String,
+    val dailyBuckets: List<DailyTokenUsage>?,
+)
+
+data class DailyTokenUsage(
+    val date: LocalDate,
+    val tokens: Long,
 )
 
 data class WorkspaceMessage(

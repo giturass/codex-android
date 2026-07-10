@@ -370,7 +370,7 @@ private val HubDialog.description: String?
         HubDialog.ConfigValue, HubDialog.ConfigBatch -> "此操作会直接修改服务端配置，请确认键和值的作用域"
         HubDialog.Feedback -> "反馈由当前服务器上传"
         HubDialog.ApiKeyLogin -> "API Key 将发送至当前服务器完成登录"
-        HubDialog.RateLimitReset -> "可以不指定重置额度，由服务器自动选择"
+        HubDialog.RateLimitReset -> "确认后将使用一次可用的额度重置，服务器会自动选择可用项"
         HubDialog.CreditsNudge -> "选择需要补充的额度类型，系统会通知工作区所有者"
         is HubDialog.McpTool -> "参数必须是合法 JSON，并关联一个会话 ID"
         is HubDialog.PluginSkill -> "读取远程插件中指定的 Skill"
@@ -395,7 +395,7 @@ private val HubDialog.firstLabel: String?
         HubDialog.ConfigBatch -> "配置编辑 JSON 数组"
         HubDialog.Feedback -> "分类"
         HubDialog.ApiKeyLogin -> "API Key"
-        HubDialog.RateLimitReset -> "重置额度 ID（可留空）"
+        HubDialog.RateLimitReset -> null
         HubDialog.CreditsNudge -> null
         is HubDialog.McpTool -> "参数 JSON"
         is HubDialog.PluginSkill -> "Skill 名称"

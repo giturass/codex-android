@@ -6,12 +6,16 @@ import com.hebo.codex.domain.AccountType
 import com.hebo.codex.domain.ApprovalPolicy
 import com.hebo.codex.domain.ApprovalReviewer
 import com.hebo.codex.domain.Personality
+import com.hebo.codex.domain.RateLimitReachedType
+import com.hebo.codex.domain.RateLimitResetCreditStatus
+import com.hebo.codex.domain.RateLimitResetType
 import com.hebo.codex.domain.ReasoningSummary
 import com.hebo.codex.domain.SandboxMode
 import com.hebo.codex.domain.ThreadGoalStatus
 import com.hebo.codex.domain.WorkspaceMessageType
 import java.text.NumberFormat
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -104,6 +108,29 @@ val AccountPlan.displayLabelRes: Int
         AccountPlan.UNKNOWN -> R.string.account_plan_unknown
     }
 
+val RateLimitReachedType.displayLabelRes: Int
+    get() = when (this) {
+        RateLimitReachedType.RATE_LIMIT_REACHED -> R.string.rate_limit_reached
+        RateLimitReachedType.WORKSPACE_OWNER_CREDITS_DEPLETED -> R.string.rate_limit_owner_credits_depleted
+        RateLimitReachedType.WORKSPACE_MEMBER_CREDITS_DEPLETED -> R.string.rate_limit_member_credits_depleted
+        RateLimitReachedType.WORKSPACE_OWNER_USAGE_LIMIT_REACHED -> R.string.rate_limit_owner_usage_reached
+        RateLimitReachedType.WORKSPACE_MEMBER_USAGE_LIMIT_REACHED -> R.string.rate_limit_member_usage_reached
+    }
+
+val RateLimitResetType.displayLabelRes: Int
+    get() = when (this) {
+        RateLimitResetType.CODEX_RATE_LIMITS -> R.string.rate_limit_reset_type_codex
+        RateLimitResetType.UNKNOWN -> R.string.rate_limit_reset_type_unknown
+    }
+
+val RateLimitResetCreditStatus.displayLabelRes: Int
+    get() = when (this) {
+        RateLimitResetCreditStatus.AVAILABLE -> R.string.rate_limit_reset_status_available
+        RateLimitResetCreditStatus.REDEEMING -> R.string.rate_limit_reset_status_redeeming
+        RateLimitResetCreditStatus.REDEEMED -> R.string.rate_limit_reset_status_redeemed
+        RateLimitResetCreditStatus.UNKNOWN -> R.string.rate_limit_reset_status_unknown
+    }
+
 val WorkspaceMessageType.displayLabelRes: Int
     get() = when (this) {
         WorkspaceMessageType.HEADLINE -> R.string.workspace_message_headline
@@ -137,6 +164,9 @@ fun formatDateTime(epochSeconds: Long, zoneId: ZoneId = ZoneId.systemDefault()):
     DateTimeFormatter.ofPattern("M月d日 HH:mm", Locale.CHINA)
         .withZone(zoneId)
         .format(Instant.ofEpochSecond(epochSeconds))
+
+fun formatDate(date: LocalDate): String =
+    DateTimeFormatter.ofPattern("yyyy年M月d日", Locale.CHINA).format(date)
 
 fun featureScopeLabel(value: String): String = when (value.lowercase()) {
     "system" -> "系统"

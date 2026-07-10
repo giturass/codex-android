@@ -1,12 +1,7 @@
 package com.hebo.codex.data.remote
 
 import com.hebo.codex.domain.AccountOverview
-import com.hebo.codex.domain.AccountPlan
-import com.hebo.codex.domain.AccountRateLimit
-import com.hebo.codex.domain.AccountRateLimits
 import com.hebo.codex.domain.AccountType
-import com.hebo.codex.domain.AccountUsage
-import com.hebo.codex.domain.CreditBalance
 import com.hebo.codex.domain.FeatureAction
 import com.hebo.codex.domain.FeatureActionResult
 import com.hebo.codex.domain.FeatureArea
@@ -16,7 +11,6 @@ import com.hebo.codex.domain.FeatureKind
 import com.hebo.codex.domain.LoginChallenge
 import com.hebo.codex.domain.ModelOption
 import com.hebo.codex.domain.OptionValue
-import com.hebo.codex.domain.RateLimitWindow
 import com.hebo.codex.domain.ServerConfiguration
 import com.hebo.codex.domain.WorkspaceMessage
 import com.hebo.codex.domain.WorkspaceMessageType
@@ -110,10 +104,10 @@ class StableFeatureApi(
             signedIn = account != null,
             type = accountType,
             email = account?.optionalString("email"),
-            planType = account?.optionalString("planType")?.toAccountPlan(),
+            planType = account?.optionalString("planType")?.let { AccountFeatureMapper.plan(it) },
             requiresOpenAiAuth = response.optionalBoolean("requiresOpenaiAuth") ?: false,
-            rateLimits = rateLimitsResponse?.toAccountRateLimits(),
-            usage = usageResponse?.toAccountUsage(),
+            rateLimits = rateLimitsResponse?.let(AccountFeatureMapper::rateLimits),
+            usage = usageResponse?.let(AccountFeatureMapper::usage),
             workspaceMessages = messages,
         )
     }
@@ -675,76 +669,11 @@ class StableFeatureApi(
         )
     }
 
-    private fun JsonObject.toAccountRateLimits(): AccountRateLimits {
-        val rateLimitsById = this["rateLimitsByLimitId"] as? JsonObject
-        val limits = if (rateLimitsById.isNullOrEmpty()) {
-            listOf(requiredObject("rateLimits").toAccountRateLimit())
-        } else {
-            rateLimitsById.map { (id, value) -> value.jsonObject.toAccountRateLimit(id) }
-        }
-        return AccountRateLimits(
-            limits = limits,
-            availableResetCredits = (this["rateLimitResetCredits"] as? JsonObject)
-                ?.optionalLong("availableCount"),
-            technicalDetails = pretty(),
-        )
-    }
-
-    private fun JsonObject.toAccountRateLimit(fallbackId: String? = null) = AccountRateLimit(
-        id = optionalString("limitId") ?: fallbackId,
-        name = optionalString("limitName"),
-        primary = (this["primary"] as? JsonObject)?.toRateLimitWindow(),
-        secondary = (this["secondary"] as? JsonObject)?.toRateLimitWindow(),
-        credits = (this["credits"] as? JsonObject)?.let { credits ->
-            CreditBalance(
-                hasCredits = credits.optionalBoolean("hasCredits")
-                    ?: throw ProtocolException("额度信息缺少 hasCredits"),
-                unlimited = credits.optionalBoolean("unlimited")
-                    ?: throw ProtocolException("额度信息缺少 unlimited"),
-                balance = credits.optionalString("balance"),
-            )
-        },
-    )
-
-    private fun JsonObject.toRateLimitWindow() = RateLimitWindow(
-        usedPercent = requiredDouble("usedPercent"),
-        windowDurationMinutes = optionalLong("windowDurationMins"),
-        resetsAt = optionalLong("resetsAt"),
-    )
-
-    private fun JsonObject.toAccountUsage(): AccountUsage {
-        val summary = requiredObject("summary")
-        return AccountUsage(
-            lifetimeTokens = summary.optionalLong("lifetimeTokens"),
-            peakDailyTokens = summary.optionalLong("peakDailyTokens"),
-            longestRunningTurnSeconds = summary.optionalLong("longestRunningTurnSec"),
-            currentStreakDays = summary.optionalLong("currentStreakDays"),
-            longestStreakDays = summary.optionalLong("longestStreakDays"),
-            technicalDetails = pretty(),
-        )
-    }
-
     private fun String.toAccountType(): AccountType = when (this) {
         "apiKey" -> AccountType.API_KEY
         "chatgpt" -> AccountType.CHATGPT
         "amazonBedrock" -> AccountType.AMAZON_BEDROCK
         else -> throw ProtocolException("未知账号类型：$this")
-    }
-
-    private fun String.toAccountPlan(): AccountPlan = when (this) {
-        "free" -> AccountPlan.FREE
-        "go" -> AccountPlan.GO
-        "plus" -> AccountPlan.PLUS
-        "pro" -> AccountPlan.PRO
-        "prolite" -> AccountPlan.PRO_LITE
-        "team" -> AccountPlan.TEAM
-        "self_serve_business_usage_based" -> AccountPlan.BUSINESS_USAGE_BASED
-        "business" -> AccountPlan.BUSINESS
-        "enterprise_cbp_usage_based" -> AccountPlan.ENTERPRISE_USAGE_BASED
-        "enterprise" -> AccountPlan.ENTERPRISE
-        "edu" -> AccountPlan.EDUCATION
-        "unknown" -> AccountPlan.UNKNOWN
-        else -> throw ProtocolException("未知账号计划：$this")
     }
 
     private fun String.toShareDiscoverabilityLabel(): String = when (this) {

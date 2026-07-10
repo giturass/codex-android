@@ -48,10 +48,15 @@ import com.hebo.codex.domain.AccountRateLimits
 import com.hebo.codex.domain.AccountUsage
 import com.hebo.codex.domain.LoginChallenge
 import com.hebo.codex.domain.RateLimitWindow
+import com.hebo.codex.domain.RateLimitResetCredit
+import com.hebo.codex.domain.RateLimitResetCredits
+import com.hebo.codex.domain.RateLimitResetCreditStatus
 import com.hebo.codex.domain.ServerConfiguration
+import com.hebo.codex.domain.SpendControlLimit
 import com.hebo.codex.ui.components.relativeTime
 import com.hebo.codex.ui.displayLabelRes
 import com.hebo.codex.ui.formatCount
+import com.hebo.codex.ui.formatDate
 import com.hebo.codex.ui.formatDateTime
 import com.hebo.codex.ui.formatDurationSeconds
 import com.hebo.codex.ui.formatPercent
@@ -217,10 +222,10 @@ private fun AccountRateLimitsCard(rateLimits: AccountRateLimits) {
                 if (index > 0) HorizontalDivider()
                 AccountRateLimitView(limit)
             }
-            rateLimits.availableResetCredits?.let {
-                MetricValue("可用重置次数", formatCount(it))
+            rateLimits.resetCredits?.let { resetCredits ->
+                HorizontalDivider()
+                RateLimitResetCreditsView(resetCredits)
             }
-            ExpandableJsonSection("额度技术详情", rateLimits.technicalDetails)
         }
     }
 }
@@ -228,9 +233,21 @@ private fun AccountRateLimitsCard(rateLimits: AccountRateLimits) {
 @Composable
 private fun AccountRateLimitView(limit: AccountRateLimit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(limit.name ?: limit.id ?: "Codex", style = MaterialTheme.typography.labelLarge)
+        Text(limit.readableName(), style = MaterialTheme.typography.labelLarge)
+        limit.planType?.let { MetricValue("适用计划", stringResource(it.displayLabelRes)) }
+        limit.reachedType?.let { reachedType ->
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("当前状态", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    stringResource(reachedType.displayLabelRes),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
         limit.primary?.let { RateLimitWindowView("主要额度", it) }
         limit.secondary?.let { RateLimitWindowView("补充额度", it) }
+        limit.individualLimit?.let { individualLimit -> SpendControlLimitView(individualLimit) }
         limit.credits?.let { credits ->
             val value = when {
                 credits.unlimited -> "不限量"
@@ -239,6 +256,81 @@ private fun AccountRateLimitView(limit: AccountRateLimit) {
             }
             MetricValue("额外额度", value)
         }
+    }
+}
+
+@Composable
+private fun SpendControlLimitView(limit: SpendControlLimit) {
+    val usedPercent = 100.0 - limit.remainingPercent
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("月度费用额度", style = MaterialTheme.typography.bodySmall)
+        MetricValue("月度上限", limit.limit)
+        MetricValue("已使用", limit.used)
+        MetricValue("剩余", formatPercent(limit.remainingPercent))
+        LinearProgressIndicator(
+            progress = { (usedPercent / 100.0).toFloat().coerceIn(0f, 1f) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            "${formatDateTime(limit.resetsAt)} 重置",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun RateLimitResetCreditsView(resetCredits: RateLimitResetCredits) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("额度重置", style = MaterialTheme.typography.labelLarge)
+        MetricValue("可用次数", formatCount(resetCredits.availableCount))
+        val credits = resetCredits.credits
+        if (credits == null) {
+            Text(
+                "服务端仅提供可用次数，暂无重置明细",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            if (credits.isEmpty()) {
+                Text(
+                    if (resetCredits.availableCount == 0L) "暂无可用的额度重置" else "暂无额度重置明细",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            credits.forEachIndexed { index, credit ->
+                if (index > 0) HorizontalDivider()
+                RateLimitResetCreditView(credit)
+            }
+        }
+    }
+}
+
+@Composable
+private fun RateLimitResetCreditView(credit: RateLimitResetCredit) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                credit.title ?: stringResource(credit.type.displayLabelRes),
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            StatusBadge(
+                stringResource(credit.status.displayLabelRes),
+                if (credit.status == RateLimitResetCreditStatus.AVAILABLE) StatusTone.POSITIVE else StatusTone.NEUTRAL,
+            )
+        }
+        credit.description?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        MetricValue("适用额度", stringResource(credit.type.displayLabelRes))
+        MetricValue("获得时间", formatDateTime(credit.grantedAt))
+        MetricValue("有效期至", credit.expiresAt?.let(::formatDateTime) ?: "长期有效")
     }
 }
 
@@ -275,7 +367,38 @@ private fun AccountUsageCard(usage: AccountUsage) {
             usage.longestRunningTurnSeconds?.let { MetricValue("最长任务", formatDurationSeconds(it)) }
             usage.currentStreakDays?.let { MetricValue("当前连续使用", "$it 天") }
             usage.longestStreakDays?.let { MetricValue("最长连续使用", "$it 天") }
-            ExpandableJsonSection("用量技术详情", usage.technicalDetails)
+            HorizontalDivider()
+            Text("每日 Token 用量", style = MaterialTheme.typography.labelLarge)
+            val buckets = usage.dailyBuckets
+            if (buckets == null) {
+                Text(
+                    "服务端暂未提供每日用量明细",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                if (buckets.isEmpty()) {
+                    Text(
+                        "暂无每日用量记录",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                buckets.sortedByDescending { it.date }.forEach { bucket ->
+                    MetricValue(formatDate(bucket.date), "${formatCount(bucket.tokens)} Token")
+                }
+            }
+        }
+    }
+}
+
+private fun AccountRateLimit.readableName(): String {
+    val value = name?.takeIf(String::isNotBlank) ?: id?.takeIf(String::isNotBlank) ?: return "Codex"
+    return value.split('_', '-').filter(String::isNotBlank).joinToString(" ") { part ->
+        when (part.lowercase()) {
+            "codex" -> "Codex"
+            "other" -> "其他"
+            else -> part.replaceFirstChar { it.titlecase() }
         }
     }
 }

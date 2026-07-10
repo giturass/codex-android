@@ -66,6 +66,17 @@
     <string name="account_plan_enterprise">企业版</string>
     <string name="account_plan_education">教育版</string>
     <string name="account_plan_unknown">未知计划</string>
+    <string name="rate_limit_reached">已达到用量上限</string>
+    <string name="rate_limit_owner_credits_depleted">工作区所有者的额外额度已用完</string>
+    <string name="rate_limit_member_credits_depleted">工作区成员的额外额度已用完</string>
+    <string name="rate_limit_owner_usage_reached">工作区所有者已达到用量上限</string>
+    <string name="rate_limit_member_usage_reached">工作区成员已达到用量上限</string>
+    <string name="rate_limit_reset_type_codex">Codex 使用额度</string>
+    <string name="rate_limit_reset_type_unknown">其他使用额度</string>
+    <string name="rate_limit_reset_status_available">可使用</string>
+    <string name="rate_limit_reset_status_redeeming">使用中</string>
+    <string name="rate_limit_reset_status_redeemed">已使用</string>
+    <string name="rate_limit_reset_status_unknown">状态未知</string>
     <string name="workspace_message_headline">重要消息</string>
     <string name="workspace_message_announcement">公告</string>
     <string name="workspace_message_unknown">账号消息</string>
