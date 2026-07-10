@@ -18,7 +18,7 @@ class ServerEditorUiStateTest {
     }
 
     @Test
-    fun editingServerKeepsExistingTokenWhenInputIsEmpty() {
+    fun editingServerUsesLoadedToken() {
         val state = ServerEditorUiState(
             isEditing = true,
             name = "Office Server",
@@ -27,7 +27,8 @@ class ServerEditorUiStateTest {
             isLoading = false,
         )
 
-        assertTrue(state.canSave)
+        assertFalse(state.canSave)
+        assertTrue(state.copy(token = "stored-secret").canSave)
     }
 
     @Test

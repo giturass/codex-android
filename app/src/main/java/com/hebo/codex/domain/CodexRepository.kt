@@ -103,7 +103,10 @@ class CodexRepository(
         return profile
     }
 
-    suspend fun server(serverId: String): ServerProfile = awaitServer(serverId)
+    suspend fun serverConnectionDetails(serverId: String): ServerConnectionDetails = ServerConnectionDetails(
+        profile = awaitServer(serverId),
+        token = serverStore.readToken(serverId),
+    )
 
     suspend fun updateServer(serverId: String, name: String, endpoint: String, token: String): ServerProfile {
         val settings = serverStore.settings.first()
@@ -112,12 +115,12 @@ class CodexRepository(
         require(normalizedName.isNotEmpty()) { "请输入服务器名称" }
         require(settings.servers.none { it.id != serverId && it.name == normalizedName }) { "服务器名称已存在" }
         val normalizedEndpoint = validateWebSocketEndpoint(endpoint)
-        val replacementToken = token.trim().ifEmpty { null }
-        val connectionToken = replacementToken ?: serverStore.readToken(serverId)
+        val normalizedToken = token.trim()
+        require(normalizedToken.isNotEmpty()) { "请输入 Token" }
 
-        testConnection(normalizedEndpoint, connectionToken)
+        testConnection(normalizedEndpoint, normalizedToken)
         val profile = current.copy(name = normalizedName, webSocketUrl = normalizedEndpoint)
-        serverStore.updateServer(profile, replacementToken)
+        serverStore.updateServer(profile, normalizedToken)
         serverSettings.first { stored -> stored.servers.singleOrNull { it.id == serverId } == profile }
 
         connectionMutex.withLock {

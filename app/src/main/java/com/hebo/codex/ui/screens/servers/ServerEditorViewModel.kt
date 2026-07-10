@@ -27,8 +27,7 @@ data class ServerEditorUiState(
     val errorMessage: UserFacingError? = null,
 ) {
     val canSave: Boolean
-        get() = isReady && !isSaving && name.isNotBlank() && endpoint.isNotBlank() &&
-            (isEditing || token.isNotBlank())
+        get() = isReady && !isSaving && name.isNotBlank() && endpoint.isNotBlank() && token.isNotBlank()
 }
 
 class ServerEditorViewModel(
@@ -86,12 +85,13 @@ class ServerEditorViewModel(
 
     private fun loadServer(id: String) {
         viewModelScope.launch {
-            runSuspendCatching { repository.server(id) }
-                .onSuccess { server ->
+            runSuspendCatching { repository.serverConnectionDetails(id) }
+                .onSuccess { details ->
                     mutableState.update {
                         it.copy(
-                            name = server.name,
-                            endpoint = server.webSocketUrl,
+                            name = details.profile.name,
+                            endpoint = details.profile.webSocketUrl,
+                            token = details.token,
                             isReady = true,
                             isLoading = false,
                         )

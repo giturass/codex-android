@@ -129,17 +129,7 @@ fun ServerEditorScreen(
                     value = state.token,
                     onValueChange = viewModel::updateToken,
                     modifier = Modifier.fillMaxWidth(),
-                    label = {
-                        Text(
-                            if (state.isEditing) "新${stringResource(R.string.server_auth_capability_token)}"
-                            else stringResource(R.string.server_auth_capability_token),
-                        )
-                    },
-                    placeholder = if (state.isEditing) {
-                        { Text("留空则保留当前令牌") }
-                    } else {
-                        null
-                    },
+                    label = { Text(stringResource(R.string.server_auth_capability_token)) },
                     visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     singleLine = true,

@@ -7,6 +7,11 @@ data class ServerProfile(
     val authentication: ServerAuthentication,
 )
 
+data class ServerConnectionDetails(
+    val profile: ServerProfile,
+    val token: String,
+)
+
 enum class ServerAuthentication {
     CAPABILITY_TOKEN,
 }
