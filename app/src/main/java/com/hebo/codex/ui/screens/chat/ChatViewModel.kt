@@ -169,9 +169,11 @@ class ChatViewModel(
             mutableState.update {
                 it.copy(
                     models = models.getOrDefault(emptyList()),
-                    inputResources = skills.getOrNull()?.entries.orEmpty() +
-                        apps.getOrNull()?.entries.orEmpty() +
-                        plugins.getOrNull()?.entries.orEmpty().filter { entry -> entry.installed == true },
+                    inputResources = availableInputResources(
+                        skills = skills.getOrNull()?.entries.orEmpty(),
+                        apps = apps.getOrNull()?.entries.orEmpty(),
+                        plugins = plugins.getOrNull()?.entries.orEmpty(),
+                    ),
                     isLoadingResources = false,
                     screenError = failure?.message,
                 )
@@ -267,3 +269,12 @@ class ChatViewModel(
         }
     }
 }
+
+internal fun availableInputResources(
+    skills: List<FeatureEntry>,
+    apps: List<FeatureEntry>,
+    plugins: List<FeatureEntry>,
+): List<FeatureEntry> =
+    skills.filter { entry -> entry.enabled != false } +
+        apps.filter { entry -> entry.enabled != false && entry.metadata["accessible"] == "true" } +
+        plugins.filter { entry -> entry.installed == true && entry.enabled != false }

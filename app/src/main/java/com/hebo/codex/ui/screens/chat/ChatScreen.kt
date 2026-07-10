@@ -34,18 +34,24 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Apps
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.HourglassTop
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Psychology
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -57,6 +63,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -1153,6 +1160,18 @@ private fun AttachmentSheet(
 ) {
     var kind by rememberSaveable { mutableStateOf(ManualAttachment.IMAGE_URL) }
     var value by rememberSaveable { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf("") }
+    var resourceFilter by rememberSaveable { mutableStateOf(ResourceFilter.ALL) }
+    var showImageForm by rememberSaveable { mutableStateOf(false) }
+    val filteredResources = remember(resources, query, resourceFilter) {
+        resources.filter { entry ->
+            resourceFilter.accepts(entry.kind) &&
+                (query.isBlank() || listOf(entry.title, entry.description, entry.parentId, entry.path)
+                    .filterNotNull()
+                    .joinToString(" ")
+                    .contains(query, ignoreCase = true))
+        }
+    }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surface,
@@ -1161,14 +1180,22 @@ private fun AttachmentSheet(
             Modifier
                 .fillMaxWidth()
                 .fillMaxHeight(0.85f)
-                .verticalScroll(rememberScrollState())
                 .navigationBarsPadding()
                 .imePadding()
                 .padding(horizontal = 20.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-                Text("添加输入", style = MaterialTheme.typography.titleLarge)
-                Text("图片", style = MaterialTheme.typography.labelLarge)
+            Text("添加输入", style = MaterialTheme.typography.titleLarge)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { showImageForm = !showImageForm }) {
+                    Icon(Icons.Rounded.Image, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (showImageForm) "收起图片输入" else "添加图片")
+                }
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = onRefresh) { Text("刷新") }
+            }
+            if (showImageForm) {
                 OptionRow(
                     values = ManualAttachment.entries,
                     selected = kind,
@@ -1191,14 +1218,71 @@ private fun AttachmentSheet(
                     enabled = value.isNotBlank(),
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("添加图片") }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Skills、Apps 与插件", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
-                    TextButton(onClick = onRefresh) { Text("刷新") }
+                HorizontalDivider()
+            }
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("搜索 Skills、Apps 与 Plugins") },
+                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { query = "" }) {
+                            Icon(Icons.Rounded.Close, contentDescription = "清除搜索")
+                        }
+                    }
+                },
+                singleLine = true,
+                shape = MaterialTheme.shapes.large,
+            )
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                ResourceFilter.entries.forEachIndexed { index, filter ->
+                    if (index > 0) Spacer(Modifier.width(8.dp))
+                    FilterChip(
+                        selected = resourceFilter == filter,
+                        onClick = { resourceFilter = filter },
+                        label = { Text(filter.label) },
+                    )
                 }
-                if (isLoading) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
-                resources.forEach { entry ->
-                    OutlinedButton(
-                        onClick = {
+            }
+            if (isLoading) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+            LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+                if (!isLoading && filteredResources.isEmpty()) {
+                    item("resources-empty") {
+                        Box(
+                            Modifier.fillMaxWidth().padding(vertical = 40.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                if (query.isBlank()) "当前没有可用内容" else "没有匹配的内容",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+                items(filteredResources, key = { "${it.kind}:${it.id}" }) { entry ->
+                    ListItem(
+                        headlineContent = { Text(entry.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        supportingContent = {
+                            if (entry.description.isNotBlank()) {
+                                Text(entry.description, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            }
+                        },
+                        leadingContent = {
+                            Icon(
+                                when (entry.kind) {
+                                    FeatureKind.SKILL -> Icons.Rounded.AutoAwesome
+                                    FeatureKind.APP -> Icons.Rounded.Apps
+                                    else -> Icons.Rounded.Extension
+                                },
+                                contentDescription = null,
+                            )
+                        },
+                        trailingContent = {
+                            Text(entry.resourceOrigin, style = MaterialTheme.typography.labelSmall)
+                        },
+                        modifier = Modifier.clickable {
                             val input = if (entry.kind == FeatureKind.SKILL) {
                                 UserInputPart.Skill(entry.title, entry.path ?: entry.id)
                             } else {
@@ -1206,14 +1290,12 @@ private fun AttachmentSheet(
                             }
                             onAdd(input)
                         },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(entry.title, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(entry.kind.name, style = MaterialTheme.typography.labelSmall)
-                    }
+                    )
+                    HorizontalDivider(Modifier.padding(start = 56.dp))
                 }
-                TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("关闭") }
-                Spacer(Modifier.height(12.dp))
+            }
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("关闭") }
+            Spacer(Modifier.height(12.dp))
         }
     }
 }
@@ -1599,6 +1681,21 @@ private enum class ManualAttachment {
     LOCAL_IMAGE,
 }
 
+private enum class ResourceFilter(val label: String) {
+    ALL("全部"),
+    SKILLS("Skills"),
+    APPS("Apps"),
+    PLUGINS("Plugins"),
+    ;
+
+    fun accepts(kind: FeatureKind): Boolean = when (this) {
+        ALL -> kind == FeatureKind.SKILL || kind == FeatureKind.APP || kind == FeatureKind.PLUGIN
+        SKILLS -> kind == FeatureKind.SKILL
+        APPS -> kind == FeatureKind.APP
+        PLUGINS -> kind == FeatureKind.PLUGIN
+    }
+}
+
 private enum class ReviewType(val label: String, val inputLabel: String) {
     UNCOMMITTED("未提交修改", ""),
     BASE_BRANCH("相对分支", "基础分支"),
@@ -1613,4 +1710,12 @@ private val UserInputPart.label: String
         is UserInputPart.LocalImage -> "本地图片"
         is UserInputPart.Skill -> "Skill · $name"
         is UserInputPart.Mention -> "提及 · $name"
+    }
+
+private val FeatureEntry.resourceOrigin: String
+    get() = when (kind) {
+        FeatureKind.SKILL -> metadata["scope"]?.ifBlank { null } ?: "Skill"
+        FeatureKind.APP -> "App"
+        FeatureKind.PLUGIN -> parentId ?: "Plugin"
+        else -> kind.name
     }

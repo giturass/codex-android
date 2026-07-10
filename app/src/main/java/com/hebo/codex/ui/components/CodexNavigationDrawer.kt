@@ -354,7 +354,7 @@ private fun ColumnScope.DrawerContent(
         if (activeServer != null) {
             HorizontalDivider()
             NavigationDrawerItem(
-                label = { Text("服务器与功能") },
+                label = { Text("服务器设置") },
                 selected = false,
                 onClick = onOpenSettings,
                 icon = { Icon(Icons.Rounded.Settings, contentDescription = null) },
@@ -438,7 +438,7 @@ private fun ProjectHeader(
             }
             DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                 DropdownMenuItem(
-                    text = { Text("项目功能") },
+                    text = { Text("项目设置") },
                     leadingIcon = { Icon(Icons.Rounded.Settings, contentDescription = null) },
                     onClick = {
                         menuExpanded = false
