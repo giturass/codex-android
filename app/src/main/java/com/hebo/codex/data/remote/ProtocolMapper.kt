@@ -3,6 +3,7 @@ package com.hebo.codex.data.remote
 import com.hebo.codex.domain.ActivityStatus
 import com.hebo.codex.domain.ChangedFile
 import com.hebo.codex.domain.ConversationItem
+import com.hebo.codex.domain.FileChangeKind
 import com.hebo.codex.domain.ThreadRuntimeStatus
 import com.hebo.codex.domain.ThreadSummary
 import kotlinx.serialization.json.JsonArray
@@ -209,10 +210,12 @@ object ProtocolMapper {
 
     private fun changedFile(element: JsonElement): ChangedFile {
         val value = element.jsonObject
-        val kind = when (val kindValue = value["kind"]) {
-            is JsonPrimitive -> kindValue.content
-            is JsonObject -> kindValue.requiredString("type")
-            else -> throw ProtocolException("文件修改缺少 kind")
+        val kindValue = value.requiredObject("kind")
+        val kind = when (val type = kindValue.requiredString("type")) {
+            "add" -> FileChangeKind.Add
+            "delete" -> FileChangeKind.Delete
+            "update" -> FileChangeKind.Update(movePath = kindValue.optionalString("move_path"))
+            else -> throw ProtocolException("未知文件修改类型：$type")
         }
         return ChangedFile(
             path = value.requiredString("path"),

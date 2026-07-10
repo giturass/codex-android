@@ -4,7 +4,6 @@ package com.hebo.codex.ui.screens.chat
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,7 +20,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -65,7 +63,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -75,6 +72,7 @@ import com.hebo.codex.domain.ApprovalDecision
 import com.hebo.codex.domain.ApprovalType
 import com.hebo.codex.domain.ChangedFile
 import com.hebo.codex.domain.ConversationItem
+import com.hebo.codex.domain.FileChangeKind
 import com.hebo.codex.domain.PendingApproval
 import com.hebo.codex.ui.theme.statusColors
 import com.mikepenz.markdown.compose.components.markdownComponents
@@ -308,7 +306,7 @@ private fun CommandCard(item: ConversationItem.CommandExecution) {
         title = "运行命令",
         status = item.status,
     ) {
-        CodeBlock(item.command)
+        ShellCommandBlock(item.command)
         Text(
             item.cwd,
             style = MaterialTheme.typography.labelSmall,
@@ -318,7 +316,7 @@ private fun CommandCard(item: ConversationItem.CommandExecution) {
         )
         if (item.output.isNotBlank()) {
             Spacer(Modifier.height(8.dp))
-            CodeBlock(item.output)
+            TerminalOutputBlock(item.output)
         }
         if (item.exitCode != null) {
             Text(
@@ -345,13 +343,21 @@ private fun FileChangeCard(item: ConversationItem.FileChange) {
 private fun ChangedFileView(change: ChangedFile) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
-            "${change.kind} · ${change.path}",
+            changedFileTitle(change),
             style = MaterialTheme.typography.labelMedium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        if (change.diff.isNotBlank()) CodeBlock(change.diff)
+        if (change.diff.isNotBlank()) FileDiffBlock(change)
     }
+}
+
+private fun changedFileTitle(change: ChangedFile): String = when (val kind = change.kind) {
+    FileChangeKind.Add -> "新增 · ${change.path}"
+    FileChangeKind.Delete -> "删除 · ${change.path}"
+    is FileChangeKind.Update -> kind.movePath
+        ?.let { destination -> "移动 · ${change.path} → $destination" }
+        ?: "修改 · ${change.path}"
 }
 
 @Composable
@@ -414,26 +420,6 @@ private fun ActivityStatusIcon(status: ActivityStatus) {
 }
 
 @Composable
-private fun CodeBlock(text: String) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-        contentColor = MaterialTheme.colorScheme.onSurface,
-    ) {
-        SelectionContainer {
-            Text(
-                text,
-                modifier = Modifier.horizontalScroll(rememberScrollState()).padding(12.dp),
-                fontFamily = FontFamily.Monospace,
-                style = MaterialTheme.typography.bodySmall,
-                softWrap = false,
-            )
-        }
-    }
-}
-
-@Composable
 private fun ApprovalCard(
     approval: PendingApproval,
     onDecision: (ApprovalDecision) -> Unit,
@@ -448,7 +434,7 @@ private fun ApprovalCard(
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
             approval.reason?.takeIf(String::isNotBlank)?.let { Text(it) }
-            approval.command?.takeIf(String::isNotBlank)?.let { CodeBlock(it) }
+            approval.command?.takeIf(String::isNotBlank)?.let { ShellCommandBlock(it) }
             approval.cwd?.takeIf(String::isNotBlank)?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall)
             }

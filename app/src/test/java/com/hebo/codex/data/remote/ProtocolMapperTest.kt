@@ -2,6 +2,7 @@ package com.hebo.codex.data.remote
 
 import com.hebo.codex.domain.ActivityStatus
 import com.hebo.codex.domain.ConversationItem
+import com.hebo.codex.domain.FileChangeKind
 import com.hebo.codex.domain.ThreadRuntimeStatus
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -71,7 +72,7 @@ class ProtocolMapperTest {
     }
 
     @Test
-    fun mapsFileChangePatch() {
+    fun mapsTypedFileChangeKinds() {
         val item = json.parseToJsonElement(
             """
             {
@@ -79,8 +80,18 @@ class ProtocolMapperTest {
               "id": "patch-1",
               "changes": [
                 {
+                  "path": "Added.kt",
+                  "kind": { "type": "add" },
+                  "diff": "val added = true"
+                },
+                {
+                  "path": "Deleted.kt",
+                  "kind": { "type": "delete" },
+                  "diff": "val deleted = true"
+                },
+                {
                   "path": "LoginViewModel.kt",
-                  "kind": { "type": "update", "movePath": null },
+                  "kind": { "type": "update", "move_path": "UserViewModel.kt" },
                   "diff": "@@ -1 +1 @@"
                 }
               ],
@@ -93,7 +104,12 @@ class ProtocolMapperTest {
 
         assertTrue(mapped is ConversationItem.FileChange)
         mapped as ConversationItem.FileChange
-        assertEquals("update", mapped.changes.single().kind)
+        assertEquals(FileChangeKind.Add, mapped.changes[0].kind)
+        assertEquals(FileChangeKind.Delete, mapped.changes[1].kind)
+        assertEquals(
+            FileChangeKind.Update(movePath = "UserViewModel.kt"),
+            mapped.changes[2].kind,
+        )
         assertEquals(ActivityStatus.IN_PROGRESS, mapped.status)
     }
 }

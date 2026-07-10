@@ -111,9 +111,17 @@ sealed interface ConversationItem {
 
 data class ChangedFile(
     val path: String,
-    val kind: String,
+    val kind: FileChangeKind,
     val diff: String,
 )
+
+sealed interface FileChangeKind {
+    data object Add : FileChangeKind
+
+    data object Delete : FileChangeKind
+
+    data class Update(val movePath: String?) : FileChangeKind
+}
 
 enum class ActivityStatus {
     IN_PROGRESS,
@@ -143,4 +151,3 @@ enum class ApprovalDecision(val wireValue: String) {
     DECLINE("decline"),
     CANCEL("cancel"),
 }
-

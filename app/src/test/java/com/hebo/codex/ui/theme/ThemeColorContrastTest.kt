@@ -42,6 +42,12 @@ class ThemeColorContrastTest {
     }
 
     @Test
+    fun diffTextMeetsContrastRequirement() {
+        assertDiffColors("浅色", LightStatusColors, LightColors)
+        assertDiffColors("深色", DarkStatusColors, DarkColors)
+    }
+
+    @Test
     fun semanticGraphicsMeetContrastRequirement() {
         assertStatusColors(
             theme = "浅色",
@@ -66,6 +72,17 @@ class ThemeColorContrastTest {
         assertContrast("${theme}失败状态", colorScheme.error, background, GRAPHIC_CONTRAST)
         assertContrast("${theme}未连接状态", colorScheme.outline, background, GRAPHIC_CONTRAST)
         assertContrast("${theme}主色图标", colorScheme.primary, background, GRAPHIC_CONTRAST)
+    }
+
+    private fun assertDiffColors(
+        theme: String,
+        colors: CodexStatusColors,
+        colorScheme: ColorScheme,
+    ) {
+        val background = colorScheme.surfaceContainerHighest
+        assertContrast("${theme}新增文本", colors.success, background, TEXT_CONTRAST)
+        assertContrast("${theme}删除文本", colorScheme.error, background, TEXT_CONTRAST)
+        assertContrast("${theme}区块文本", colorScheme.primary, background, TEXT_CONTRAST)
     }
 
     private fun assertContrast(
