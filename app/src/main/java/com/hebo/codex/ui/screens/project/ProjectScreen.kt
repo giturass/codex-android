@@ -4,26 +4,18 @@ package com.hebo.codex.ui.screens.project
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Folder
-import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -34,6 +26,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -42,8 +35,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.hebo.codex.ui.components.TaskPromptBar
 import com.hebo.codex.ui.components.ThreadRow
 
 @Composable
@@ -78,18 +72,7 @@ fun ProjectScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = {
-                    Column {
-                        Text(state.projectName, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(
-                            state.cwd,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                },
+                title = { Text(state.projectName, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
@@ -99,92 +82,65 @@ fun ProjectScreen(
                     IconButton(onClick = onOpenServerHub) {
                         Icon(Icons.Rounded.Settings, contentDescription = "服务器能力")
                     }
-                    IconButton(onClick = viewModel::refresh) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "刷新")
-                    }
                 },
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
+        bottomBar = {
+            TaskPromptBar(
+                label = "在此项目中开始新任务",
+                isLoading = state.isCreatingConversation,
                 onClick = viewModel::startConversation,
-                icon = {
-                    if (state.isCreatingConversation) CircularProgressIndicator(strokeWidth = 2.dp)
-                    else Icon(Icons.Rounded.Add, contentDescription = null)
-                },
-                text = { Text("新建会话") },
             )
         },
     ) { padding ->
-        LazyColumn(
+        PullToRefreshBox(
+            isRefreshing = state.isLoading,
+            onRefresh = viewModel::refresh,
             modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 100.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            item {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                    ),
-                ) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(18.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            Icons.Rounded.Folder,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                        Spacer(Modifier.width(14.dp))
-                        Column {
-                            Text(state.projectName, style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                state.cwd,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 100.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                item("path") {
+                    Text(
+                        state.cwd,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                item("title") { Text("最近会话", style = MaterialTheme.typography.titleMedium) }
+                if (state.threads.isNotEmpty()) {
+                    items(state.threads, key = { it.id }) { thread ->
+                        ThreadRow(thread = thread, onClick = { onOpenConversation(thread.id) })
+                    }
+                } else if (state.isLoading) {
+                    item("loading") { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+                } else {
+                    item("empty") {
+                        Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
+                            Text("该项目还没有会话", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
-            }
-            item { Text("本项目最近会话", style = MaterialTheme.typography.titleMedium) }
-            if (state.isLoading) {
-                item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
-            } else if (state.threads.isEmpty()) {
-                item {
-                    Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
-                        Text("该项目还没有会话", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            } else {
-                item {
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                        ),
-                    ) {
-                        state.threads.forEach { thread ->
-                            ThreadRow(thread = thread, onClick = { onOpenConversation(thread.id) })
+                if (state.nextCursor != null) {
+                    item("load-more") {
+                        OutlinedButton(
+                            onClick = viewModel::loadMore,
+                            enabled = !state.isLoadingMore,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            if (state.isLoadingMore) CircularProgressIndicator(strokeWidth = 2.dp)
+                            else Text("加载更多")
                         }
                     }
                 }
+                item("end") { Spacer(Modifier.height(1.dp)) }
             }
-            if (state.nextCursor != null) {
-                item {
-                    OutlinedButton(
-                        onClick = viewModel::loadMore,
-                        enabled = !state.isLoadingMore,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        if (state.isLoadingMore) CircularProgressIndicator(strokeWidth = 2.dp)
-                        else Text("加载更多")
-                    }
-                }
-            }
-            item { Spacer(Modifier.height(1.dp)) }
         }
     }
 }

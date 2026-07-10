@@ -7,6 +7,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.hebo.codex.domain.ConnectionStatus
 import com.hebo.codex.ui.theme.statusColors
@@ -19,7 +21,12 @@ fun ConnectionIndicator(status: ConnectionStatus, modifier: Modifier = Modifier)
         ConnectionStatus.Disconnected -> MaterialTheme.colorScheme.outline
         is ConnectionStatus.Failed -> MaterialTheme.colorScheme.error
     }
-    Box(modifier.size(9.dp).background(color, CircleShape))
+    Box(
+        modifier
+            .size(9.dp)
+            .background(color, CircleShape)
+            .semantics { contentDescription = status.label() },
+    )
 }
 
 fun ConnectionStatus.label(): String = when (this) {

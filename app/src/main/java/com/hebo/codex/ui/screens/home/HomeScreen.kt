@@ -2,7 +2,6 @@
 
 package com.hebo.codex.ui.screens.home
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -12,30 +11,32 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Dns
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Menu
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -44,6 +45,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -53,7 +55,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -70,16 +71,18 @@ import com.hebo.codex.domain.ThreadSortKey
 import com.hebo.codex.domain.ThreadSourceKind
 import com.hebo.codex.domain.ThreadSummary
 import com.hebo.codex.ui.components.ProjectCard
-import com.hebo.codex.ui.components.ServerSelector
+import com.hebo.codex.ui.components.TaskPromptBar
 import com.hebo.codex.ui.components.ThreadRow
 
 @Composable
 fun HomeScreen(
     viewModel: HomeViewModel,
+    newConversationRequest: Int,
+    onNewConversationRequestHandled: () -> Unit,
+    onOpenNavigation: () -> Unit,
     onAddServer: () -> Unit,
     onOpenProject: (serverId: String, cwd: String) -> Unit,
     onOpenConversation: (serverId: String, threadId: String) -> Unit,
-    onOpenServerHub: (serverId: String) -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -90,6 +93,13 @@ fun HomeScreen(
     LifecycleResumeEffect(viewModel) {
         viewModel.refresh()
         onPauseOrDispose {}
+    }
+
+    LaunchedEffect(newConversationRequest) {
+        if (newConversationRequest > 0) {
+            showNewConversation = true
+            onNewConversationRequestHandled()
+        }
     }
 
     LaunchedEffect(viewModel) {
@@ -115,27 +125,39 @@ fun HomeScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Codex") },
+                title = {
+                    Column {
+                        Text("Codex")
+                        state.activeServer?.let { server ->
+                            Text(
+                                server.name,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = onOpenNavigation) {
+                        Icon(Icons.Rounded.Menu, contentDescription = "打开导航")
+                    }
+                },
                 actions = {
                     if (state.activeServer != null) {
-                        IconButton(onClick = { onOpenServerHub(state.activeServerId.orEmpty()) }) {
-                            Icon(Icons.Rounded.Settings, contentDescription = "服务器能力")
-                        }
-                        IconButton(onClick = viewModel::refresh) {
-                            Icon(Icons.Rounded.Refresh, contentDescription = "刷新")
+                        IconButton(onClick = { showNewConversation = true }) {
+                            Icon(Icons.Rounded.Add, contentDescription = "新建任务")
                         }
                     }
                 },
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        floatingActionButton = {
+        bottomBar = {
             if (state.activeServer != null) {
-                ExtendedFloatingActionButton(
+                TaskPromptBar(
+                    label = "开始一项新任务",
+                    isLoading = state.isCreatingConversation,
                     onClick = { showNewConversation = true },
-                    icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
-                    text = { Text("新建会话") },
-                    expanded = !state.isCreatingConversation,
                 )
             }
         },
@@ -148,16 +170,12 @@ fun HomeScreen(
 
             else -> HomeContent(
                 state = state,
-                onSelectServer = viewModel::selectServer,
-                onReconnectServer = viewModel::reconnectServer,
-                onRemoveServer = viewModel::removeServer,
-                onAddServer = onAddServer,
-                onSelectTab = viewModel::selectTab,
                 onOpenProject = { cwd -> onOpenProject(state.activeServerId.orEmpty(), cwd) },
                 onOpenConversation = { threadId ->
                     onOpenConversation(state.activeServerId.orEmpty(), threadId)
                 },
-                onSearch = viewModel::search,
+                onClearSearch = { viewModel.search("") },
+                onRefresh = viewModel::refresh,
                 onArchived = viewModel::setArchived,
                 onOpenFilters = { showThreadFilters = true },
                 onLoadMore = viewModel::loadMore,
@@ -168,7 +186,7 @@ fun HomeScreen(
     }
 
     if (showNewConversation) {
-        NewConversationDialog(
+        NewConversationSheet(
             projects = state.projects,
             models = state.models,
             isSaving = state.isCreatingConversation,
@@ -218,179 +236,94 @@ fun HomeScreen(
 @Composable
 private fun HomeContent(
     state: HomeUiState,
-    onSelectServer: (String) -> Unit,
-    onReconnectServer: (String) -> Unit,
-    onRemoveServer: (String) -> Unit,
-    onAddServer: () -> Unit,
-    onSelectTab: (HomeTab) -> Unit,
     onOpenProject: (String) -> Unit,
     onOpenConversation: (String) -> Unit,
-    onSearch: (String) -> Unit,
+    onClearSearch: () -> Unit,
+    onRefresh: () -> Unit,
     onArchived: (Boolean) -> Unit,
     onOpenFilters: () -> Unit,
     onLoadMore: () -> Unit,
     onThreadMenu: (ThreadSummary) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier) {
-        ServerSelector(
-            servers = state.servers,
-            activeServer = state.activeServer,
-            statuses = state.connectionStatuses,
-            onSelect = onSelectServer,
-            onReconnect = onReconnectServer,
-            onDelete = onRemoveServer,
-            onAdd = onAddServer,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-        )
-        Spacer(Modifier.height(16.dp))
-        if (state.activeServer == null) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("请选择服务器")
+    if (state.activeServer == null) {
+        Box(modifier, contentAlignment = Alignment.Center) {
+            Text("请从侧边栏选择服务器")
+        }
+        return
+    }
+    PullToRefreshBox(
+        isRefreshing = state.isLoading,
+        onRefresh = onRefresh,
+        modifier = modifier,
+    ) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 112.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            item("intro") {
+                Column(Modifier.fillMaxWidth().padding(vertical = 22.dp)) {
+                    Text("今天想处理什么？", style = MaterialTheme.typography.titleLarge)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "从最近项目继续，或在下方开始一项新任务",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
-        } else {
-            HomeTabs(
-                selected = state.selectedTab,
-                onSelect = onSelectTab,
-                modifier = Modifier.padding(horizontal = 16.dp),
-            )
-            if (state.isLoading) {
-                LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
+            item("projects-title") { SectionTitle("最近项目") }
+            if (!state.isLoading && state.projects.isEmpty()) {
+                item("projects-empty") { EmptyContent("还没有项目记录", "新建任务时输入服务端项目路径") }
             }
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 16.dp, top = 20.dp, end = 16.dp, bottom = 100.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                when (state.selectedTab) {
-                    HomeTab.PROJECTS -> {
-                        item { SectionTitle("最近项目") }
-                        if (!state.isLoading && state.projects.isEmpty()) {
-                            item { EmptyContent("还没有项目记录", "新建会话时输入服务端项目路径") }
-                        }
-                        items(state.projects, key = RecentProject::path) { project ->
-                            ProjectCard(project, onClick = { onOpenProject(project.path) })
+            items(state.projects.take(6), key = RecentProject::path) { project ->
+                ProjectCard(project, onClick = { onOpenProject(project.path) })
+            }
+            item("threads-header") {
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 18.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("最近会话", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                    if (state.searchTerm.isNotBlank()) {
+                        IconButton(onClick = onClearSearch) {
+                            Icon(Icons.Rounded.Close, contentDescription = "清除搜索")
                         }
                     }
-
-                    HomeTab.CONVERSATIONS -> {
-                        item { SectionTitle("最近会话") }
-                        item {
-                            OutlinedTextField(
-                                value = state.searchTerm,
-                                onValueChange = onSearch,
-                                modifier = Modifier.fillMaxWidth(),
-                                label = { Text("搜索会话") },
-                                singleLine = true,
-                            )
-                        }
-                        item {
-                            Row(
-                                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                FilterChip(
-                                    selected = state.showArchived,
-                                    onClick = { onArchived(!state.showArchived) },
-                                    label = { Text(if (state.showArchived) "已归档" else "当前会话") },
-                                )
-                                FilterChip(
-                                    selected = state.modelProviders.isNotEmpty() || state.sourceKinds.isNotEmpty() ||
-                                        state.sortKey != ThreadSortKey.RECENCY_AT ||
-                                        state.sortDirection != SortDirection.DESC,
-                                    onClick = onOpenFilters,
-                                    label = { Text("筛选与排序") },
-                                )
-                            }
-                        }
-                        if (!state.isLoading && state.threads.isEmpty()) {
-                            item { EmptyContent("还没有历史会话", "点击下方按钮开始第一个会话") }
-                        }
-                        item {
-                            Card(
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                                ),
-                            ) {
-                                state.threads.forEach { thread ->
-                                    ThreadRow(
-                                        thread = thread,
-                                        showProjectPath = true,
-                                        onClick = { onOpenConversation(thread.id) },
-                                        onMenu = { onThreadMenu(thread) },
-                                    )
-                                }
-                            }
-                        }
-                        if (state.nextCursor != null) {
-                            item {
-                                OutlinedButton(
-                                    onClick = onLoadMore,
-                                    enabled = !state.isLoadingMore,
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    if (state.isLoadingMore) CircularProgressIndicator(strokeWidth = 2.dp)
-                                    else Text("加载更多")
-                                }
-                            }
-                        }
+                    FilterChip(
+                        selected = state.showArchived,
+                        onClick = { onArchived(!state.showArchived) },
+                        label = { Text(if (state.showArchived) "已归档" else "当前") },
+                    )
+                    IconButton(onClick = onOpenFilters) {
+                        Icon(Icons.Rounded.Tune, contentDescription = "筛选与排序")
+                    }
+                }
+            }
+            if (!state.isLoading && state.threads.isEmpty()) {
+                item("threads-empty") { EmptyContent("还没有历史会话", "从下方开始第一项任务") }
+            }
+            items(state.threads, key = ThreadSummary::id) { thread ->
+                ThreadRow(
+                    thread = thread,
+                    showProjectPath = true,
+                    onClick = { onOpenConversation(thread.id) },
+                    onMenu = { onThreadMenu(thread) },
+                )
+            }
+            if (state.nextCursor != null) {
+                item("load-more") {
+                    OutlinedButton(
+                        onClick = onLoadMore,
+                        enabled = !state.isLoadingMore,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        if (state.isLoadingMore) CircularProgressIndicator(strokeWidth = 2.dp)
+                        else Text("加载更多")
                     }
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun HomeTabs(
-    selected: HomeTab,
-    onSelect: (HomeTab) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        TabButton(
-            text = "最近项目",
-            selected = selected == HomeTab.PROJECTS,
-            onClick = { onSelect(HomeTab.PROJECTS) },
-            modifier = Modifier.weight(1f),
-        )
-        TabButton(
-            text = "最近会话",
-            selected = selected == HomeTab.CONVERSATIONS,
-            onClick = { onSelect(HomeTab.CONVERSATIONS) },
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
-
-@Composable
-private fun TabButton(
-    text: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Card(
-        modifier = modifier.clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (selected) {
-                MaterialTheme.colorScheme.primaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceContainer
-            },
-        ),
-    ) {
-        Text(
-            text,
-            modifier = Modifier.fillMaxWidth().padding(vertical = 11.dp),
-            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            textAlign = TextAlign.Center,
-        )
     }
 }
 
@@ -509,7 +442,7 @@ private fun ThreadFiltersDialog(
 }
 
 @Composable
-private fun NewConversationDialog(
+private fun NewConversationSheet(
     projects: List<RecentProject>,
     models: List<ModelOption>,
     isSaving: Boolean,
@@ -533,51 +466,79 @@ private fun NewConversationDialog(
     var baseInstructions by rememberSaveable { mutableStateOf("") }
     var developerInstructions by rememberSaveable { mutableStateOf("") }
     var configJson by rememberSaveable { mutableStateOf("") }
+    var showAdvanced by rememberSaveable { mutableStateOf(false) }
     val selectedModel = selectableModels.firstOrNull { it.model == modelId }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("新建会话") },
-        text = {
-            Column(
-                Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+    ModalBottomSheet(
+        onDismissRequest = { if (!isSaving) onDismiss() },
+        containerColor = MaterialTheme.colorScheme.surface,
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.9f)
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("新建任务", style = MaterialTheme.typography.titleLarge)
+            Text(
+                "先选择工作目录，其他设置可以沿用服务器默认值",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (projects.isNotEmpty()) {
+                Text("最近项目", style = MaterialTheme.typography.labelLarge)
+                projects.take(4).forEach { project ->
+                    OutlinedButton(
+                        onClick = { cwd = project.path },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(project.name, modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
+                        if (cwd == project.path) Text("已选择")
+                    }
+                }
+            }
+            OutlinedTextField(
+                value = cwd,
+                onValueChange = { cwd = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("服务端项目路径") },
+                placeholder = { Text("/home/user/project") },
+                singleLine = true,
+                shape = MaterialTheme.shapes.medium,
+            )
+            if (selectableModels.isNotEmpty()) {
+                Text("模型", style = MaterialTheme.typography.labelLarge)
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                    selectableModels.forEach { model ->
+                        FilterChip(
+                            selected = model.model == modelId,
+                            onClick = {
+                                modelId = model.model
+                                serviceTier = model.defaultServiceTier.orEmpty()
+                            },
+                            label = { Text(model.displayName) },
+                            modifier = Modifier.padding(end = 8.dp),
+                        )
+                    }
+                }
+                selectedModel?.description?.takeIf(String::isNotBlank)?.let { description ->
+                    Text(
+                        description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            HorizontalDivider(Modifier.padding(top = 4.dp))
+            TextButton(
+                onClick = { showAdvanced = !showAdvanced },
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                if (projects.isNotEmpty()) {
-                    Text("最近项目", style = MaterialTheme.typography.labelLarge)
-                    projects.take(4).forEach { project ->
-                        OutlinedButton(
-                            onClick = { cwd = project.path },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(project.name, modifier = Modifier.weight(1f), textAlign = TextAlign.Start)
-                            if (cwd == project.path) Text("已选择")
-                        }
-                    }
-                }
-                OutlinedTextField(
-                    value = cwd,
-                    onValueChange = { cwd = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("服务端项目路径") },
-                    placeholder = { Text("/home/user/project") },
-                    singleLine = true,
-                )
-                if (selectableModels.isNotEmpty()) {
-                    Text("模型", style = MaterialTheme.typography.labelLarge)
-                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                        selectableModels.forEach { model ->
-                            FilterChip(
-                                selected = model.model == modelId,
-                                onClick = {
-                                    modelId = model.model
-                                    serviceTier = model.defaultServiceTier.orEmpty()
-                                },
-                                label = { Text(model.displayName) },
-                                modifier = Modifier.padding(end = 8.dp),
-                            )
-                        }
-                    }
-                }
+                Text(if (showAdvanced) "收起高级设置" else "高级设置")
+            }
+            if (showAdvanced) {
                 OutlinedTextField(
                     value = modelId.orEmpty(),
                     onValueChange = { modelId = it.ifBlank { null } },
@@ -655,8 +616,6 @@ private fun NewConversationDialog(
                     androidx.compose.material3.Switch(checked = ephemeral, onCheckedChange = { ephemeral = it })
                 }
             }
-        },
-        confirmButton = {
             Button(
                 onClick = {
                     onCreate(
@@ -677,13 +636,21 @@ private fun NewConversationDialog(
                     )
                 },
                 enabled = cwd.isNotBlank() && !isSaving,
+                modifier = Modifier.fillMaxWidth(),
             ) {
-                if (isSaving) CircularProgressIndicator(strokeWidth = 2.dp)
-                else Text("创建")
+                if (isSaving) {
+                    CircularProgressIndicator(
+                        Modifier.size(20.dp),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    Text("开始会话")
+                }
             }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
-    )
+            Spacer(Modifier.height(12.dp))
+        }
+    }
 }
 
 @Composable

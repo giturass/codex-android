@@ -28,11 +28,6 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-enum class HomeTab {
-    PROJECTS,
-    CONVERSATIONS,
-}
-
 data class HomeUiState(
     val servers: List<ServerProfile> = emptyList(),
     val activeServerId: String? = null,
@@ -41,7 +36,6 @@ data class HomeUiState(
     val projects: List<RecentProject> = emptyList(),
     val models: List<ModelOption> = emptyList(),
     val serverNotices: List<ConversationNotice> = emptyList(),
-    val selectedTab: HomeTab = HomeTab.PROJECTS,
     val searchTerm: String = "",
     val showArchived: Boolean = false,
     val sortKey: ThreadSortKey = ThreadSortKey.RECENCY_AT,
@@ -113,11 +107,8 @@ class HomeViewModel(
         }
     }
 
-    fun selectTab(tab: HomeTab) {
-        mutableState.update { it.copy(selectedTab = tab) }
-    }
-
     fun selectServer(serverId: String) {
+        mutableState.update { it.copy(searchTerm = "") }
         viewModelScope.launch {
             runSuspendCatching { repository.selectServer(serverId) }
                 .onFailure(::showError)

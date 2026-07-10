@@ -144,7 +144,11 @@ fun AddServerScreen(
             ) {
                 if (state.isSaving) {
                     Row {
-                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        CircularProgressIndicator(
+                            Modifier.size(20.dp),
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            strokeWidth = 2.dp,
+                        )
                         Spacer(Modifier.width(10.dp))
                         Text("正在测试连接")
                     }

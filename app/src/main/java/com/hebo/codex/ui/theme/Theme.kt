@@ -2,6 +2,7 @@ package com.hebo.codex.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -10,25 +11,79 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.unit.dp
 
 internal val LightColors = lightColorScheme(
-    primary = Purple,
-    onPrimary = Color.White,
-    primaryContainer = PurpleContainer,
-    onPrimaryContainer = Color(0xFF24105F),
-    secondary = Color(0xFF65558F),
-    surface = Color(0xFFFFFBFF),
-    surfaceContainer = Color(0xFFF5F2FA),
+    primary = Ink,
+    onPrimary = Paper,
+    primaryContainer = LightSurfaceStrong,
+    onPrimaryContainer = Ink,
+    secondary = LightMuted,
+    onSecondary = Paper,
+    secondaryContainer = LightSurface,
+    onSecondaryContainer = Ink,
+    tertiary = LightMuted,
+    onTertiary = Paper,
+    tertiaryContainer = LightSurface,
+    onTertiaryContainer = Ink,
+    background = Paper,
+    onBackground = Ink,
+    surface = Paper,
+    onSurface = Ink,
+    surfaceVariant = LightSurface,
+    onSurfaceVariant = LightMuted,
+    surfaceContainerLowest = Paper,
+    surfaceContainerLow = LightSurfaceSubtle,
+    surfaceContainer = LightSurface,
+    surfaceContainerHigh = LightSurfaceStrong,
+    surfaceContainerHighest = LightSurfaceStrong,
+    outline = LightOutline,
+    outlineVariant = LightOutlineSubtle,
+    inverseSurface = DarkSurface,
+    inverseOnSurface = Paper,
+    inversePrimary = Paper,
+    scrim = Color.Black,
 )
 
 internal val DarkColors = darkColorScheme(
-    primary = PurpleDark,
-    onPrimary = Color(0xFF2A1479),
-    primaryContainer = PurpleContainerDark,
-    onPrimaryContainer = Color(0xFFE8E0FF),
-    secondary = Color(0xFFCEC2DC),
-    surface = Color(0xFF121217),
-    surfaceContainer = Color(0xFF1E1D24),
+    primary = DarkText,
+    onPrimary = Ink,
+    primaryContainer = DarkSurfaceStrong,
+    onPrimaryContainer = DarkText,
+    secondary = DarkMuted,
+    onSecondary = Ink,
+    secondaryContainer = DarkSurface,
+    onSecondaryContainer = DarkText,
+    tertiary = DarkMuted,
+    onTertiary = Ink,
+    tertiaryContainer = DarkSurface,
+    onTertiaryContainer = DarkText,
+    background = DarkBackground,
+    onBackground = DarkText,
+    surface = DarkBackground,
+    onSurface = DarkText,
+    surfaceVariant = DarkSurface,
+    onSurfaceVariant = DarkMuted,
+    surfaceContainerLowest = DarkBackground,
+    surfaceContainerLow = DarkSurfaceSubtle,
+    surfaceContainer = DarkSurface,
+    surfaceContainerHigh = DarkSurfaceStrong,
+    surfaceContainerHighest = DarkSurfaceStrong,
+    outline = DarkOutline,
+    outlineVariant = DarkOutlineSubtle,
+    inverseSurface = LightSurface,
+    inverseOnSurface = Ink,
+    inversePrimary = Ink,
+    scrim = Color.Black,
+)
+
+internal val CodexShapes = Shapes(
+    extraSmall = RoundedCornerShape(8.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(22.dp),
+    extraLarge = RoundedCornerShape(28.dp),
 )
 
 @Immutable
@@ -66,6 +121,7 @@ fun CodexTheme(
         MaterialTheme(
             colorScheme = if (darkTheme) DarkColors else LightColors,
             typography = CodexTypography,
+            shapes = CodexShapes,
             content = content,
         )
     }
