@@ -39,6 +39,7 @@ import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.HourglassTop
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.Stop
@@ -48,6 +49,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -69,10 +71,16 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -110,6 +118,10 @@ import com.mikepenz.markdown.compose.elements.highlightedCodeBlock
 import com.mikepenz.markdown.compose.elements.highlightedCodeFence
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.model.rememberMarkdownState
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 
@@ -117,6 +129,8 @@ private val highlightedMarkdownComponents = markdownComponents(
     codeBlock = highlightedCodeBlock,
     codeFence = highlightedCodeFence,
 )
+
+private const val CHAT_LIST_END_KEY = "chat-list-end"
 
 @Composable
 fun ChatScreen(
@@ -128,7 +142,23 @@ fun ChatScreen(
     val conversation = state.conversation
     val snackbarHostState = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
+    val scrollScope = rememberCoroutineScope()
+    var autoFollow by rememberSaveable(conversation?.threadId) { mutableStateOf(true) }
     var dialog by remember { mutableStateOf<ChatDialog?>(null) }
+    val userScrollConnection = remember(conversation?.threadId) {
+        object : NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset {
+                if (source == NestedScrollSource.UserInput && consumed.y != 0f) {
+                    autoFollow = false
+                }
+                return Offset.Zero
+            }
+        }
+    }
 
     LaunchedEffect(viewModel) {
         viewModel.events.collect { event ->
@@ -144,16 +174,19 @@ fun ChatScreen(
             viewModel.clearError()
         }
     }
-    LaunchedEffect(
-        conversation?.items?.size,
-        conversation?.items?.lastOrNull(),
-        conversation?.pendingRequests?.size,
-        conversation?.plan,
-        conversation?.turnDiff,
-    ) {
-        val lastIndex = listState.layoutInfo.totalItemsCount - 1
-        if (lastIndex >= 0) {
-            listState.animateScrollToItem(lastIndex)
+    LaunchedEffect(listState, autoFollow) {
+        if (autoFollow) {
+            snapshotFlow {
+                val lastIndex = listState.layoutInfo.totalItemsCount - 1
+                lastIndex.takeIf { autoFollow && it >= 0 && listState.canScrollForward }
+            }.filterNotNull().collectLatest { lastIndex ->
+                listState.scrollToItem(lastIndex)
+            }
+        } else {
+            snapshotFlow {
+                !listState.isScrollInProgress && !listState.canScrollForward
+            }.first { it }
+            autoFollow = true
         }
     }
 
@@ -193,6 +226,25 @@ fun ChatScreen(
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
+        floatingActionButton = {
+            if (conversation != null && !autoFollow) {
+                ExtendedFloatingActionButton(
+                    onClick = {
+                        scrollScope.launch {
+                            val lastIndex = listState.layoutInfo.totalItemsCount - 1
+                            if (lastIndex >= 0) {
+                                listState.animateScrollToItem(lastIndex)
+                                autoFollow = true
+                            }
+                        }
+                    },
+                    icon = {
+                        Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = null)
+                    },
+                    text = { Text("回到底部") },
+                )
+            }
+        },
         bottomBar = {
             if (conversation != null) {
                 ChatComposer(
@@ -201,7 +253,10 @@ fun ChatScreen(
                     resources = state.inputResources,
                     isLoadingResources = state.isLoadingResources,
                     onLoadResources = viewModel::loadInputResources,
-                    onSend = viewModel::send,
+                    onSend = { input, options ->
+                        autoFollow = true
+                        viewModel.send(input, options)
+                    },
                     onStop = viewModel::interrupt,
                 )
             }
@@ -224,7 +279,7 @@ fun ChatScreen(
 
             else -> LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize().padding(padding),
+                modifier = Modifier.fillMaxSize().padding(padding).nestedScroll(userScrollConnection),
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
@@ -271,7 +326,10 @@ fun ChatScreen(
                     )
                 }
                 if (conversation.isRunning) {
-                    item { RunningIndicator() }
+                    item("running") { RunningIndicator() }
+                }
+                item(CHAT_LIST_END_KEY) {
+                    Spacer(Modifier.height(1.dp))
                 }
             }
         }
