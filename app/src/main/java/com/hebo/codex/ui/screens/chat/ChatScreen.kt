@@ -45,6 +45,7 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
@@ -170,6 +171,7 @@ fun ChatScreen(
     rateLimitsState: RateLimitsUiState,
     showNavigationIcon: Boolean,
     onOpenNavigation: () -> Unit,
+    onNewTask: (String) -> Unit,
     onOpenConversation: (String) -> Unit,
     onRefreshRateLimits: () -> Unit,
 ) {
@@ -287,6 +289,11 @@ fun ChatScreen(
                             state = rateLimitsState,
                             onRefresh = onRefreshRateLimits,
                         )
+                        if (showNavigationIcon) {
+                            IconButton(onClick = { onNewTask(conversation.cwd) }) {
+                                Icon(Icons.Rounded.Edit, contentDescription = "新建任务")
+                            }
+                        }
                         IconButton(onClick = { dialog = ChatDialog.Actions }) {
                             Icon(Icons.Rounded.MoreVert, contentDescription = "会话操作")
                         }

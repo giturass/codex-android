@@ -40,7 +40,13 @@ import kotlinx.serialization.Serializable
 private val PermanentDrawerThreshold = 840.dp
 
 @Serializable
-private data object NewTaskRoute
+internal data class NewTaskRoute(
+    val serverId: String? = null,
+    val cwd: String? = null,
+)
+
+internal fun isNewTaskDestination(route: String?): Boolean =
+    route?.substringBefore('?') == NewTaskRoute::class.qualifiedName
 
 @Serializable
 private data class ServerEditorRoute(val serverId: String? = null)
@@ -65,16 +71,20 @@ fun CodexApp(
     val scope = rememberCoroutineScope()
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val activeThreadId = currentBackStackEntry?.arguments?.getString("threadId")
-    val newTaskSelected = currentBackStackEntry?.destination?.route == NewTaskRoute::class.qualifiedName
+    val newTaskSelected = isNewTaskDestination(currentBackStackEntry?.destination?.route)
 
     fun closeDrawer() {
         scope.launch { drawerState.close() }
     }
 
-    fun openNewTask() {
-        navController.navigate(NewTaskRoute) {
-            popUpTo<NewTaskRoute> { inclusive = false }
-            launchSingleTop = true
+    fun openNewTask(serverId: String? = null, cwd: String? = null) {
+        navController.navigate(
+            NewTaskRoute(
+                serverId = serverId,
+                cwd = cwd?.takeIf(String::isNotBlank),
+            ),
+        ) {
+            popUpTo<NewTaskRoute> { inclusive = true }
         }
     }
 
@@ -94,7 +104,7 @@ fun CodexApp(
                     val currentServerId = arguments?.getString("serverId")
                     val currentThreadId = arguments?.getString("threadId")
                     if (currentServerId == event.serverId && currentThreadId == event.threadId) {
-                        openNewTask()
+                        openNewTask(event.serverId)
                     }
                 }
             }
@@ -128,7 +138,7 @@ fun CodexApp(
                 isPermanent = isPermanent,
                 onNewConversation = {
                     closeDrawer()
-                    openNewTask()
+                    openNewTask(homeState.activeServerId)
                 },
                 onOpenConversation = { threadId ->
                     closeDrawer()
@@ -137,6 +147,10 @@ fun CodexApp(
                 onOpenProjectSettings = { cwd ->
                     closeDrawer()
                     homeState.activeServerId?.let { navController.navigate(ServerHubRoute(it, cwd)) }
+                },
+                onNewProjectTask = { cwd ->
+                    closeDrawer()
+                    openNewTask(homeState.activeServerId, cwd)
                 },
                 onSearch = homeViewModel::search,
                 onShowArchived = homeViewModel::setArchived,
@@ -147,9 +161,8 @@ fun CodexApp(
                 onArchiveConversation = homeViewModel::archiveConversation,
                 onDeleteConversation = homeViewModel::deleteConversation,
                 onSelectServer = { serverId ->
-                    homeViewModel.selectServer(serverId)
                     closeDrawer()
-                    openNewTask()
+                    openNewTask(serverId)
                 },
                 onReconnectServer = homeViewModel::reconnectServer,
                 onEditServer = { serverId ->
@@ -172,11 +185,19 @@ fun CodexApp(
             )
         }
         val content: @Composable () -> Unit = {
-            NavHost(navController = navController, startDestination = NewTaskRoute) {
-                composable<NewTaskRoute> {
+            NavHost(navController = navController, startDestination = NewTaskRoute()) {
+                composable<NewTaskRoute> { entry ->
+                    val route = entry.toRoute<NewTaskRoute>()
+                    LaunchedEffect(route.serverId, homeState.activeServerId) {
+                        val serverId = route.serverId
+                        if (serverId != null && serverId != homeState.activeServerId) {
+                            homeViewModel.selectServer(serverId)
+                        }
+                    }
                     HomeScreen(
                         viewModel = homeViewModel,
                         rateLimitsState = homeState.activeServerId?.let(rateLimitsStates::get) ?: RateLimitsUiState(),
+                        initialCwd = route.cwd,
                         showNavigationIcon = !isPermanent,
                         onOpenNavigation = { scope.launch { drawerState.open() } },
                         onAddServer = { navController.navigate(ServerEditorRoute()) },
@@ -204,6 +225,7 @@ fun CodexApp(
                         rateLimitsState = rateLimitsStates[route.serverId] ?: RateLimitsUiState(),
                         showNavigationIcon = !isPermanent,
                         onOpenNavigation = { scope.launch { drawerState.open() } },
+                        onNewTask = { cwd -> openNewTask(route.serverId, cwd) },
                         onOpenConversation = { openConversation(route.serverId, it) },
                         onRefreshRateLimits = { rateLimitsViewModel.refresh(route.serverId) },
                     )

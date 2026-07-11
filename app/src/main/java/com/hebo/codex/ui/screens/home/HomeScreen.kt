@@ -88,6 +88,7 @@ import com.hebo.codex.ui.ratelimits.RateLimitsUiState
 fun HomeScreen(
     viewModel: HomeViewModel,
     rateLimitsState: RateLimitsUiState,
+    initialCwd: String?,
     showNavigationIcon: Boolean,
     onOpenNavigation: () -> Unit,
     onAddServer: () -> Unit,
@@ -96,7 +97,9 @@ fun HomeScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     var message by rememberSaveable(state.activeServerId) { mutableStateOf("") }
-    var cwd by rememberSaveable(state.activeServerId) { mutableStateOf("") }
+    var cwd by rememberSaveable(state.activeServerId, initialCwd) {
+        mutableStateOf(initialCwd.orEmpty())
+    }
     var options by remember(state.activeServerId) { mutableStateOf(ThreadOptions()) }
     var showProjectMenu by remember { mutableStateOf(false) }
     var showCustomPathDialog by remember { mutableStateOf(false) }
