@@ -40,9 +40,11 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
@@ -170,7 +172,6 @@ fun CodexNavigationDrawer(
 private enum class DrawerPage {
     RECENT,
     SEARCH,
-    PROJECTS,
 }
 
 @Composable
@@ -208,6 +209,7 @@ private fun ColumnScope.DrawerContent(
     onOpenSettings: () -> Unit,
 ) {
     var drawerPage by rememberSaveable(activeServer?.id) { mutableStateOf(DrawerPage.RECENT) }
+    var groupByProject by rememberSaveable { mutableStateOf(false) }
     var expandedProjects by remember(activeServer?.id) { mutableStateOf(emptySet<String>()) }
     var expansionInitialized by remember(activeServer?.id) { mutableStateOf(false) }
     var selectedThread by remember(activeServer?.id) { mutableStateOf<ThreadSummary?>(null) }
@@ -274,13 +276,15 @@ private fun ColumnScope.DrawerContent(
             )
             Spacer(Modifier.height(8.dp))
             when (drawerPage) {
-                DrawerPage.RECENT -> DrawerPrimaryActions(
+                DrawerPage.RECENT -> DrawerRecentHeader(
                     newTaskSelected = newTaskSelected,
+                    groupByProject = groupByProject,
                     onNewConversation = {
                         leaveTransientPage()
                         onNewConversation()
                     },
                     onSearch = { drawerPage = DrawerPage.SEARCH },
+                    onGroupByProjectChange = { groupByProject = it },
                 )
 
                 DrawerPage.SEARCH -> DrawerSearchHeader(
@@ -289,11 +293,6 @@ private fun ColumnScope.DrawerContent(
                     onSearch = onSearch,
                     onShowArchived = onShowArchived,
                     onBack = ::showRecent,
-                )
-
-                DrawerPage.PROJECTS -> DrawerPageHeader(
-                    title = "项目",
-                    onBack = { drawerPage = DrawerPage.RECENT },
                 )
             }
         }
@@ -339,9 +338,9 @@ private fun ColumnScope.DrawerContent(
                     }
                 }
 
-                activeServer != null && drawerPage == DrawerPage.PROJECTS -> {
+                activeServer != null && groupByProject -> {
                     if (!isLoading && projects.isEmpty()) {
-                        item("projects-empty") { DrawerEmptyMessage("还没有项目") }
+                        item("grouped-empty") { DrawerEmptyMessage("还没有会话") }
                     }
                     items(projects, key = RecentProject::path) { project ->
                         val expanded = project.path in expandedProjects
@@ -383,7 +382,6 @@ private fun ColumnScope.DrawerContent(
                 }
 
                 activeServer != null -> {
-                    item("recent-title") { DrawerSectionTitle("最近会话") }
                     if (!isLoading && recentThreads.isEmpty()) {
                         item("recent-empty") { DrawerEmptyMessage("还没有会话") }
                     }
@@ -395,15 +393,6 @@ private fun ColumnScope.DrawerContent(
                             showProject = true,
                             onClick = { onOpenConversation(thread.id) },
                             onMenu = { selectedThread = thread },
-                        )
-                    }
-                    item("projects-entry") {
-                        NavigationDrawerItem(
-                            label = { Text("查看全部项目") },
-                            selected = false,
-                            onClick = { drawerPage = DrawerPage.PROJECTS },
-                            icon = { Icon(Icons.Rounded.Folder, contentDescription = null) },
-                            modifier = Modifier.padding(top = 4.dp),
                         )
                     }
                 }
@@ -468,24 +457,43 @@ private fun ColumnScope.DrawerContent(
 }
 
 @Composable
-private fun DrawerPrimaryActions(
+private fun DrawerRecentHeader(
     newTaskSelected: Boolean,
+    groupByProject: Boolean,
     onNewConversation: () -> Unit,
     onSearch: () -> Unit,
+    onGroupByProjectChange: (Boolean) -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().padding(start = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        NavigationDrawerItem(
-            label = { Text("新建任务") },
-            selected = newTaskSelected,
-            onClick = onNewConversation,
-            icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
+        Text(
+            text = "最近会话",
             modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (newTaskSelected) {
+            FilledTonalIconButton(onClick = onNewConversation) {
+                Icon(Icons.Rounded.Add, contentDescription = "新建任务")
+            }
+        } else {
+            IconButton(onClick = onNewConversation) {
+                Icon(Icons.Rounded.Add, contentDescription = "新建任务")
+            }
+        }
         IconButton(onClick = onSearch) {
             Icon(Icons.Rounded.Search, contentDescription = "搜索会话")
+        }
+        IconToggleButton(
+            checked = groupByProject,
+            onCheckedChange = onGroupByProjectChange,
+        ) {
+            Icon(
+                Icons.Rounded.Folder,
+                contentDescription = "按项目分组",
+            )
         }
     }
 }
@@ -543,22 +551,6 @@ private fun DrawerSearchHeader(
                 label = { Text("已归档") },
             )
         }
-    }
-}
-
-@Composable
-private fun DrawerPageHeader(
-    title: String,
-    onBack: () -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        IconButton(onClick = onBack) {
-            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回最近会话")
-        }
-        Text(title, style = MaterialTheme.typography.titleMedium)
     }
 }
 
