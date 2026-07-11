@@ -1,5 +1,6 @@
 package com.hebo.codex.ui.screens.chat
 
+import androidx.compose.ui.text.AnnotatedString
 import com.hebo.codex.domain.FileChangeKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -33,4 +34,20 @@ class CodeBlocksTest {
         assertEquals(command, highlighted.text)
         assertTrue(highlighted.spanStyles.isNotEmpty())
     }
+
+    @Test
+    fun previewsFirstLinesOfLongText() {
+        val preview = AnnotatedString(numberedLines(1..81)).previewLines(maxLines = 80, fromEnd = false)
+
+        assertEquals(numberedLines(1..80) + "\n…", preview.text)
+    }
+
+    @Test
+    fun previewsLastLinesOfLongText() {
+        val preview = AnnotatedString(numberedLines(1..81)).previewLines(maxLines = 80, fromEnd = true)
+
+        assertEquals("…\n" + numberedLines(2..81), preview.text)
+    }
+
+    private fun numberedLines(range: IntRange): String = range.joinToString("\n") { "line-$it" }
 }

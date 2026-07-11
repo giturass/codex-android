@@ -36,6 +36,35 @@ class ConversationRowsTest {
         assertTrue(rows[1] is ConversationRow.Item)
     }
 
+    @Test
+    fun `相同条目编号在不同回合中具有不同列表键`() {
+        val rows = buildConversationRows(
+            listOf(
+                ConversationItem.AgentMessage("item-1", "turn-1", "第一回合", false),
+                ConversationItem.AgentMessage("item-1", "turn-2", "第二回合", false),
+            ),
+        )
+
+        assertEquals(2, rows.size)
+        assertEquals(2, rows.map(ConversationRow::key).toSet().size)
+    }
+
+    @Test
+    fun `相同起始条目编号在不同回合中具有不同活动组键`() {
+        val rows = buildConversationRows(
+            listOf(
+                command("item-1", "turn-1"),
+                command("item-2", "turn-1"),
+                command("item-1", "turn-2"),
+                command("item-2", "turn-2"),
+            ),
+        )
+
+        assertEquals(2, rows.size)
+        assertTrue(rows.all { it is ConversationRow.ActivityGroup })
+        assertEquals(2, rows.map(ConversationRow::key).toSet().size)
+    }
+
     private fun command(id: String, turnId: String) = ConversationItem.CommandExecution(
         id = id,
         turnId = turnId,

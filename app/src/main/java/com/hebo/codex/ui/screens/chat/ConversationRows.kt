@@ -6,11 +6,11 @@ internal sealed interface ConversationRow {
     val key: String
 
     data class Item(val item: ConversationItem) : ConversationRow {
-        override val key: String = item.id
+        override val key: String = item.rowKey("item")
     }
 
     data class ActivityGroup(val items: List<ConversationItem>) : ConversationRow {
-        override val key: String = "activity-group:${items.first().id}"
+        override val key: String = items.first().rowKey("activity-group")
     }
 }
 
@@ -45,3 +45,6 @@ private fun ConversationItem.isGroupableActivity(): Boolean =
     this is ConversationItem.CommandExecution ||
         this is ConversationItem.FileChange ||
         this is ConversationItem.Activity
+
+private fun ConversationItem.rowKey(prefix: String): String =
+    "$prefix:${turnId.length}:$turnId:${id.length}:$id"

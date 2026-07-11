@@ -168,7 +168,7 @@ private fun FullCodeDialog(title: String, text: AnnotatedString, onDismiss: () -
     }
 }
 
-private fun AnnotatedString.previewLines(maxLines: Int, fromEnd: Boolean): AnnotatedString {
+internal fun AnnotatedString.previewLines(maxLines: Int, fromEnd: Boolean): AnnotatedString {
     if (!fromEnd) {
         var newlineCount = 0
         val end = text.indexOfFirst { character ->
@@ -191,9 +191,10 @@ private fun AnnotatedString.previewLines(maxLines: Int, fromEnd: Boolean): Annot
             }
         }
     }
+    val end = length
     return buildAnnotatedString {
         append("…\n")
-        append(this@previewLines.subSequence(start, length))
+        append(this@previewLines.subSequence(start, end))
     }
 }
 

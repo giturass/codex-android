@@ -229,6 +229,7 @@ class CodexRepository(
         val activeTurnId = state.value.activeTurnId
         val clientId = UUID.randomUUID().toString()
         val localItemId = "local:$clientId"
+        val localTurnId = activeTurnId ?: "pending"
         val messageContent = input.map { it.toMessagePart() }
         val messageTitle = input.conversationTitle()
         state.updateState { current ->
@@ -237,7 +238,7 @@ class CodexRepository(
                 isRunning = true,
                 items = current.items + ConversationItem.UserMessage(
                     id = localItemId,
-                    turnId = activeTurnId ?: "pending",
+                    turnId = localTurnId,
                     clientId = clientId,
                     content = messageContent,
                     isPending = true,
@@ -261,7 +262,10 @@ class CodexRepository(
             state.updateState { current ->
                 current.copy(
                     items = current.items.map { item ->
-                        if (item is ConversationItem.UserMessage && item.id == localItemId) {
+                        if (item is ConversationItem.UserMessage &&
+                            item.turnId == localTurnId &&
+                            item.id == localItemId
+                        ) {
                             item.copy(turnId = turnId)
                         } else {
                             item
@@ -274,7 +278,7 @@ class CodexRepository(
         } catch (error: Throwable) {
             state.updateState { current ->
                 current.copy(
-                    items = current.items.filterNot { it.id == localItemId },
+                    items = current.items.filterNot { it.turnId == localTurnId && it.id == localItemId },
                     isRunning = false,
                     errorMessage = error.toUserFacingError("发送消息失败"),
                 )
@@ -842,6 +846,13 @@ class CodexRepository(
         }
         if (threadId == null) return
         val state = conversations[ConversationKey(serverId, threadId)]
+        fun updateNotifiedItem(transform: (ConversationItem) -> ConversationItem) {
+            state?.updateItem(
+                turnId = params.requiredString("turnId"),
+                itemId = params.requiredString("itemId"),
+                transform = transform,
+            )
+        }
         when (method) {
             "thread/started" -> bumpThreadRevision(serverId)
 
@@ -998,46 +1009,46 @@ class CodexRepository(
                     turnId = params.requiredString("turnId"),
                     isCompleted = method == "item/completed",
                 )
-                state.updateState { current -> current.copy(items = current.items.upsert(item)) }
+                state.updateState { current -> current.copy(items = current.items.upsertConversationItem(item)) }
             }
 
-            "item/agentMessage/delta" -> state?.updateItem(params.requiredString("itemId")) { item ->
+            "item/agentMessage/delta" -> updateNotifiedItem { item ->
                 val message = item as? ConversationItem.AgentMessage
                     ?: throw ProtocolException("agentMessage delta 的目标类型不正确")
                 message.copy(text = message.text + params.requiredString("delta"))
             }
 
-            "item/reasoning/summaryTextDelta" -> state?.updateItem(params.requiredString("itemId")) { item ->
+            "item/reasoning/summaryTextDelta" -> updateNotifiedItem { item ->
                 val reasoning = item as? ConversationItem.Reasoning
                     ?: throw ProtocolException("reasoning summary delta 的目标类型不正确")
                 reasoning.copy(summary = reasoning.summary + params.requiredString("delta"))
             }
 
-            "item/reasoning/summaryPartAdded" -> state?.updateItem(params.requiredString("itemId")) { item ->
+            "item/reasoning/summaryPartAdded" -> updateNotifiedItem { item ->
                 val reasoning = item as? ConversationItem.Reasoning
                     ?: throw ProtocolException("reasoning summary part 的目标类型不正确")
                 reasoning.copy(summary = reasoning.summary.trimEnd() + "\n")
             }
 
-            "item/reasoning/textDelta" -> state?.updateItem(params.requiredString("itemId")) { item ->
+            "item/reasoning/textDelta" -> updateNotifiedItem { item ->
                 val reasoning = item as? ConversationItem.Reasoning
                     ?: throw ProtocolException("reasoning delta 的目标类型不正确")
                 reasoning.copy(details = reasoning.details + params.requiredString("delta"))
             }
 
-            "item/commandExecution/outputDelta" -> state?.updateItem(params.requiredString("itemId")) { item ->
+            "item/commandExecution/outputDelta" -> updateNotifiedItem { item ->
                 val command = item as? ConversationItem.CommandExecution
                     ?: throw ProtocolException("command output delta 的目标类型不正确")
                 command.copy(output = command.output + params.requiredString("delta"))
             }
 
-            "item/commandExecution/terminalInteraction" -> state?.updateItem(params.requiredString("itemId")) { item ->
+            "item/commandExecution/terminalInteraction" -> updateNotifiedItem { item ->
                 val command = item as? ConversationItem.CommandExecution
                     ?: throw ProtocolException("terminal interaction 的目标类型不正确")
                 command.copy(output = command.output + params.requiredString("stdin"))
             }
 
-            "item/fileChange/patchUpdated" -> state?.updateItem(params.requiredString("itemId")) { item ->
+            "item/fileChange/patchUpdated" -> updateNotifiedItem { item ->
                 val fileChange = item as? ConversationItem.FileChange
                     ?: throw ProtocolException("fileChange patch 的目标类型不正确")
                 val replacement = ProtocolMapper.conversationItem(
@@ -1053,13 +1064,13 @@ class CodexRepository(
                 replacement
             }
 
-            "item/plan/delta" -> state?.updateItem(params.requiredString("itemId")) { item ->
+            "item/plan/delta" -> updateNotifiedItem { item ->
                 val activity = item as? ConversationItem.Activity
                     ?: throw ProtocolException("plan delta 的目标类型不正确")
                 activity.copy(details = activity.details + params.requiredString("delta"))
             }
 
-            "item/mcpToolCall/progress" -> state?.updateItem(params.requiredString("itemId")) { item ->
+            "item/mcpToolCall/progress" -> updateNotifiedItem { item ->
                 val activity = item as? ConversationItem.Activity
                     ?: throw ProtocolException("MCP progress 的目标类型不正确")
                 activity.copy(details = listOf(activity.details, params.requiredString("message"))
@@ -1131,25 +1142,15 @@ class CodexRepository(
         sandbox = sandbox,
     )
 
-    private fun List<ConversationItem>.upsert(newItem: ConversationItem): List<ConversationItem> {
-        val index = indexOfFirst { current ->
-            current.id == newItem.id ||
-                current is ConversationItem.UserMessage &&
-                newItem is ConversationItem.UserMessage &&
-                current.clientId != null && current.clientId == newItem.clientId
-        }
-        if (index == -1) return this + newItem
-        return toMutableList().apply { set(index, newItem) }
-    }
-
     private fun MutableStateFlow<ConversationState>.updateItem(
+        turnId: String,
         itemId: String,
         transform: (ConversationItem) -> ConversationItem,
     ) {
         updateState { current ->
-            val index = current.items.indexOfFirst { it.id == itemId }
-            if (index == -1) throw ProtocolException("流式事件引用了不存在的条目：$itemId")
-            current.copy(items = current.items.toMutableList().apply { set(index, transform(get(index))) })
+            val items = current.items.replaceConversationItem(turnId, itemId, transform)
+                ?: throw ProtocolException("流式事件引用了不存在的条目：$turnId/$itemId")
+            current.copy(items = items)
         }
     }
 
