@@ -56,7 +56,6 @@ import com.hebo.codex.domain.SpendControlLimit
 import com.hebo.codex.ui.components.relativeTime
 import com.hebo.codex.ui.displayLabelRes
 import com.hebo.codex.ui.formatCount
-import com.hebo.codex.ui.formatDate
 import com.hebo.codex.ui.formatDateTime
 import com.hebo.codex.ui.formatDurationSeconds
 import com.hebo.codex.ui.formatPercent
@@ -368,8 +367,21 @@ private fun AccountUsageCard(usage: AccountUsage) {
             usage.currentStreakDays?.let { MetricValue("当前连续使用", "$it 天") }
             usage.longestStreakDays?.let { MetricValue("最长连续使用", "$it 天") }
             HorizontalDivider()
-            Text("每日 Token 用量", style = MaterialTheme.typography.labelLarge)
             val buckets = usage.dailyBuckets
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("每日 Token 用量", style = MaterialTheme.typography.labelLarge)
+                if (!buckets.isNullOrEmpty()) {
+                    Text(
+                        "最近 $DAILY_TOKEN_USAGE_DAY_COUNT 天",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             if (buckets == null) {
                 Text(
                     "服务端暂未提供每日用量明细",
@@ -383,9 +395,8 @@ private fun AccountUsageCard(usage: AccountUsage) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                }
-                buckets.sortedByDescending { it.date }.forEach { bucket ->
-                    MetricValue(formatDate(bucket.date), "${formatCount(bucket.tokens)} Token")
+                } else {
+                    DailyTokenUsageChart(buckets)
                 }
             }
         }

@@ -140,6 +140,27 @@ val WorkspaceMessageType.displayLabelRes: Int
 
 fun formatCount(value: Long): String = NumberFormat.getIntegerInstance(Locale.CHINA).format(value)
 
+fun formatCompactCount(value: Long): String {
+    val safeValue = value.coerceAtLeast(0)
+    if (safeValue < 1_000) return safeValue.toString()
+
+    val (divisor, suffix) = when {
+        safeValue >= 1_000_000_000_000 -> 1_000_000_000_000.0 to "T"
+        safeValue >= 1_000_000_000 -> 1_000_000_000.0 to "B"
+        safeValue >= 1_000_000 -> 1_000_000.0 to "M"
+        else -> 1_000.0 to "K"
+    }
+    val scaled = safeValue / divisor
+    val decimalPlaces = when {
+        scaled < 10 -> 2
+        scaled < 100 -> 1
+        else -> 0
+    }
+    var formatted = String.format(Locale.ROOT, "%.${decimalPlaces}f", scaled)
+    if ('.' in formatted) formatted = formatted.trimEnd('0').trimEnd('.')
+    return "$formatted$suffix"
+}
+
 fun formatDurationSeconds(seconds: Long): String {
     val safeSeconds = seconds.coerceAtLeast(0)
     val days = safeSeconds / 86_400

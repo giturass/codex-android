@@ -25,6 +25,8 @@ class HumanReadableTest {
     fun goalStatusAndMetricsAreFormattedForReading() {
         assertEquals(R.string.goal_status_usage_limited, ThreadGoalStatus.USAGE_LIMITED.displayLabelRes)
         assertEquals("123,456", formatCount(123_456))
+        assertEquals("1.25K", formatCompactCount(1_250))
+        assertEquals("12.5M", formatCompactCount(12_500_000))
         assertEquals("1 小时 2 分钟", formatDurationSeconds(3_720))
         assertEquals("12.5%", formatPercent(12.5))
         assertEquals("2026年7月11日", formatDate(LocalDate.of(2026, 7, 11)))
