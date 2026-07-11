@@ -191,6 +191,34 @@ class ProtocolMapperTest {
     }
 
     @Test
+    fun mapsAppServerWebSearchActionsUsingCamelCaseTypes() {
+        val cases = listOf(
+            """{
+              "type":"webSearch",
+              "id":"open-page-1",
+              "query":"Compose Material 3",
+              "action":{"type":"openPage","url":"https://developer.android.com/compose"}
+            }""" to "打开页面：https://developer.android.com/compose",
+            """{
+              "type":"webSearch",
+              "id":"find-in-page-1",
+              "query":"Compose Material 3",
+              "action":{"type":"findInPage","pattern":"MaterialTheme"}
+            }""" to "在页面中查找：MaterialTheme",
+        )
+
+        cases.forEach { (payload, expectedSummary) ->
+            val mapped = ProtocolMapper.conversationItem(
+                item = json.parseToJsonElement(payload).jsonObject,
+                turnId = "turn-1",
+                isCompleted = true,
+            ) as ConversationItem.Activity
+
+            assertEquals(expectedSummary, mapped.summary)
+        }
+    }
+
+    @Test
     fun mapsApprovalPayloadsToTypedModels() {
         val actions = ProtocolMapper.commandActions(
             json.parseToJsonElement(

@@ -459,8 +459,8 @@ object ProtocolMapper {
         val action = item["action"] as? JsonObject ?: return "搜索：$query"
         return when (action.requiredString("type")) {
             "search" -> action.optionalString("query")?.let { "搜索：$it" } ?: "搜索：$query"
-            "open_page" -> action.optionalString("url")?.let { "打开页面：$it" } ?: "打开搜索结果"
-            "find_in_page" -> action.optionalString("pattern")?.let { "在页面中查找：$it" } ?: "在页面中查找"
+            "openPage" -> action.optionalString("url")?.let { "打开页面：$it" } ?: "打开搜索结果"
+            "findInPage" -> action.optionalString("pattern")?.let { "在页面中查找：$it" } ?: "在页面中查找"
             "other" -> "处理搜索结果"
             else -> throw ProtocolException("未知网页搜索操作：${action.requiredString("type")}")
         }
