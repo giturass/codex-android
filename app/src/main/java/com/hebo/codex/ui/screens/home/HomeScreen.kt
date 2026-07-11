@@ -13,30 +13,25 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Menu
-import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -79,6 +74,10 @@ import com.hebo.codex.domain.ThreadOptions
 import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.domain.projectName
 import com.hebo.codex.ui.components.UserFacingErrorDialog
+import com.hebo.codex.ui.components.MessageComposer
+import com.hebo.codex.ui.components.MessageComposerAction
+import com.hebo.codex.ui.components.MessageComposerActionButton
+import com.hebo.codex.ui.components.MessageComposerAddButton
 import com.hebo.codex.ui.displayDescriptionRes
 import com.hebo.codex.ui.displayLabelRes
 import com.hebo.codex.ui.ratelimits.RateLimitIndicator
@@ -158,9 +157,6 @@ fun HomeScreen(
         state.serverNotices.lastOrNull()?.let { snackbarHostState.showSnackbar(it.message) }
     }
 
-    val selectedModel = state.models.firstOrNull { it.model == newTaskState.options.model }
-    val modelLabel = selectedModel?.displayName ?: newTaskState.options.model ?: "默认模型"
-
     Scaffold(
         topBar = {
             TopAppBar(
@@ -210,7 +206,6 @@ fun HomeScreen(
                 message = newTaskState.message,
                 cwd = newTaskState.cwd,
                 projects = state.recentProjects,
-                modelLabel = modelLabel,
                 isCreating = newTaskState.isCreatingConversation || newTaskState.isLoadingDraft,
                 projectMenuExpanded = showProjectMenu,
                 onMessageChange = newTaskViewModel::updateMessage,
@@ -262,7 +257,6 @@ private fun NewTaskContent(
     message: String,
     cwd: String,
     projects: List<RecentProject>,
-    modelLabel: String,
     isCreating: Boolean,
     projectMenuExpanded: Boolean,
     onMessageChange: (String) -> Unit,
@@ -274,95 +268,68 @@ private fun NewTaskContent(
     onSend: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Box(modifier.imePadding(), contentAlignment = Alignment.Center) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .widthIn(max = 760.dp)
-                .verticalScroll(rememberScrollState())
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+    Column(
+        modifier = modifier.imePadding(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            contentAlignment = Alignment.Center,
         ) {
-            Text("今天想处理什么？", style = MaterialTheme.typography.headlineSmall)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "选择项目并描述任务，Codex 会立即开始处理",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
-            Spacer(Modifier.height(28.dp))
-            ProjectSelector(
-                cwd = cwd,
-                projects = projects,
-                expanded = projectMenuExpanded,
-                enabled = !isCreating,
-                onToggle = onToggleProjectMenu,
-                onDismiss = onDismissProjectMenu,
-                onSelect = onSelectProject,
-                onSelectCustomPath = onSelectCustomPath,
-            )
-            Spacer(Modifier.height(12.dp))
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.extraLarge,
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            Column(
+                modifier = Modifier
+                    .widthIn(max = 760.dp)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Column(Modifier.fillMaxWidth().padding(14.dp)) {
-                    BasicTextField(
-                        value = message,
-                        onValueChange = onMessageChange,
-                        enabled = !isCreating,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 112.dp, max = 280.dp),
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(
-                            color = MaterialTheme.colorScheme.onSurface,
-                        ),
-                        minLines = 4,
-                        maxLines = 10,
-                        decorationBox = { innerTextField ->
-                            Box(contentAlignment = Alignment.TopStart) {
-                                if (message.isEmpty()) {
-                                    Text(
-                                        "描述要完成的任务……",
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                innerTextField()
-                            }
-                        },
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        TextButton(onClick = onOpenOptions, enabled = !isCreating) {
-                            Icon(Icons.Rounded.Tune, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Text(
-                                modelLabel,
-                                modifier = Modifier.padding(start = 6.dp),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        Spacer(Modifier.weight(1f))
-                        FilledIconButton(
-                            onClick = onSend,
-                            enabled = cwd.isNotBlank() && message.isNotBlank() && !isCreating,
-                        ) {
-                            if (isCreating) {
-                                CircularProgressIndicator(
-                                    Modifier.size(18.dp),
-                                    color = MaterialTheme.colorScheme.onPrimary,
-                                    strokeWidth = 2.dp,
-                                )
-                            } else {
-                                Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = "开始任务")
-                            }
-                        }
-                    }
-                }
+                Text("今天想处理什么？", style = MaterialTheme.typography.headlineSmall)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "选择项目并描述任务，Codex 会立即开始处理",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(28.dp))
+                ProjectSelector(
+                    cwd = cwd,
+                    projects = projects,
+                    expanded = projectMenuExpanded,
+                    enabled = !isCreating,
+                    onToggle = onToggleProjectMenu,
+                    onDismiss = onDismissProjectMenu,
+                    onSelect = onSelectProject,
+                    onSelectCustomPath = onSelectCustomPath,
+                )
             }
         }
+        MessageComposer(
+            value = message,
+            onValueChange = onMessageChange,
+            placeholder = "描述要完成的任务……",
+            enabled = !isCreating,
+            modifier = Modifier
+                .widthIn(max = 760.dp)
+                .fillMaxWidth()
+                .padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 10.dp),
+            leadingContent = {
+                MessageComposerAddButton(
+                    onClick = onOpenOptions,
+                    enabled = !isCreating,
+                    contentDescription = "调整会话设置",
+                )
+            },
+            trailingContent = {
+                MessageComposerActionButton(
+                    onClick = onSend,
+                    enabled = cwd.isNotBlank() && message.isNotBlank() && !isCreating,
+                    action = MessageComposerAction.SEND,
+                    isLoading = isCreating,
+                    contentDescription = "开始任务",
+                )
+            },
+        )
     }
 }
 

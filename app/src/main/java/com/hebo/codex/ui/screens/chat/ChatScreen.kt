@@ -5,9 +5,6 @@ package com.hebo.codex.ui.screens.chat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -25,7 +22,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
@@ -40,8 +36,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.HelpOutline
@@ -49,7 +43,6 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Apps
-import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Code
@@ -69,12 +62,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -100,7 +91,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -148,10 +138,13 @@ import com.hebo.codex.ui.formatCompactCount
 import com.hebo.codex.ui.formatPercent
 import com.hebo.codex.ui.featureScopeLabel
 import com.hebo.codex.ui.components.ExpandableErrorDetails
+import com.hebo.codex.ui.components.MessageComposer
+import com.hebo.codex.ui.components.MessageComposerAction
+import com.hebo.codex.ui.components.MessageComposerActionButton
+import com.hebo.codex.ui.components.MessageComposerAddButton
 import com.hebo.codex.ui.components.UserFacingErrorDialog
 import com.hebo.codex.ui.ratelimits.RateLimitIndicator
 import com.hebo.codex.ui.ratelimits.RateLimitsUiState
-import com.hebo.codex.ui.theme.ActionBlue
 import com.mikepenz.markdown.compose.components.markdownComponents
 import com.mikepenz.markdown.compose.elements.highlightedCodeBlock
 import com.mikepenz.markdown.compose.elements.highlightedCodeFence
@@ -174,13 +167,6 @@ private val ChatHeaderControlsHeight = 64.dp
 private val ChatHeaderFadeHeight = 24.dp
 private val ChatComposerOverlayMinHeight = 116.dp
 private val ChatComposerFadeHeight = 44.dp
-private val ComposerCompactCornerRadius = 30.dp
-private val ComposerExpandedCornerRadius = 22.dp
-private val ComposerCompactControlInset = 56.dp
-private val ComposerExpandedTextInset = 12.dp
-private val ComposerExpandedActionsHeight = 54.dp
-private val ComposerTextFieldHeight = 48.dp
-private val ComposerExpandedTextFieldMaxHeight = 140.dp
 
 @Composable
 fun ChatScreen(
@@ -1156,7 +1142,6 @@ private fun ChatComposer(
 ) {
     var dialog by remember { mutableStateOf<ComposerDialog?>(null) }
     var isAddingImage by remember { mutableStateOf(false) }
-    var isInputFocused by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val composerScope = rememberCoroutineScope()
     val imagePicker = rememberLauncherForActivityResult(
@@ -1193,26 +1178,6 @@ private fun ChatComposer(
     }
     val connected = connectionStatus is ConnectionStatus.Connected
     val hasInput = draft.message.isNotBlank() || draft.attachments.isNotEmpty()
-    val composerCornerRadius by animateDpAsState(
-        targetValue = if (isInputFocused) ComposerExpandedCornerRadius else ComposerCompactCornerRadius,
-        label = "输入框圆角",
-    )
-    val composerColor by animateColorAsState(
-        targetValue = if (isInputFocused) {
-            MaterialTheme.colorScheme.surfaceContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerLow
-        },
-        label = "输入框背景",
-    )
-    val composerBorderColor by animateColorAsState(
-        targetValue = if (isInputFocused) {
-            MaterialTheme.colorScheme.outlineVariant
-        } else {
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)
-        },
-        label = "输入框边框",
-    )
 
     Column(
         Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 10.dp),
@@ -1252,124 +1217,60 @@ private fun ChatComposer(
             }
             Spacer(Modifier.height(6.dp))
         }
-        Surface(
-            modifier = Modifier.fillMaxWidth().animateContentSize(),
-            shape = RoundedCornerShape(composerCornerRadius),
-            color = composerColor,
-            border = BorderStroke(1.dp, composerBorderColor),
-            shadowElevation = 2.dp,
-        ) {
-            Box(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 5.dp),
-            ) {
-                IconButton(
+        val compactEndExtra = (if (isAddingImage) 28.dp else 0.dp) +
+            (if (conversation.isRunning && hasInput) 40.dp else 0.dp)
+        MessageComposer(
+            value = draft.message,
+            onValueChange = onMessageChange,
+            placeholder = when {
+                !connected -> "服务器已断开"
+                conversation.isRunning -> "继续对话"
+                else -> "向 Codex 发送消息"
+            },
+            enabled = !isSending,
+            compactEndExtra = compactEndExtra,
+            leadingContent = {
+                MessageComposerAddButton(
                     onClick = {
                         onLoadResources(false)
                         dialog = ComposerDialog.Attachments
                     },
                     enabled = !isSending,
-                    modifier = Modifier
-                        .align(if (isInputFocused) Alignment.BottomStart else Alignment.CenterStart)
-                        .size(48.dp),
-                ) {
-                    Icon(Icons.Rounded.Add, contentDescription = "添加内容或调整设置")
-                }
-                val trailingPadding = ComposerCompactControlInset +
-                    (if (isAddingImage) 28.dp else 0.dp) +
-                    (if (conversation.isRunning && hasInput) 40.dp else 0.dp)
-                BasicTextField(
-                    value = draft.message,
-                    onValueChange = onMessageChange,
-                    enabled = !isSending,
-                    modifier = Modifier
-                        .align(Alignment.CenterStart)
-                        .fillMaxWidth()
-                        .padding(
-                            start = if (isInputFocused) ComposerExpandedTextInset else ComposerCompactControlInset,
-                            top = if (isInputFocused) 6.dp else 0.dp,
-                            end = if (isInputFocused) ComposerExpandedTextInset else trailingPadding,
-                            bottom = if (isInputFocused) ComposerExpandedActionsHeight else 0.dp,
-                        )
-                        .heightIn(
-                            min = ComposerTextFieldHeight,
-                            max = if (isInputFocused) {
-                                ComposerExpandedTextFieldMaxHeight
-                            } else {
-                                ComposerTextFieldHeight
-                            },
-                        )
-                        .onFocusChanged { isInputFocused = it.isFocused },
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                    minLines = 1,
-                    maxLines = if (isInputFocused) 5 else 1,
-                    decorationBox = { innerTextField ->
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = if (isInputFocused) Alignment.TopStart else Alignment.CenterStart,
-                        ) {
-                            if (draft.message.isEmpty()) {
-                                Text(
-                                    when {
-                                        !connected -> "服务器已断开"
-                                        conversation.isRunning -> "继续对话"
-                                        else -> "向 Codex 发送消息"
-                                    },
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            innerTextField()
-                        }
-                    },
+                    contentDescription = "添加内容或调整设置",
                 )
-                Row(
-                    modifier = Modifier.align(
-                        if (isInputFocused) Alignment.BottomEnd else Alignment.CenterEnd,
-                    ),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    if (isAddingImage) {
-                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(8.dp))
-                    }
-                    if (conversation.isRunning && hasInput) {
-                        IconButton(
-                            onClick = onStop,
-                            enabled = !isSending,
-                            modifier = Modifier.size(40.dp),
-                        ) {
-                            Icon(Icons.Rounded.Stop, contentDescription = "停止")
-                        }
-                    }
-                    FilledIconButton(
-                        onClick = if (conversation.isRunning && !hasInput) onStop else onSend,
-                        enabled = if (conversation.isRunning && !hasInput) {
-                            !isSending
-                        } else {
-                            hasInput && connected && !isSending
-                        },
-                        modifier = Modifier.size(48.dp),
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = ActionBlue,
-                            contentColor = Color.White,
-                            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                        ),
+            },
+            trailingContent = {
+                if (isAddingImage) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                }
+                if (conversation.isRunning && hasInput) {
+                    IconButton(
+                        onClick = onStop,
+                        enabled = !isSending,
+                        modifier = Modifier.size(40.dp),
                     ) {
-                        if (isSending) {
-                            CircularProgressIndicator(
-                                Modifier.size(19.dp),
-                                color = Color.White,
-                                strokeWidth = 2.dp,
-                            )
-                        } else if (conversation.isRunning && !hasInput) {
-                            Icon(Icons.Rounded.Stop, contentDescription = "停止")
-                        } else {
-                            Icon(Icons.Rounded.ArrowUpward, contentDescription = "发送")
-                        }
+                        Icon(Icons.Rounded.Stop, contentDescription = "停止")
                     }
                 }
-            }
-        }
+                val stopsActiveTurn = conversation.isRunning && !hasInput
+                MessageComposerActionButton(
+                    onClick = if (stopsActiveTurn) onStop else onSend,
+                    enabled = if (stopsActiveTurn) {
+                        !isSending
+                    } else {
+                        hasInput && connected && !isSending
+                    },
+                    action = if (stopsActiveTurn) {
+                        MessageComposerAction.STOP
+                    } else {
+                        MessageComposerAction.SEND
+                    },
+                    isLoading = isSending,
+                    contentDescription = if (stopsActiveTurn) "停止" else "发送",
+                )
+            },
+        )
     }
 
     when (dialog) {
