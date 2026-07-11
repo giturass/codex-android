@@ -1,15 +1,26 @@
 package com.hebo.codex.ui
 
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.PermanentNavigationDrawer
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
@@ -18,12 +29,14 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
-import androidx.compose.ui.unit.dp
 import com.hebo.codex.ConversationTarget
+import com.hebo.codex.R
 import com.hebo.codex.domain.CodexRepository
 import com.hebo.codex.domain.DraftRepository
 import com.hebo.codex.domain.DraftTarget
+import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.ui.components.CodexNavigationDrawer
+import com.hebo.codex.ui.components.UserFacingErrorDialog
 import com.hebo.codex.ui.ratelimits.RateLimitsUiState
 import com.hebo.codex.ui.ratelimits.RateLimitsViewModel
 import com.hebo.codex.ui.screens.chat.ChatScreen
@@ -80,10 +93,21 @@ fun CodexApp(
     val rateLimitsViewModel: RateLimitsViewModel = viewModel(factory = RateLimitsViewModel.factory(repository))
     val rateLimitsStates by rateLimitsViewModel.state.collectAsStateWithLifecycle()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val snackbarHostState = remember { SnackbarHostState() }
+    var technicalError by remember { mutableStateOf<UserFacingError?>(null) }
+    val detailsLabel = stringResource(R.string.common_details)
     val scope = rememberCoroutineScope()
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val activeThreadId = currentBackStackEntry?.arguments?.getString("threadId")
     val newTaskSelected = isNewTaskDestination(currentBackStackEntry?.destination?.route)
+
+    suspend fun showUserFacingError(error: UserFacingError) {
+        val result = snackbarHostState.showSnackbar(
+            message = error.summary,
+            actionLabel = error.technicalDetails?.let { detailsLabel },
+        )
+        if (result == SnackbarResult.ActionPerformed) technicalError = error
+    }
 
     fun closeDrawer() {
         scope.launch { drawerState.close() }
@@ -133,6 +157,15 @@ fun CodexApp(
             openConversation(target.serverId, target.threadId)
         }
     }
+    LaunchedEffect(homeState.errorMessage) {
+        homeState.errorMessage?.let { error ->
+            showUserFacingError(error)
+            homeViewModel.clearError()
+        }
+    }
+    LaunchedEffect(homeState.serverNotices.lastOrNull()?.id) {
+        homeState.serverNotices.lastOrNull()?.let { snackbarHostState.showSnackbar(it.message) }
+    }
 
     BoxWithConstraints {
         val isPermanent = maxWidth >= PermanentDrawerThreshold
@@ -149,6 +182,7 @@ fun CodexApp(
                 searchTerm = homeState.searchTerm,
                 showArchived = homeState.showArchived,
                 isLoading = homeState.isLoading,
+                isRefreshing = homeState.isRefreshing,
                 isLoadingMore = homeState.isLoadingMore,
                 hasMore = homeState.nextCursor != null,
                 activeThreadId = activeThreadId,
@@ -186,6 +220,7 @@ fun CodexApp(
                 onSearch = homeViewModel::search,
                 onShowArchived = homeViewModel::setArchived,
                 onShowRecent = homeViewModel::showRecent,
+                onRefresh = homeViewModel::refresh,
                 onLoadMore = homeViewModel::loadMore,
                 onRenameConversation = homeViewModel::renameConversation,
                 onForkConversation = homeViewModel::forkConversation,
@@ -258,6 +293,7 @@ fun CodexApp(
                         onRefreshRateLimits = {
                             homeState.activeServerId?.let(rateLimitsViewModel::refresh)
                         },
+                        onShowError = ::showUserFacingError,
                     )
                 }
                 composable<ServerEditorRoute> { entry ->
@@ -309,5 +345,12 @@ fun CodexApp(
                 content = content,
             )
         }
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),
+        )
+    }
+    technicalError?.let { error ->
+        UserFacingErrorDialog(error = error, onDismiss = { technicalError = null })
     }
 }

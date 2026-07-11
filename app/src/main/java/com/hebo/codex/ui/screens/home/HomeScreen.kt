@@ -40,9 +40,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -73,7 +70,6 @@ import com.hebo.codex.domain.SandboxMode
 import com.hebo.codex.domain.ThreadOptions
 import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.domain.projectName
-import com.hebo.codex.ui.components.UserFacingErrorDialog
 import com.hebo.codex.ui.components.MessageComposer
 import com.hebo.codex.ui.components.MessageComposerAction
 import com.hebo.codex.ui.components.MessageComposerActionButton
@@ -92,18 +88,16 @@ fun HomeScreen(
     onOpenNavigation: () -> Unit,
     onAddServer: () -> Unit,
     onRefreshRateLimits: () -> Unit,
+    onShowError: suspend (UserFacingError) -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val newTaskState by newTaskViewModel.state.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
     var showProjectMenu by remember { mutableStateOf(false) }
     var showCustomPathDialog by remember { mutableStateOf(false) }
     var showOptions by remember { mutableStateOf(false) }
-    var technicalError by remember { mutableStateOf<UserFacingError?>(null) }
-    val detailsLabel = stringResource(R.string.common_details)
 
     LifecycleResumeEffect(viewModel) {
-        viewModel.refresh()
+        viewModel.reloadThreads()
         onPauseOrDispose {}
     }
     LifecycleResumeEffect(newTaskViewModel) {
@@ -133,28 +127,11 @@ fun HomeScreen(
         state.models.firstOrNull { it.isDefault && !it.hidden }
             ?.let(newTaskViewModel::applyDefaultModel)
     }
-    LaunchedEffect(state.errorMessage) {
-        state.errorMessage?.let { error ->
-            val result = snackbarHostState.showSnackbar(
-                message = error.summary,
-                actionLabel = error.technicalDetails?.let { detailsLabel },
-            )
-            if (result == SnackbarResult.ActionPerformed) technicalError = error
-            viewModel.clearError()
-        }
-    }
     LaunchedEffect(newTaskState.errorMessage) {
         newTaskState.errorMessage?.let { error ->
-            val result = snackbarHostState.showSnackbar(
-                message = error.summary,
-                actionLabel = error.technicalDetails?.let { detailsLabel },
-            )
-            if (result == SnackbarResult.ActionPerformed) technicalError = error
+            onShowError(error)
             newTaskViewModel.clearError()
         }
-    }
-    LaunchedEffect(state.serverNotices.lastOrNull()?.id) {
-        state.serverNotices.lastOrNull()?.let { snackbarHostState.showSnackbar(it.message) }
     }
 
     Scaffold(
@@ -187,7 +164,6 @@ fun HomeScreen(
                 },
             )
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         when {
             state.servers.isEmpty() -> NoServers(
@@ -246,9 +222,6 @@ fun HomeScreen(
                 showOptions = false
             },
         )
-    }
-    technicalError?.let { error ->
-        UserFacingErrorDialog(error = error, onDismiss = { technicalError = null })
     }
 }
 

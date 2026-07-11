@@ -48,6 +48,7 @@ data class HomeUiState(
     val nextCursor: String? = null,
     val recentNextCursor: String? = null,
     val isLoading: Boolean = false,
+    val isRefreshing: Boolean = false,
     val isLoadingMore: Boolean = false,
     val errorMessage: UserFacingError? = null,
 ) {
@@ -123,6 +124,7 @@ class HomeViewModel(
                             nextCursor = null,
                             recentNextCursor = null,
                             isLoading = false,
+                            isRefreshing = false,
                             isLoadingMore = false,
                         )
                     }
@@ -138,6 +140,7 @@ class HomeViewModel(
                             showArchived = false,
                             nextCursor = null,
                             recentNextCursor = null,
+                            isRefreshing = false,
                             isLoadingMore = false,
                         )
                     }
@@ -179,8 +182,15 @@ class HomeViewModel(
         }
     }
 
-    fun refresh() {
+    fun reloadThreads() {
         mutableState.value.activeServerId?.let(::requestLoad)
+    }
+
+    fun refresh() {
+        val state = mutableState.value
+        val serverId = state.activeServerId ?: return
+        if (state.isLoading || state.isLoadingMore) return
+        requestLoad(serverId, isRefresh = true)
     }
 
     fun search(term: String) {
@@ -194,6 +204,7 @@ class HomeViewModel(
                 searchTerm = term,
                 nextCursor = null,
                 isLoading = term.isNotBlank() || it.showArchived,
+                isRefreshing = false,
             )
         }
         if (term.isBlank() && !mutableState.value.showArchived) {
@@ -218,12 +229,13 @@ class HomeViewModel(
                 showArchived = show,
                 nextCursor = null,
                 isLoading = show || it.searchTerm.isNotBlank(),
+                isRefreshing = false,
             )
         }
         if (!show && mutableState.value.searchTerm.isBlank()) {
             restoreRecentState()
         } else {
-            refresh()
+            reloadThreads()
         }
     }
 
@@ -238,6 +250,7 @@ class HomeViewModel(
                 showArchived = false,
                 nextCursor = it.recentNextCursor,
                 isLoading = false,
+                isRefreshing = false,
                 isLoadingMore = false,
             )
         }
@@ -300,7 +313,7 @@ class HomeViewModel(
                 repository.renameConversation(serverId, threadId, name)
                 draftRepository.renameThread(serverId, threadId, name.trim())
             }
-                .onSuccess { refresh() }
+                .onSuccess { reloadThreads() }
                 .onFailure(::showError)
         }
     }
@@ -313,7 +326,7 @@ class HomeViewModel(
                 if (archived) repository.unarchiveConversation(serverId, threadId)
                 else repository.archiveConversation(serverId, threadId)
             }.onSuccess {
-                refresh()
+                reloadThreads()
                 if (!archived) mutableEvents.send(HomeEvent.ConversationRemoved(serverId, threadId))
             }.onFailure(::showError)
         }
@@ -327,7 +340,7 @@ class HomeViewModel(
                     runSuspendCatching {
                         draftRepository.delete(DraftKey(serverId, DraftTarget.Thread(threadId)))
                     }.onFailure(::showError)
-                    refresh()
+                    reloadThreads()
                     mutableEvents.send(HomeEvent.ConversationRemoved(serverId, threadId))
                 }
                 .onFailure(::showError)
@@ -345,8 +358,14 @@ class HomeViewModel(
         mutableState.update { it.copy(errorMessage = null) }
     }
 
-    private suspend fun loadThreads(serverId: String) {
-        mutableState.update { it.copy(isLoading = true, errorMessage = null, nextCursor = null) }
+    private suspend fun loadThreads(serverId: String, isRefresh: Boolean) {
+        mutableState.update {
+            it.copy(
+                isLoading = true,
+                isRefreshing = isRefresh,
+                errorMessage = null,
+            )
+        }
         val query = mutableState.value
         runSuspendCatching {
             repository.threadPage(
@@ -381,7 +400,7 @@ class HomeViewModel(
                 it.searchTerm == query.searchTerm &&
                 it.showArchived == query.showArchived
             ) {
-                it.copy(isLoading = false)
+                it.copy(isLoading = false, isRefreshing = false)
             } else {
                 it
             }
@@ -395,6 +414,7 @@ class HomeViewModel(
                 projects = it.recentProjects,
                 nextCursor = it.recentNextCursor,
                 isLoading = false,
+                isRefreshing = false,
                 isLoadingMore = false,
             )
         }
@@ -409,9 +429,9 @@ class HomeViewModel(
         }
     }
 
-    private fun requestLoad(serverId: String) {
+    private fun requestLoad(serverId: String, isRefresh: Boolean = false) {
         refreshJob?.cancel()
-        refreshJob = viewModelScope.launch { loadThreads(serverId) }
+        refreshJob = viewModelScope.launch { loadThreads(serverId, isRefresh) }
     }
 
     private fun showError(error: Throwable) {

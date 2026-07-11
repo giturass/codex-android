@@ -14,12 +14,14 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -34,6 +36,7 @@ import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PriorityHigh
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialog
@@ -57,6 +60,7 @@ import androidx.compose.material3.PermanentDrawerSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -99,6 +103,7 @@ fun CodexNavigationDrawer(
     searchTerm: String,
     showArchived: Boolean,
     isLoading: Boolean,
+    isRefreshing: Boolean,
     isLoadingMore: Boolean,
     hasMore: Boolean,
     activeThreadId: String?,
@@ -113,6 +118,7 @@ fun CodexNavigationDrawer(
     onSearch: (String) -> Unit,
     onShowArchived: (Boolean) -> Unit,
     onShowRecent: () -> Unit,
+    onRefresh: () -> Unit,
     onLoadMore: () -> Unit,
     onRenameConversation: (threadId: String, name: String) -> Unit,
     onForkConversation: (String) -> Unit,
@@ -140,6 +146,7 @@ fun CodexNavigationDrawer(
             searchTerm = searchTerm,
             showArchived = showArchived,
             isLoading = isLoading,
+            isRefreshing = isRefreshing,
             isLoadingMore = isLoadingMore,
             hasMore = hasMore,
             activeThreadId = activeThreadId,
@@ -153,6 +160,7 @@ fun CodexNavigationDrawer(
             onSearch = onSearch,
             onShowArchived = onShowArchived,
             onShowRecent = onShowRecent,
+            onRefresh = onRefresh,
             onLoadMore = onLoadMore,
             onRenameConversation = onRenameConversation,
             onForkConversation = onForkConversation,
@@ -200,6 +208,7 @@ private fun ColumnScope.DrawerContent(
     searchTerm: String,
     showArchived: Boolean,
     isLoading: Boolean,
+    isRefreshing: Boolean,
     isLoadingMore: Boolean,
     hasMore: Boolean,
     activeThreadId: String?,
@@ -213,6 +222,7 @@ private fun ColumnScope.DrawerContent(
     onSearch: (String) -> Unit,
     onShowArchived: (Boolean) -> Unit,
     onShowRecent: () -> Unit,
+    onRefresh: () -> Unit,
     onLoadMore: () -> Unit,
     onRenameConversation: (threadId: String, name: String) -> Unit,
     onForkConversation: (String) -> Unit,
@@ -314,9 +324,17 @@ private fun ColumnScope.DrawerContent(
                 )
             }
         }
-        if (isLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (isLoading && !isRefreshing) LinearProgressIndicator(Modifier.fillMaxWidth())
 
-        LazyColumn(modifier = Modifier.weight(1f)) {
+        RefreshableDrawerList(
+            isRefreshing = isRefreshing,
+            enabled = activeServer != null &&
+                !isLoading &&
+                !isLoadingMore &&
+                (drawerPage == DrawerPage.RECENT || searchTerm.isNotBlank() || showArchived),
+            onRefresh = onRefresh,
+            modifier = Modifier.weight(1f),
+        ) {
             val visibleDrafts = drafts
             val visibleRecentThreads = threadsWithoutDrafts(recentThreads, visibleDrafts)
             val visibleProjects = projectsWithoutDrafts(projects, visibleDrafts)
@@ -334,7 +352,13 @@ private fun ColumnScope.DrawerContent(
                         )
                     }
                 }
-                item("recent-title") { DrawerSectionTitle("最近会话") }
+                item("recent-title") {
+                    DrawerSectionTitle(
+                        text = "最近会话",
+                        refreshEnabled = !isLoading && !isLoadingMore,
+                        onRefresh = onRefresh,
+                    )
+                }
             }
             when {
                 activeServer == null && servers.isNotEmpty() -> {
@@ -354,7 +378,11 @@ private fun ColumnScope.DrawerContent(
                                 showArchived -> "已归档会话"
                                 else -> "搜索结果"
                             }
-                            DrawerSectionTitle(title)
+                            DrawerSectionTitle(
+                                text = title,
+                                refreshEnabled = !isLoading && !isLoadingMore,
+                                onRefresh = onRefresh,
+                            )
                         }
                         if (!isLoading && threads.isEmpty()) {
                             item("search-empty") { DrawerEmptyMessage("没有匹配的会话") }
@@ -448,7 +476,7 @@ private fun ColumnScope.DrawerContent(
                 item("load-more") {
                     TextButton(
                         onClick = onLoadMore,
-                        enabled = !isLoadingMore,
+                        enabled = !isLoading && !isLoadingMore,
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
                     ) {
                         if (isLoadingMore) {
@@ -518,6 +546,27 @@ private fun ColumnScope.DrawerContent(
                 TextButton(onClick = { selectedDraft = null }) { Text("取消") }
             },
         )
+    }
+}
+
+@Composable
+private fun RefreshableDrawerList(
+    isRefreshing: Boolean,
+    enabled: Boolean,
+    onRefresh: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: LazyListScope.() -> Unit,
+) {
+    if (enabled || isRefreshing) {
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = onRefresh,
+            modifier = modifier,
+        ) {
+            LazyColumn(modifier = Modifier.fillMaxSize(), content = content)
+        }
+    } else {
+        LazyColumn(modifier = modifier.fillMaxSize(), content = content)
     }
 }
 
@@ -880,13 +929,34 @@ private fun ThreadStatusIndicator(attention: ThreadAttention?) {
 }
 
 @Composable
-private fun DrawerSectionTitle(text: String) {
-    Text(
-        text = text,
-        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+private fun DrawerSectionTitle(
+    text: String,
+    refreshEnabled: Boolean = false,
+    onRefresh: (() -> Unit)? = null,
+) {
+    if (onRefresh == null) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    } else {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = text,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            IconButton(onClick = onRefresh, enabled = refreshEnabled) {
+                Icon(Icons.Rounded.Refresh, contentDescription = "刷新会话列表")
+            }
+        }
+    }
 }
 
 @Composable
