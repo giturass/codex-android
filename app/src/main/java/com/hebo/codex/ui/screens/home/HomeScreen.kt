@@ -81,13 +81,17 @@ import com.hebo.codex.domain.projectName
 import com.hebo.codex.ui.components.UserFacingErrorDialog
 import com.hebo.codex.ui.displayDescriptionRes
 import com.hebo.codex.ui.displayLabelRes
+import com.hebo.codex.ui.ratelimits.RateLimitIndicator
+import com.hebo.codex.ui.ratelimits.RateLimitsUiState
 
 @Composable
 fun HomeScreen(
     viewModel: HomeViewModel,
+    rateLimitsState: RateLimitsUiState,
     showNavigationIcon: Boolean,
     onOpenNavigation: () -> Unit,
     onAddServer: () -> Unit,
+    onRefreshRateLimits: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -102,6 +106,10 @@ fun HomeScreen(
 
     LifecycleResumeEffect(viewModel) {
         viewModel.refresh()
+        onPauseOrDispose {}
+    }
+    LifecycleResumeEffect(state.activeServerId) {
+        onRefreshRateLimits()
         onPauseOrDispose {}
     }
 
@@ -159,6 +167,12 @@ fun HomeScreen(
                             Icon(Icons.Rounded.Menu, contentDescription = "打开导航")
                         }
                     }
+                },
+                actions = {
+                    RateLimitIndicator(
+                        state = rateLimitsState,
+                        onRefresh = onRefreshRateLimits,
+                    )
                 },
             )
         },

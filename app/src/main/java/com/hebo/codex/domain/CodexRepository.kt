@@ -60,6 +60,7 @@ class CodexRepository(
     private val mutableConnectionStatuses = MutableStateFlow<Map<String, ConnectionStatus>>(emptyMap())
     private val mutableThreadRevisions = MutableStateFlow<Map<String, Long>>(emptyMap())
     private val mutableFeatureRevisions = MutableStateFlow<Map<String, Long>>(emptyMap())
+    private val mutableRateLimitRevisions = MutableStateFlow<Map<String, Long>>(emptyMap())
     private val mutableServerNotices = MutableStateFlow<Map<String, List<ConversationNotice>>>(emptyMap())
     private val mutableThreadAttention = MutableStateFlow<Map<String, Map<String, ThreadAttention>>>(emptyMap())
 
@@ -77,6 +78,7 @@ class CodexRepository(
     val connectionStatuses: StateFlow<Map<String, ConnectionStatus>> = mutableConnectionStatuses
     val threadRevisions: StateFlow<Map<String, Long>> = mutableThreadRevisions
     val featureRevisions: StateFlow<Map<String, Long>> = mutableFeatureRevisions
+    val rateLimitRevisions: StateFlow<Map<String, Long>> = mutableRateLimitRevisions
     val serverNotices: StateFlow<Map<String, List<ConversationNotice>>> = mutableServerNotices
     val threadAttention: StateFlow<Map<String, Map<String, ThreadAttention>>> = mutableThreadAttention
 
@@ -567,6 +569,8 @@ class CodexRepository(
 
     suspend fun account(serverId: String): AccountOverview = StableFeatureApi(api(serverId)).account()
 
+    suspend fun rateLimits(serverId: String): AccountRateLimits? = StableFeatureApi(api(serverId)).rateLimits()
+
     suspend fun loginWithApiKey(serverId: String, apiKey: String): LoginChallenge =
         StableFeatureApi(api(serverId)).loginWithApiKey(apiKey)
 
@@ -816,7 +820,11 @@ class CodexRepository(
 
     private fun handleNotification(serverId: String, method: String, params: JsonObject) {
         when (method) {
-            "account/updated", "account/rateLimits/updated", "account/login/completed",
+            "account/updated", "account/rateLimits/updated", "account/login/completed" -> {
+                bumpFeatureRevision(serverId)
+                bumpRateLimitRevision(serverId)
+            }
+
             "app/list/updated", "skills/changed", "mcpServer/oauthLogin/completed",
             "mcpServer/startupStatus/updated" -> bumpFeatureRevision(serverId)
 
@@ -1252,6 +1260,10 @@ class CodexRepository(
 
     private fun bumpFeatureRevision(serverId: String) {
         mutableFeatureRevisions.increment(serverId)
+    }
+
+    private fun bumpRateLimitRevision(serverId: String) {
+        mutableRateLimitRevisions.increment(serverId)
     }
 
     private fun MutableStateFlow<Map<String, Long>>.increment(serverId: String) {

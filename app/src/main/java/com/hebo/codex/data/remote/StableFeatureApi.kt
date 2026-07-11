@@ -1,5 +1,6 @@
 package com.hebo.codex.data.remote
 
+import com.hebo.codex.domain.AccountRateLimits
 import com.hebo.codex.domain.AccountOverview
 import com.hebo.codex.domain.AccountType
 import com.hebo.codex.domain.FeatureAction
@@ -109,6 +110,19 @@ class StableFeatureApi(
             rateLimits = rateLimitsResponse?.let(AccountFeatureMapper::rateLimits),
             usage = usageResponse?.let(AccountFeatureMapper::usage),
             workspaceMessages = messages,
+        )
+    }
+
+    suspend fun rateLimits(): AccountRateLimits? {
+        val response = api.request(
+            StableRpcMethod.ACCOUNT_READ,
+            buildJsonObject { put("refreshToken", false) },
+        ).jsonObject
+        val account = response["account"] as? JsonObject ?: return null
+        if (account.requiredString("type").toAccountType() != AccountType.CHATGPT) return null
+
+        return AccountFeatureMapper.rateLimits(
+            api.request(StableRpcMethod.ACCOUNT_RATE_LIMITS).jsonObject,
         )
     }
 

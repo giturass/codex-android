@@ -106,6 +106,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.hebo.codex.R
 import com.hebo.codex.domain.ActivityStatus
 import com.hebo.codex.domain.ApprovalDecision
@@ -141,6 +142,8 @@ import com.hebo.codex.ui.formatPercent
 import com.hebo.codex.ui.featureScopeLabel
 import com.hebo.codex.ui.components.ExpandableErrorDetails
 import com.hebo.codex.ui.components.UserFacingErrorDialog
+import com.hebo.codex.ui.ratelimits.RateLimitIndicator
+import com.hebo.codex.ui.ratelimits.RateLimitsUiState
 import com.hebo.codex.ui.theme.statusColors
 import com.mikepenz.markdown.compose.components.markdownComponents
 import com.mikepenz.markdown.compose.elements.highlightedCodeBlock
@@ -164,9 +167,11 @@ private const val CHAT_LIST_END_KEY = "chat-list-end"
 @Composable
 fun ChatScreen(
     viewModel: ChatViewModel,
+    rateLimitsState: RateLimitsUiState,
     showNavigationIcon: Boolean,
     onOpenNavigation: () -> Unit,
     onOpenConversation: (String) -> Unit,
+    onRefreshRateLimits: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val conversation = state.conversation
@@ -195,6 +200,11 @@ fun ChatScreen(
                 return Offset.Zero
             }
         }
+    }
+
+    LifecycleResumeEffect(viewModel) {
+        onRefreshRateLimits()
+        onPauseOrDispose {}
     }
 
     LaunchedEffect(viewModel) {
@@ -273,6 +283,10 @@ fun ChatScreen(
                 },
                 actions = {
                     if (conversation != null) {
+                        RateLimitIndicator(
+                            state = rateLimitsState,
+                            onRefresh = onRefreshRateLimits,
+                        )
                         IconButton(onClick = { dialog = ChatDialog.Actions }) {
                             Icon(Icons.Rounded.MoreVert, contentDescription = "会话操作")
                         }

@@ -18,9 +18,11 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import androidx.compose.ui.unit.dp
-import com.hebo.codex.domain.CodexRepository
 import com.hebo.codex.ConversationTarget
+import com.hebo.codex.domain.CodexRepository
 import com.hebo.codex.ui.components.CodexNavigationDrawer
+import com.hebo.codex.ui.ratelimits.RateLimitsUiState
+import com.hebo.codex.ui.ratelimits.RateLimitsViewModel
 import com.hebo.codex.ui.screens.chat.ChatScreen
 import com.hebo.codex.ui.screens.chat.ChatViewModel
 import com.hebo.codex.ui.screens.home.HomeEvent
@@ -57,6 +59,8 @@ fun CodexApp(
 ) {
     val homeViewModel: HomeViewModel = viewModel(factory = HomeViewModel.factory(repository))
     val homeState by homeViewModel.state.collectAsStateWithLifecycle()
+    val rateLimitsViewModel: RateLimitsViewModel = viewModel(factory = RateLimitsViewModel.factory(repository))
+    val rateLimitsStates by rateLimitsViewModel.state.collectAsStateWithLifecycle()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
@@ -172,9 +176,13 @@ fun CodexApp(
                 composable<NewTaskRoute> {
                     HomeScreen(
                         viewModel = homeViewModel,
+                        rateLimitsState = homeState.activeServerId?.let(rateLimitsStates::get) ?: RateLimitsUiState(),
                         showNavigationIcon = !isPermanent,
                         onOpenNavigation = { scope.launch { drawerState.open() } },
                         onAddServer = { navController.navigate(ServerEditorRoute()) },
+                        onRefreshRateLimits = {
+                            homeState.activeServerId?.let(rateLimitsViewModel::refresh)
+                        },
                     )
                 }
                 composable<ServerEditorRoute> { entry ->
@@ -193,9 +201,11 @@ fun CodexApp(
                     )
                     ChatScreen(
                         viewModel = viewModel,
+                        rateLimitsState = rateLimitsStates[route.serverId] ?: RateLimitsUiState(),
                         showNavigationIcon = !isPermanent,
                         onOpenNavigation = { scope.launch { drawerState.open() } },
                         onOpenConversation = { openConversation(route.serverId, it) },
+                        onRefreshRateLimits = { rateLimitsViewModel.refresh(route.serverId) },
                     )
                 }
                 composable<ServerHubRoute> { entry ->
