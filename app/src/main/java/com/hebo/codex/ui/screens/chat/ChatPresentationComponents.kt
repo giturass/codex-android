@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -45,12 +46,12 @@ internal fun UserMessage(item: ConversationItem.UserMessage) {
     val attachments = item.content.filterNot { it is UserMessagePart.Text }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         Surface(
-            modifier = Modifier.fillMaxWidth(0.88f),
-            shape = MaterialTheme.shapes.large,
+            modifier = Modifier.widthIn(max = 320.dp),
+            shape = MaterialTheme.shapes.extraLarge,
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
         ) {
             Column(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                modifier = Modifier.padding(horizontal = 17.dp, vertical = 11.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (text.isNotBlank()) {

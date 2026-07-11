@@ -22,7 +22,7 @@ class ConversationRowsTest {
         assertTrue(rows[0] is ConversationRow.ActivityGroup)
         assertEquals(2, (rows[0] as ConversationRow.ActivityGroup).items.size)
         assertTrue(rows[1] is ConversationRow.Item)
-        assertTrue(rows[2] is ConversationRow.Item)
+        assertTrue(rows[2] is ConversationRow.ActivityGroup)
     }
 
     @Test
@@ -32,8 +32,7 @@ class ConversationRowsTest {
         )
 
         assertEquals(2, rows.size)
-        assertTrue(rows[0] is ConversationRow.Item)
-        assertTrue(rows[1] is ConversationRow.Item)
+        assertTrue(rows.all { it is ConversationRow.ActivityGroup })
     }
 
     @Test
@@ -65,13 +64,50 @@ class ConversationRowsTest {
         assertEquals(2, rows.map(ConversationRow::key).toSet().size)
     }
 
-    private fun command(id: String, turnId: String) = ConversationItem.CommandExecution(
+    @Test
+    fun `推理和操作收纳到同一活动组`() {
+        val reasoning = ConversationItem.Reasoning(
+            id = "reasoning",
+            turnId = "turn-1",
+            summary = "分析项目",
+            details = "先检查目录",
+            isStreaming = false,
+        )
+
+        val rows = buildConversationRows(listOf(reasoning, command("command", "turn-1")))
+
+        assertEquals(1, rows.size)
+        assertEquals(2, (rows.single() as ConversationRow.ActivityGroup).items.size)
+        assertEquals(
+            "思考过程",
+            activityGroupLabel((rows.single() as ConversationRow.ActivityGroup).items),
+        )
+    }
+
+    @Test
+    fun `运行中的操作提供明确摘要`() {
+        val rows = buildConversationRows(
+            listOf(command("command", "turn-1", ActivityStatus.IN_PROGRESS)),
+        )
+
+        assertTrue(rows.hasInProgressActivity())
+        assertEquals(
+            "正在执行 pwd",
+            activityGroupLabel((rows.single() as ConversationRow.ActivityGroup).items),
+        )
+    }
+
+    private fun command(
+        id: String,
+        turnId: String,
+        status: ActivityStatus = ActivityStatus.COMPLETED,
+    ) = ConversationItem.CommandExecution(
         id = id,
         turnId = turnId,
         command = "pwd",
         cwd = "/project",
         output = "",
         exitCode = 0,
-        status = ActivityStatus.COMPLETED,
+        status = status,
     )
 }

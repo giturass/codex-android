@@ -27,8 +27,8 @@ val CodexTypography = Typography(
     ),
     bodyLarge = TextStyle(
         fontFamily = FontFamily.SansSerif,
-        fontSize = 16.sp,
-        lineHeight = 24.sp,
+        fontSize = 17.sp,
+        lineHeight = 26.sp,
     ),
     bodyMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,

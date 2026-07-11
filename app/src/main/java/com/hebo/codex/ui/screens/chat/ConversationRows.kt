@@ -1,5 +1,6 @@
 package com.hebo.codex.ui.screens.chat
 
+import com.hebo.codex.domain.ActivityStatus
 import com.hebo.codex.domain.ConversationItem
 
 internal sealed interface ConversationRow {
@@ -19,10 +20,8 @@ internal fun buildConversationRows(items: List<ConversationItem>): List<Conversa
     var activityItems = mutableListOf<ConversationItem>()
 
     fun flushActivities() {
-        when (activityItems.size) {
-            0 -> Unit
-            1 -> rows += ConversationRow.Item(activityItems.single())
-            else -> rows += ConversationRow.ActivityGroup(activityItems.toList())
+        if (activityItems.isNotEmpty()) {
+            rows += ConversationRow.ActivityGroup(activityItems.toList())
         }
         activityItems = mutableListOf()
     }
@@ -42,9 +41,15 @@ internal fun buildConversationRows(items: List<ConversationItem>): List<Conversa
 }
 
 private fun ConversationItem.isGroupableActivity(): Boolean =
-    this is ConversationItem.CommandExecution ||
-        this is ConversationItem.FileChange ||
-        this is ConversationItem.Activity
+    this !is ConversationItem.UserMessage && this !is ConversationItem.AgentMessage
+
+internal fun List<ConversationRow>.hasInProgressActivity(): Boolean = any { row ->
+    val items = when (row) {
+        is ConversationRow.Item -> listOf(row.item)
+        is ConversationRow.ActivityGroup -> row.items
+    }
+    items.any { it.activityStatus() == ActivityStatus.IN_PROGRESS }
+}
 
 private fun ConversationItem.rowKey(prefix: String): String =
     "$prefix:${turnId.length}:$turnId:${id.length}:$id"

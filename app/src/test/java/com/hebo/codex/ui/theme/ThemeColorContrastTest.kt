@@ -61,6 +61,16 @@ class ThemeColorContrastTest {
         )
     }
 
+    @Test
+    fun primaryActionIconMeetsContrastRequirement() {
+        assertContrast(
+            label = "主操作按钮图标",
+            foreground = Paper,
+            background = ActionBlue,
+            minimum = GRAPHIC_CONTRAST,
+        )
+    }
+
     private fun assertStatusColors(
         theme: String,
         colors: CodexStatusColors,
