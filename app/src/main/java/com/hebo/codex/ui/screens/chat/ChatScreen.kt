@@ -136,7 +136,7 @@ import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.domain.projectName
 import com.hebo.codex.ui.displayDescriptionRes
 import com.hebo.codex.ui.displayLabelRes
-import com.hebo.codex.ui.formatCount
+import com.hebo.codex.ui.formatCompactCount
 import com.hebo.codex.ui.formatPercent
 import com.hebo.codex.ui.featureScopeLabel
 import com.hebo.codex.ui.components.ExpandableErrorDetails
@@ -409,10 +409,11 @@ fun ChatScreen(
                             ?.takeIf { it > 0 }
                             ?.let { formatPercent(usage.totalTokens * 100.0 / it) }
                         Text(
-                            "已用 ${formatCount(usage.totalTokens)} Token" +
-                                " · 输入 ${formatCount(usage.inputTokens)}" +
-                                (usage.cachedInputTokens.takeIf { it > 0 }?.let { "（缓存 ${formatCount(it)}）" } ?: "") +
-                                " · 输出 ${formatCount(usage.outputTokens)}" +
+                            "已用 ${formatCompactCount(usage.totalTokens)} Token" +
+                                " · 输入 ${formatCompactCount(usage.inputTokens)}" +
+                                (usage.cachedInputTokens.takeIf { it > 0 }
+                                    ?.let { "（缓存 ${formatCompactCount(it)}）" } ?: "") +
+                                " · 输出 ${formatCompactCount(usage.outputTokens)}" +
                                 (contextUsage?.let { " · 占上下文 $it" } ?: ""),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,

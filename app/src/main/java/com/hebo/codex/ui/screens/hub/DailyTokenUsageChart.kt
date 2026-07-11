@@ -37,7 +37,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.hebo.codex.domain.DailyTokenUsage
 import com.hebo.codex.ui.formatCompactCount
-import com.hebo.codex.ui.formatCount
 import com.hebo.codex.ui.formatDate
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -75,7 +74,7 @@ internal fun DailyTokenUsageChart(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Text("${formatCount(selected.tokens)} Token", style = MaterialTheme.typography.labelLarge)
+            Text("${formatCompactCount(selected.tokens)} Token", style = MaterialTheme.typography.labelLarge)
         }
         DailyTokenUsagePlot(
             values = values,
@@ -98,7 +97,7 @@ internal fun DailyTokenUsageChart(
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
                         Text(formatDate(value.date), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("${formatCount(value.tokens)} Token", style = MaterialTheme.typography.labelLarge)
+                        Text("${formatCompactCount(value.tokens)} Token", style = MaterialTheme.typography.labelLarge)
                     }
                 }
             }
@@ -121,7 +120,7 @@ private fun DailyTokenUsagePlot(
     val selected = values[selectedIndex.coerceIn(values.indices)]
     val chartDescription = remember(selected, values) {
         "最近 $DAILY_TOKEN_USAGE_DAY_COUNT 天每日 Token 用量图表，当前选择${formatDate(selected.date)}，" +
-            "${formatCount(selected.tokens)} Token，可展开查看每日明细"
+            "${formatCompactCount(selected.tokens)} Token，可展开查看每日明细"
     }
 
     Row(modifier = Modifier.fillMaxWidth()) {
