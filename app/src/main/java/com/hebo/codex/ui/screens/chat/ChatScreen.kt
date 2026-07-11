@@ -200,7 +200,7 @@ fun ChatScreen(
 
     LifecycleResumeEffect(viewModel) {
         onRefreshRateLimits()
-        onPauseOrDispose {}
+        onPauseOrDispose { viewModel.flushDraft() }
     }
 
     LaunchedEffect(viewModel) {

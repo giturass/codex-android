@@ -2,6 +2,8 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.ksp)
+    alias(libs.plugins.room)
 }
 
 android {
@@ -44,6 +46,10 @@ android {
     }
 }
 
+room3 {
+    schemaDirectory("$projectDir/schemas")
+}
+
 dependencies {
     implementation(libs.androidx.core)
     implementation(libs.androidx.activity.compose)
@@ -56,6 +62,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.sqlite.framework)
     implementation(libs.material)
     implementation(libs.markdown.renderer.code)
     implementation(libs.markdown.renderer.m3)
@@ -70,4 +78,6 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+
+    ksp(libs.androidx.room.compiler)
 }

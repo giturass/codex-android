@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
@@ -20,6 +21,8 @@ import androidx.navigation.toRoute
 import androidx.compose.ui.unit.dp
 import com.hebo.codex.ConversationTarget
 import com.hebo.codex.domain.CodexRepository
+import com.hebo.codex.domain.DraftRepository
+import com.hebo.codex.domain.DraftTarget
 import com.hebo.codex.ui.components.CodexNavigationDrawer
 import com.hebo.codex.ui.ratelimits.RateLimitsUiState
 import com.hebo.codex.ui.ratelimits.RateLimitsViewModel
@@ -28,6 +31,8 @@ import com.hebo.codex.ui.screens.chat.ChatViewModel
 import com.hebo.codex.ui.screens.home.HomeEvent
 import com.hebo.codex.ui.screens.home.HomeScreen
 import com.hebo.codex.ui.screens.home.HomeViewModel
+import com.hebo.codex.ui.screens.home.NewTaskEvent
+import com.hebo.codex.ui.screens.home.NewTaskViewModel
 import com.hebo.codex.ui.screens.hub.ServerHubScreen
 import com.hebo.codex.ui.screens.hub.ServerHubViewModel
 import com.hebo.codex.ui.screens.servers.ServerEditorScreen
@@ -41,12 +46,16 @@ private val PermanentDrawerThreshold = 840.dp
 
 @Serializable
 internal data class NewTaskRoute(
+    val draftId: String,
     val serverId: String? = null,
     val cwd: String? = null,
 )
 
-internal fun isNewTaskDestination(route: String?): Boolean =
-    route?.substringBefore('?') == NewTaskRoute::class.qualifiedName
+internal fun isNewTaskDestination(route: String?): Boolean {
+    val routeBase = route?.substringBefore('?') ?: return false
+    val routeName = NewTaskRoute::class.qualifiedName ?: return false
+    return routeBase == routeName || routeBase.startsWith("$routeName/")
+}
 
 @Serializable
 private data class ServerEditorRoute(val serverId: String? = null)
@@ -60,10 +69,13 @@ private data class ServerHubRoute(val serverId: String, val cwd: String? = null)
 @Composable
 fun CodexApp(
     repository: CodexRepository,
+    draftRepository: DraftRepository,
     notificationTargets: Flow<ConversationTarget> = emptyFlow(),
     navController: NavHostController = rememberNavController(),
 ) {
-    val homeViewModel: HomeViewModel = viewModel(factory = HomeViewModel.factory(repository))
+    val homeViewModel: HomeViewModel = viewModel(
+        factory = HomeViewModel.factory(repository, draftRepository),
+    )
     val homeState by homeViewModel.state.collectAsStateWithLifecycle()
     val rateLimitsViewModel: RateLimitsViewModel = viewModel(factory = RateLimitsViewModel.factory(repository))
     val rateLimitsStates by rateLimitsViewModel.state.collectAsStateWithLifecycle()
@@ -77,9 +89,14 @@ fun CodexApp(
         scope.launch { drawerState.close() }
     }
 
-    fun openNewTask(serverId: String? = null, cwd: String? = null) {
+    fun openNewTask(
+        serverId: String? = null,
+        cwd: String? = null,
+        draftId: String = NewTaskViewModel.newDraftId(),
+    ) {
         navController.navigate(
             NewTaskRoute(
+                draftId = draftId,
                 serverId = serverId,
                 cwd = cwd?.takeIf(String::isNotBlank),
             ),
@@ -127,6 +144,7 @@ fun CodexApp(
                 projects = homeState.recentProjects,
                 threads = homeState.threads,
                 recentThreads = homeState.recentThreads,
+                drafts = homeState.activeDrafts,
                 threadAttention = homeState.threadAttention,
                 searchTerm = homeState.searchTerm,
                 showArchived = homeState.showArchived,
@@ -144,6 +162,19 @@ fun CodexApp(
                     closeDrawer()
                     homeState.activeServerId?.let { openConversation(it, threadId) }
                 },
+                onOpenDraft = { draft ->
+                    closeDrawer()
+                    when (val target = draft.key.target) {
+                        is DraftTarget.NewTask -> openNewTask(
+                            serverId = draft.key.serverId,
+                            cwd = draft.cwd,
+                            draftId = target.id,
+                        )
+
+                        is DraftTarget.Thread -> openConversation(draft.key.serverId, target.id)
+                    }
+                },
+                onDeleteDraft = homeViewModel::deleteDraft,
                 onOpenProjectSettings = { cwd ->
                     closeDrawer()
                     homeState.activeServerId?.let { navController.navigate(ServerHubRoute(it, cwd)) }
@@ -184,20 +215,43 @@ fun CodexApp(
                 },
             )
         }
+        val initialDraftId = rememberSaveable { NewTaskViewModel.newDraftId() }
         val content: @Composable () -> Unit = {
-            NavHost(navController = navController, startDestination = NewTaskRoute()) {
+            NavHost(
+                navController = navController,
+                startDestination = NewTaskRoute(draftId = initialDraftId),
+            ) {
                 composable<NewTaskRoute> { entry ->
                     val route = entry.toRoute<NewTaskRoute>()
+                    val newTaskViewModel: NewTaskViewModel = viewModel(
+                        key = "new-task:${route.serverId.orEmpty()}:${route.draftId}",
+                        factory = NewTaskViewModel.factory(
+                            repository = repository,
+                            draftRepository = draftRepository,
+                            serverId = route.serverId,
+                            draftId = route.draftId,
+                            initialCwd = route.cwd,
+                        ),
+                    )
                     LaunchedEffect(route.serverId, homeState.activeServerId) {
                         val serverId = route.serverId
                         if (serverId != null && serverId != homeState.activeServerId) {
                             homeViewModel.selectServer(serverId)
                         }
                     }
+                    LaunchedEffect(newTaskViewModel) {
+                        newTaskViewModel.events.collect { event ->
+                            when (event) {
+                                is NewTaskEvent.OpenConversation -> {
+                                    openConversation(event.serverId, event.threadId)
+                                }
+                            }
+                        }
+                    }
                     HomeScreen(
                         viewModel = homeViewModel,
+                        newTaskViewModel = newTaskViewModel,
                         rateLimitsState = homeState.activeServerId?.let(rateLimitsStates::get) ?: RateLimitsUiState(),
-                        initialCwd = route.cwd,
                         showNavigationIcon = !isPermanent,
                         onOpenNavigation = { scope.launch { drawerState.open() } },
                         onAddServer = { navController.navigate(ServerEditorRoute()) },
@@ -218,7 +272,12 @@ fun CodexApp(
                     val route = entry.toRoute<ChatRoute>()
                     val viewModel: ChatViewModel = viewModel(
                         key = "chat:${route.serverId}:${route.threadId}",
-                        factory = ChatViewModel.factory(repository, route.serverId, route.threadId),
+                        factory = ChatViewModel.factory(
+                            repository,
+                            draftRepository,
+                            route.serverId,
+                            route.threadId,
+                        ),
                     )
                     ChatScreen(
                         viewModel = viewModel,

@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import com.hebo.codex.domain.FeatureEntry
 import com.hebo.codex.domain.FeatureKind
+import com.hebo.codex.domain.DraftAttachment
 import com.hebo.codex.domain.UserInputPart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext

@@ -8,10 +8,13 @@ import androidx.lifecycle.viewModelScope
 import com.hebo.codex.domain.CodexRepository
 import com.hebo.codex.domain.ConnectionStatus
 import com.hebo.codex.domain.ConversationNotice
+import com.hebo.codex.domain.DraftKey
+import com.hebo.codex.domain.DraftRepository
+import com.hebo.codex.domain.DraftSummary
+import com.hebo.codex.domain.DraftTarget
 import com.hebo.codex.domain.ModelOption
 import com.hebo.codex.domain.RecentProject
 import com.hebo.codex.domain.ServerProfile
-import com.hebo.codex.domain.ThreadOptions
 import com.hebo.codex.domain.ThreadAttention
 import com.hebo.codex.domain.ThreadSummary
 import com.hebo.codex.domain.UserFacingError
@@ -39,18 +42,20 @@ data class HomeUiState(
     val models: List<ModelOption> = emptyList(),
     val serverNotices: List<ConversationNotice> = emptyList(),
     val threadAttention: Map<String, ThreadAttention> = emptyMap(),
+    val drafts: List<DraftSummary> = emptyList(),
     val searchTerm: String = "",
     val showArchived: Boolean = false,
     val nextCursor: String? = null,
     val recentNextCursor: String? = null,
     val isLoading: Boolean = false,
     val isLoadingMore: Boolean = false,
-    val isCreatingConversation: Boolean = false,
-    val newTaskRevision: Int = 0,
     val errorMessage: UserFacingError? = null,
 ) {
     val activeServer: ServerProfile?
         get() = servers.singleOrNull { it.id == activeServerId }
+
+    val activeDrafts: List<DraftSummary>
+        get() = drafts.filter { it.key.serverId == activeServerId }
 }
 
 sealed interface HomeEvent {
@@ -60,6 +65,7 @@ sealed interface HomeEvent {
 
 class HomeViewModel(
     private val repository: CodexRepository,
+    private val draftRepository: DraftRepository,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(HomeUiState())
     private val mutableEvents = Channel<HomeEvent>(Channel.BUFFERED)
@@ -95,6 +101,11 @@ class HomeViewModel(
                         threadAttention = value.threadAttention,
                     )
                 }
+            }
+        }
+        viewModelScope.launch {
+            draftRepository.summaries.collect { drafts ->
+                mutableState.update { it.copy(drafts = drafts) }
             }
         }
         viewModelScope.launch {
@@ -160,7 +171,10 @@ class HomeViewModel(
 
     fun removeServer(serverId: String) {
         viewModelScope.launch {
-            runSuspendCatching { repository.removeServer(serverId) }
+            runSuspendCatching {
+                repository.removeServer(serverId)
+                draftRepository.deleteServer(serverId)
+            }
                 .onFailure(::showError)
         }
     }
@@ -270,36 +284,6 @@ class HomeViewModel(
         }
     }
 
-    fun startConversation(
-        cwd: String,
-        message: String,
-        options: ThreadOptions = ThreadOptions(),
-    ) {
-        if (mutableState.value.isCreatingConversation) return
-        val serverId = mutableState.value.activeServerId ?: return
-        val normalizedMessage = message.trim()
-        if (normalizedMessage.isEmpty()) {
-            showError(IllegalArgumentException("请输入任务内容"))
-            return
-        }
-        viewModelScope.launch {
-            mutableState.update { it.copy(isCreatingConversation = true, errorMessage = null) }
-            val result = runSuspendCatching { repository.startConversation(serverId, cwd, options) }
-            result.exceptionOrNull()?.let(::showError)
-            result.getOrNull()?.let { threadId ->
-                runSuspendCatching { repository.sendMessage(serverId, threadId, normalizedMessage) }
-                mutableState.update {
-                    it.copy(
-                        isCreatingConversation = false,
-                        newTaskRevision = it.newTaskRevision + 1,
-                    )
-                }
-                mutableEvents.send(HomeEvent.OpenConversation(serverId, threadId))
-            }
-            mutableState.update { it.copy(isCreatingConversation = false) }
-        }
-    }
-
     fun forkConversation(threadId: String) {
         val serverId = mutableState.value.activeServerId ?: return
         viewModelScope.launch {
@@ -312,7 +296,10 @@ class HomeViewModel(
     fun renameConversation(threadId: String, name: String) {
         val serverId = mutableState.value.activeServerId ?: return
         viewModelScope.launch {
-            runSuspendCatching { repository.renameConversation(serverId, threadId, name) }
+            runSuspendCatching {
+                repository.renameConversation(serverId, threadId, name)
+                draftRepository.renameThread(serverId, threadId, name.trim())
+            }
                 .onSuccess { refresh() }
                 .onFailure(::showError)
         }
@@ -337,9 +324,19 @@ class HomeViewModel(
         viewModelScope.launch {
             runSuspendCatching { repository.deleteConversation(serverId, threadId) }
                 .onSuccess {
+                    runSuspendCatching {
+                        draftRepository.delete(DraftKey(serverId, DraftTarget.Thread(threadId)))
+                    }.onFailure(::showError)
                     refresh()
                     mutableEvents.send(HomeEvent.ConversationRemoved(serverId, threadId))
                 }
+                .onFailure(::showError)
+        }
+    }
+
+    fun deleteDraft(key: DraftKey) {
+        viewModelScope.launch {
+            runSuspendCatching { draftRepository.delete(key) }
                 .onFailure(::showError)
         }
     }
@@ -430,8 +427,11 @@ class HomeViewModel(
     )
 
     companion object {
-        fun factory(repository: CodexRepository): ViewModelProvider.Factory = viewModelFactory {
-            initializer { HomeViewModel(repository) }
+        fun factory(
+            repository: CodexRepository,
+            draftRepository: DraftRepository,
+        ): ViewModelProvider.Factory = viewModelFactory {
+            initializer { HomeViewModel(repository, draftRepository) }
         }
     }
 }

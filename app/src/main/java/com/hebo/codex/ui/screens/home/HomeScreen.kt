@@ -87,20 +87,16 @@ import com.hebo.codex.ui.ratelimits.RateLimitsUiState
 @Composable
 fun HomeScreen(
     viewModel: HomeViewModel,
+    newTaskViewModel: NewTaskViewModel,
     rateLimitsState: RateLimitsUiState,
-    initialCwd: String?,
     showNavigationIcon: Boolean,
     onOpenNavigation: () -> Unit,
     onAddServer: () -> Unit,
     onRefreshRateLimits: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val newTaskState by newTaskViewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    var message by rememberSaveable(state.activeServerId) { mutableStateOf("") }
-    var cwd by rememberSaveable(state.activeServerId, initialCwd) {
-        mutableStateOf(initialCwd.orEmpty())
-    }
-    var options by remember(state.activeServerId) { mutableStateOf(ThreadOptions()) }
     var showProjectMenu by remember { mutableStateOf(false) }
     var showCustomPathDialog by remember { mutableStateOf(false) }
     var showOptions by remember { mutableStateOf(false) }
@@ -111,26 +107,32 @@ fun HomeScreen(
         viewModel.refresh()
         onPauseOrDispose {}
     }
+    LifecycleResumeEffect(newTaskViewModel) {
+        onPauseOrDispose { newTaskViewModel.flushDraft() }
+    }
     LifecycleResumeEffect(state.activeServerId) {
         onRefreshRateLimits()
         onPauseOrDispose {}
     }
 
-    LaunchedEffect(state.activeServerId, state.projects) {
-        if (cwd.isBlank()) cwd = state.projects.firstOrNull()?.path.orEmpty()
-    }
-    LaunchedEffect(state.activeServerId, state.models) {
-        if (options.model == null) {
-            state.models.firstOrNull { it.isDefault && !it.hidden }?.let { defaultModel ->
-                options = options.copy(
-                    model = defaultModel.model,
-                    serviceTier = defaultModel.defaultServiceTier,
-                )
-            }
+    LaunchedEffect(
+        state.activeServerId,
+        state.projects,
+        newTaskState.isLoadingDraft,
+        newTaskState.cwd,
+    ) {
+        if (!newTaskState.isLoadingDraft && newTaskState.cwd.isBlank()) {
+            state.projects.firstOrNull()?.path?.let(newTaskViewModel::updateCwd)
         }
     }
-    LaunchedEffect(state.newTaskRevision) {
-        if (state.newTaskRevision > 0) message = ""
+    LaunchedEffect(
+        state.activeServerId,
+        state.models,
+        newTaskState.isLoadingDraft,
+        newTaskState.options.model,
+    ) {
+        state.models.firstOrNull { it.isDefault && !it.hidden }
+            ?.let(newTaskViewModel::applyDefaultModel)
     }
     LaunchedEffect(state.errorMessage) {
         state.errorMessage?.let { error ->
@@ -142,12 +144,22 @@ fun HomeScreen(
             viewModel.clearError()
         }
     }
+    LaunchedEffect(newTaskState.errorMessage) {
+        newTaskState.errorMessage?.let { error ->
+            val result = snackbarHostState.showSnackbar(
+                message = error.summary,
+                actionLabel = error.technicalDetails?.let { detailsLabel },
+            )
+            if (result == SnackbarResult.ActionPerformed) technicalError = error
+            newTaskViewModel.clearError()
+        }
+    }
     LaunchedEffect(state.serverNotices.lastOrNull()?.id) {
         state.serverNotices.lastOrNull()?.let { snackbarHostState.showSnackbar(it.message) }
     }
 
-    val selectedModel = state.models.firstOrNull { it.model == options.model }
-    val modelLabel = selectedModel?.displayName ?: options.model ?: "默认模型"
+    val selectedModel = state.models.firstOrNull { it.model == newTaskState.options.model }
+    val modelLabel = selectedModel?.displayName ?: newTaskState.options.model ?: "默认模型"
 
     Scaffold(
         topBar = {
@@ -195,17 +207,17 @@ fun HomeScreen(
             }
 
             else -> NewTaskContent(
-                message = message,
-                cwd = cwd,
+                message = newTaskState.message,
+                cwd = newTaskState.cwd,
                 projects = state.recentProjects,
                 modelLabel = modelLabel,
-                isCreating = state.isCreatingConversation,
+                isCreating = newTaskState.isCreatingConversation || newTaskState.isLoadingDraft,
                 projectMenuExpanded = showProjectMenu,
-                onMessageChange = { message = it },
+                onMessageChange = newTaskViewModel::updateMessage,
                 onToggleProjectMenu = { showProjectMenu = !showProjectMenu },
                 onDismissProjectMenu = { showProjectMenu = false },
                 onSelectProject = {
-                    cwd = it
+                    newTaskViewModel.updateCwd(it)
                     showProjectMenu = false
                 },
                 onSelectCustomPath = {
@@ -213,7 +225,7 @@ fun HomeScreen(
                     showCustomPathDialog = true
                 },
                 onOpenOptions = { showOptions = true },
-                onSend = { viewModel.startConversation(cwd, message, options) },
+                onSend = newTaskViewModel::startConversation,
                 modifier = Modifier.fillMaxSize().padding(padding),
             )
         }
@@ -221,21 +233,21 @@ fun HomeScreen(
 
     if (showCustomPathDialog) {
         CustomProjectPathDialog(
-            currentPath = cwd,
+            currentPath = newTaskState.cwd,
             onDismiss = { showCustomPathDialog = false },
             onConfirm = {
-                cwd = it
+                newTaskViewModel.updateCwd(it)
                 showCustomPathDialog = false
             },
         )
     }
     if (showOptions) {
         ThreadOptionsSheet(
-            value = options,
+            value = newTaskState.options,
             models = state.models,
             onDismiss = { showOptions = false },
             onSave = {
-                options = it
+                newTaskViewModel.updateOptions(it)
                 showOptions = false
             },
         )

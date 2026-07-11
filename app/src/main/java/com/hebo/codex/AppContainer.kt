@@ -1,10 +1,15 @@
 package com.hebo.codex
 
 import android.content.Context
+import androidx.room3.Room
+import androidx.sqlite.driver.AndroidSQLiteDriver
+import com.hebo.codex.data.local.CodexDatabase
+import com.hebo.codex.data.local.RoomDraftRepository
 import com.hebo.codex.data.local.ServerStore
 import com.hebo.codex.data.local.TokenCipher
 import com.hebo.codex.data.remote.AppServerClientFactory
 import com.hebo.codex.domain.CodexRepository
+import com.hebo.codex.domain.DraftRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -20,7 +25,18 @@ class AppContainer(context: Context) {
         tokenCipher = TokenCipher(),
         json = json,
     )
+    private val database = Room.databaseBuilder(
+        context = context,
+        klass = CodexDatabase::class.java,
+        name = "codex.db",
+    ).setDriver(AndroidSQLiteDriver()).build()
     val notifications = ConversationNotificationController(context)
+    val draftRepository: DraftRepository = RoomDraftRepository(
+        dao = database.draftDao(),
+        filesDir = context.filesDir,
+        json = json,
+        applicationScope = applicationScope,
+    )
 
     val repository = CodexRepository(
         serverStore = serverStore,

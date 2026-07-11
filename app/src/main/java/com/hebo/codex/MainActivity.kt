@@ -29,7 +29,11 @@ class MainActivity : ComponentActivity() {
         val container = (application as CodexApplication).container
         setContent {
             CodexTheme {
-                CodexApp(container.repository, notificationTargets = notificationTargetFlow)
+                CodexApp(
+                    repository = container.repository,
+                    draftRepository = container.draftRepository,
+                    notificationTargets = notificationTargetFlow,
+                )
             }
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&

@@ -11,6 +11,7 @@ class NewTaskRouteTest {
     @Test
     fun projectContextSurvivesSerialization() {
         val route = NewTaskRoute(
+            draftId = "draft-1",
             serverId = "server-1",
             cwd = "/home/user/Idea Projects/codex-android",
         )
@@ -25,7 +26,7 @@ class NewTaskRouteTest {
         val routeName = NewTaskRoute::class.qualifiedName
 
         assertTrue(isNewTaskDestination(routeName))
-        assertTrue(isNewTaskDestination("$routeName?serverId={serverId}&cwd={cwd}"))
+        assertTrue(isNewTaskDestination("$routeName/{draftId}?serverId={serverId}&cwd={cwd}"))
         assertFalse(isNewTaskDestination("com.hebo.codex.ui.ChatRoute/{serverId}/{threadId}"))
     }
 }

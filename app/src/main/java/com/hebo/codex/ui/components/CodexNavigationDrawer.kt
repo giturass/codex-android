@@ -28,6 +28,7 @@ import androidx.compose.material.icons.rounded.Circle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Folder
@@ -74,6 +75,9 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hebo.codex.domain.ConnectionStatus
+import com.hebo.codex.domain.DraftKey
+import com.hebo.codex.domain.DraftSummary
+import com.hebo.codex.domain.DraftTarget
 import com.hebo.codex.domain.RecentProject
 import com.hebo.codex.domain.ServerProfile
 import com.hebo.codex.domain.ThreadRuntimeStatus
@@ -90,6 +94,7 @@ fun CodexNavigationDrawer(
     projects: List<RecentProject>,
     threads: List<ThreadSummary>,
     recentThreads: List<ThreadSummary>,
+    drafts: List<DraftSummary>,
     threadAttention: Map<String, ThreadAttention>,
     searchTerm: String,
     showArchived: Boolean,
@@ -101,6 +106,8 @@ fun CodexNavigationDrawer(
     isPermanent: Boolean,
     onNewConversation: () -> Unit,
     onOpenConversation: (String) -> Unit,
+    onOpenDraft: (DraftSummary) -> Unit,
+    onDeleteDraft: (DraftKey) -> Unit,
     onOpenProjectSettings: (String) -> Unit,
     onNewProjectTask: (String) -> Unit,
     onSearch: (String) -> Unit,
@@ -128,6 +135,7 @@ fun CodexNavigationDrawer(
             projects = projects,
             threads = threads,
             recentThreads = recentThreads,
+            drafts = drafts,
             threadAttention = threadAttention,
             searchTerm = searchTerm,
             showArchived = showArchived,
@@ -138,6 +146,8 @@ fun CodexNavigationDrawer(
             newTaskSelected = newTaskSelected,
             onNewConversation = onNewConversation,
             onOpenConversation = onOpenConversation,
+            onOpenDraft = onOpenDraft,
+            onDeleteDraft = onDeleteDraft,
             onOpenProjectSettings = onOpenProjectSettings,
             onNewProjectTask = onNewProjectTask,
             onSearch = onSearch,
@@ -185,6 +195,7 @@ private fun ColumnScope.DrawerContent(
     projects: List<RecentProject>,
     threads: List<ThreadSummary>,
     recentThreads: List<ThreadSummary>,
+    drafts: List<DraftSummary>,
     threadAttention: Map<String, ThreadAttention>,
     searchTerm: String,
     showArchived: Boolean,
@@ -195,6 +206,8 @@ private fun ColumnScope.DrawerContent(
     newTaskSelected: Boolean,
     onNewConversation: () -> Unit,
     onOpenConversation: (String) -> Unit,
+    onOpenDraft: (DraftSummary) -> Unit,
+    onDeleteDraft: (DraftKey) -> Unit,
     onOpenProjectSettings: (String) -> Unit,
     onNewProjectTask: (String) -> Unit,
     onSearch: (String) -> Unit,
@@ -217,6 +230,7 @@ private fun ColumnScope.DrawerContent(
     var expandedProjects by remember(activeServer?.id) { mutableStateOf(emptySet<String>()) }
     var expansionInitialized by remember(activeServer?.id) { mutableStateOf(false) }
     var selectedThread by remember(activeServer?.id) { mutableStateOf<ThreadSummary?>(null) }
+    var selectedDraft by remember(activeServer?.id) { mutableStateOf<DraftSummary?>(null) }
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
 
@@ -280,7 +294,7 @@ private fun ColumnScope.DrawerContent(
             )
             Spacer(Modifier.height(8.dp))
             when (drawerPage) {
-                DrawerPage.RECENT -> DrawerRecentHeader(
+                DrawerPage.RECENT -> DrawerMainHeader(
                     newTaskSelected = newTaskSelected,
                     groupByProject = groupByProject,
                     onNewConversation = {
@@ -303,6 +317,25 @@ private fun ColumnScope.DrawerContent(
         if (isLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
 
         LazyColumn(modifier = Modifier.weight(1f)) {
+            val visibleDrafts = drafts
+            val visibleRecentThreads = threadsWithoutDrafts(recentThreads, visibleDrafts)
+            val visibleProjects = projectsWithoutDrafts(projects, visibleDrafts)
+            if (activeServer != null && drawerPage == DrawerPage.RECENT) {
+                if (visibleDrafts.isNotEmpty()) {
+                    item("drafts-title") { DrawerSectionTitle("草稿") }
+                    items(visibleDrafts, key = { it.drawerKey }) { draft ->
+                        DrawerDraftItem(
+                            draft = draft,
+                            onClick = {
+                                leaveTransientPage()
+                                onOpenDraft(draft)
+                            },
+                            onDelete = { selectedDraft = draft },
+                        )
+                    }
+                }
+                item("recent-title") { DrawerSectionTitle("最近会话") }
+            }
             when {
                 activeServer == null && servers.isNotEmpty() -> {
                     item("no-active-server") {
@@ -343,10 +376,12 @@ private fun ColumnScope.DrawerContent(
                 }
 
                 activeServer != null && groupByProject -> {
-                    if (!isLoading && projects.isEmpty()) {
-                        item("grouped-empty") { DrawerEmptyMessage("还没有会话") }
+                    if (!isLoading && visibleProjects.isEmpty()) {
+                        item("grouped-empty") {
+                            DrawerEmptyMessage(if (visibleDrafts.isEmpty()) "还没有会话" else "没有其他最近会话")
+                        }
                     }
-                    items(projects, key = RecentProject::path) { project ->
+                    items(visibleProjects, key = RecentProject::path) { project ->
                         val expanded = project.path in expandedProjects
                         val active = project.threads.any { it.id == activeThreadId }
                         Column {
@@ -390,10 +425,12 @@ private fun ColumnScope.DrawerContent(
                 }
 
                 activeServer != null -> {
-                    if (!isLoading && recentThreads.isEmpty()) {
-                        item("recent-empty") { DrawerEmptyMessage("还没有会话") }
+                    if (!isLoading && visibleRecentThreads.isEmpty()) {
+                        item("recent-empty") {
+                            DrawerEmptyMessage(if (visibleDrafts.isEmpty()) "还没有会话" else "没有其他最近会话")
+                        }
                     }
-                    items(recentThreads, key = ThreadSummary::id) { thread ->
+                    items(visibleRecentThreads, key = ThreadSummary::id) { thread ->
                         DrawerThreadItem(
                             thread = thread,
                             attention = threadAttention[thread.id],
@@ -462,10 +499,30 @@ private fun ColumnScope.DrawerContent(
             },
         )
     }
+    selectedDraft?.let { draft ->
+        AlertDialog(
+            onDismissRequest = { selectedDraft = null },
+            title = { Text("删除草稿？") },
+            text = { Text("删除后无法恢复：${draft.preview}") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeleteDraft(draft.key)
+                        selectedDraft = null
+                    },
+                ) {
+                    Text("删除")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { selectedDraft = null }) { Text("取消") }
+            },
+        )
+    }
 }
 
 @Composable
-private fun DrawerRecentHeader(
+private fun DrawerMainHeader(
     newTaskSelected: Boolean,
     groupByProject: Boolean,
     onNewConversation: () -> Unit,
@@ -477,7 +534,7 @@ private fun DrawerRecentHeader(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = "最近会话",
+            text = "会话",
             modifier = Modifier.weight(1f),
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -627,6 +684,82 @@ private fun ProjectHeader(
                         menuExpanded = false
                         onOpenSettings()
                     },
+                )
+            }
+        }
+    }
+}
+
+internal fun threadsWithoutDrafts(
+    threads: List<ThreadSummary>,
+    drafts: List<DraftSummary>,
+): List<ThreadSummary> {
+    val draftedThreadIds = drafts.mapNotNullTo(mutableSetOf()) { draft ->
+        (draft.key.target as? DraftTarget.Thread)?.id
+    }
+    return threads.filterNot { it.id in draftedThreadIds }
+}
+
+internal fun projectsWithoutDrafts(
+    projects: List<RecentProject>,
+    drafts: List<DraftSummary>,
+): List<RecentProject> = projects.mapNotNull { project ->
+    project.copy(threads = threadsWithoutDrafts(project.threads, drafts))
+        .takeIf { it.threads.isNotEmpty() }
+}
+
+private val DraftSummary.drawerKey: String
+    get() = when (val target = key.target) {
+        is DraftTarget.NewTask -> "draft:${key.serverId}:new:${target.id}"
+        is DraftTarget.Thread -> "draft:${key.serverId}:thread:${target.id}"
+    }
+
+@Composable
+private fun DrawerDraftItem(
+    draft: DraftSummary,
+    onClick: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 4.dp, end = 4.dp, bottom = 4.dp)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClickLabel = "删除草稿",
+                onLongClick = onDelete,
+            ),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Rounded.EditNote,
+                contentDescription = null,
+                modifier = Modifier.size(22.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Column(Modifier.weight(1f).padding(start = 10.dp)) {
+                Text(
+                    draft.preview,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = buildList {
+                        add(draft.contextTitle)
+                        draft.cwd.takeIf(String::isNotBlank)?.let { add(projectName(it)) }
+                        add(relativeTime(draft.updatedAtMillis / 1_000))
+                    }.joinToString(" · "),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.76f),
                 )
             }
         }
