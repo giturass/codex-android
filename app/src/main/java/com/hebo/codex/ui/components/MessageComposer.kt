@@ -1,17 +1,14 @@
 package com.hebo.codex.ui.components
 
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imeAnimationSource
+import androidx.compose.foundation.layout.imeAnimationTarget
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,17 +23,33 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp as lerpColor
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.constrainHeight
+import androidx.compose.ui.unit.constrainWidth
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp as lerpDp
+import androidx.compose.ui.unit.offset
 import com.hebo.codex.ui.theme.ActionBlue
+import kotlin.math.roundToInt
 
 private val ComposerCompactCornerRadius = 30.dp
 private val ComposerExpandedCornerRadius = 22.dp
@@ -51,6 +64,7 @@ internal enum class MessageComposerAction {
     STOP,
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun MessageComposer(
     value: String,
@@ -62,99 +76,212 @@ internal fun MessageComposer(
     modifier: Modifier = Modifier,
     compactEndExtra: Dp = 0.dp,
 ) {
-    val isExpanded = WindowInsets.ime.getBottom(LocalDensity.current) > 0
-    val cornerRadius by animateDpAsState(
-        targetValue = if (isExpanded) ComposerExpandedCornerRadius else ComposerCompactCornerRadius,
-        label = "输入框圆角",
-    )
-    val containerColor by animateColorAsState(
-        targetValue = if (isExpanded) {
-            MaterialTheme.colorScheme.surfaceContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerLow
-        },
-        label = "输入框背景",
-    )
-    val borderColor by animateColorAsState(
-        targetValue = if (isExpanded) {
-            MaterialTheme.colorScheme.outlineVariant
-        } else {
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)
-        },
-        label = "输入框边框",
-    )
+    val density = LocalDensity.current
+    val imeInsets = WindowInsets.ime
+    val imeAnimationSource = WindowInsets.imeAnimationSource
+    val imeAnimationTarget = WindowInsets.imeAnimationTarget
+    val imeAnimation = remember(imeInsets, imeAnimationSource, imeAnimationTarget) {
+        ComposerImeAnimation(imeInsets, imeAnimationSource, imeAnimationTarget)
+    }
+    val hasText = value.isNotEmpty()
+    val allowsMultipleLines by remember(density, imeAnimation, hasText) {
+        derivedStateOf { hasText || imeAnimation.isVisibleOrOpening(density) }
+    }
+    val compactContainerColor = MaterialTheme.colorScheme.surfaceContainerLow
+    val expandedContainerColor = MaterialTheme.colorScheme.surfaceContainer
+    val compactBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)
+    val expandedBorderColor = MaterialTheme.colorScheme.outlineVariant
 
-    Surface(
-        modifier = modifier.fillMaxWidth().animateContentSize(),
-        shape = RoundedCornerShape(cornerRadius),
-        color = containerColor,
-        border = BorderStroke(1.dp, borderColor),
-        shadowElevation = 2.dp,
+    // Insets 在布局前更新；在布局与绘制阶段读取，才能与 imePadding 保持同一帧
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                val fraction = imeAnimation.expansionFraction(this, hasText)
+                shadowElevation = 2.dp.toPx()
+                shape = RoundedCornerShape(
+                    lerpDp(ComposerCompactCornerRadius, ComposerExpandedCornerRadius, fraction),
+                )
+                clip = true
+            }
+            .drawWithContent {
+                val fraction = imeAnimation.expansionFraction(this, hasText)
+                val cornerRadius = lerpDp(
+                    ComposerCompactCornerRadius,
+                    ComposerExpandedCornerRadius,
+                    fraction,
+                ).toPx()
+                drawRoundRect(
+                    color = lerpColor(compactContainerColor, expandedContainerColor, fraction),
+                    cornerRadius = CornerRadius(cornerRadius),
+                )
+                drawContent()
+                val strokeWidth = 1.dp.toPx()
+                drawRoundRect(
+                    color = lerpColor(compactBorderColor, expandedBorderColor, fraction),
+                    topLeft = Offset(strokeWidth / 2f, strokeWidth / 2f),
+                    size = Size(
+                        width = (size.width - strokeWidth).coerceAtLeast(0f),
+                        height = (size.height - strokeWidth).coerceAtLeast(0f),
+                    ),
+                    cornerRadius = CornerRadius((cornerRadius - strokeWidth / 2f).coerceAtLeast(0f)),
+                    style = Stroke(strokeWidth),
+                )
+            }
+            .padding(horizontal = 6.dp, vertical = 5.dp),
     ) {
         Box(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 5.dp),
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .size(48.dp),
+            contentAlignment = Alignment.Center,
         ) {
-            Box(
-                modifier = Modifier
-                    .align(if (isExpanded) Alignment.BottomStart else Alignment.CenterStart)
-                    .size(48.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                leadingContent()
-            }
-            BasicTextField(
-                value = value,
-                onValueChange = onValueChange,
-                enabled = enabled,
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .fillMaxWidth()
-                    .padding(
-                        start = if (isExpanded) ComposerExpandedTextInset else ComposerCompactControlInset,
-                        top = if (isExpanded) 6.dp else 0.dp,
-                        end = if (isExpanded) {
-                            ComposerExpandedTextInset
-                        } else {
-                            ComposerCompactControlInset + compactEndExtra
-                        },
-                        bottom = if (isExpanded) ComposerExpandedActionsHeight else 0.dp,
-                    )
-                    .heightIn(
-                        min = ComposerTextFieldHeight,
-                        max = if (isExpanded) {
-                            ComposerExpandedTextFieldMaxHeight
-                        } else {
-                            ComposerTextFieldHeight
-                        },
-                    ),
-                textStyle = MaterialTheme.typography.bodyLarge.copy(
-                    color = MaterialTheme.colorScheme.onSurface,
-                ),
-                minLines = 1,
-                maxLines = if (isExpanded) 5 else 1,
-                decorationBox = { innerTextField ->
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = if (isExpanded) Alignment.TopStart else Alignment.CenterStart,
-                    ) {
-                        if (value.isEmpty()) {
-                            Text(
-                                placeholder,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        innerTextField()
-                    }
-                },
-            )
-            Row(
-                modifier = Modifier.align(
-                    if (isExpanded) Alignment.BottomEnd else Alignment.CenterEnd,
-                ),
-                verticalAlignment = Alignment.CenterVertically,
-                content = trailingContent,
-            )
+            leadingContent()
         }
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            enabled = enabled,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .fillMaxWidth()
+                .composerTextFieldLayout(
+                    imeAnimation = imeAnimation,
+                    compactEndExtra = compactEndExtra,
+                    hasText = hasText,
+                ),
+            textStyle = MaterialTheme.typography.bodyLarge.copy(
+                color = MaterialTheme.colorScheme.onSurface,
+            ),
+            minLines = 1,
+            maxLines = if (allowsMultipleLines) 5 else 1,
+            decorationBox = { innerTextField ->
+                ComposerTextFieldDecoration(
+                    value = value,
+                    placeholder = placeholder,
+                    imeAnimation = imeAnimation,
+                    hasText = hasText,
+                    innerTextField = innerTextField,
+                )
+            },
+        )
+        Row(
+            modifier = Modifier.align(Alignment.BottomEnd),
+            verticalAlignment = Alignment.CenterVertically,
+            content = trailingContent,
+        )
+    }
+}
+
+private fun Modifier.composerTextFieldLayout(
+    imeAnimation: ComposerImeAnimation,
+    compactEndExtra: Dp,
+    hasText: Boolean,
+) = layout { measurable, constraints ->
+    val fraction = imeAnimation.expansionFraction(this, hasText)
+    val startPadding = lerpDp(
+        ComposerCompactControlInset,
+        ComposerExpandedTextInset,
+        fraction,
+    ).roundToPx()
+    val endPadding = lerpDp(
+        ComposerCompactControlInset + compactEndExtra,
+        ComposerExpandedTextInset,
+        fraction,
+    ).roundToPx()
+    val topPadding = lerpDp(0.dp, 6.dp, fraction).roundToPx()
+    val bottomPadding = lerpDp(0.dp, ComposerExpandedActionsHeight, fraction).roundToPx()
+    val horizontalPadding = startPadding + endPadding
+    val verticalPadding = topPadding + bottomPadding
+    val contentConstraints = constraints.offset(-horizontalPadding, -verticalPadding)
+    val maxTextFieldHeight = lerpDp(
+        ComposerTextFieldHeight,
+        ComposerExpandedTextFieldMaxHeight,
+        fraction,
+    ).roundToPx()
+        .coerceAtMost(contentConstraints.maxHeight)
+        .coerceAtLeast(contentConstraints.minHeight)
+    val minTextFieldHeight = lerpDp(ComposerTextFieldHeight, 0.dp, fraction).roundToPx()
+        .coerceAtLeast(contentConstraints.minHeight)
+        .coerceAtMost(maxTextFieldHeight)
+    val placeable = measurable.measure(
+        contentConstraints.copy(
+            minHeight = minTextFieldHeight,
+            maxHeight = maxTextFieldHeight,
+        ),
+    )
+    val width = constraints.constrainWidth(placeable.width + horizontalPadding)
+    val height = constraints.constrainHeight(placeable.height + verticalPadding)
+
+    layout(width, height) {
+        placeable.placeRelative(startPadding, topPadding)
+    }
+}
+
+@Composable
+private fun ComposerTextFieldDecoration(
+    value: String,
+    placeholder: String,
+    imeAnimation: ComposerImeAnimation,
+    hasText: Boolean,
+    innerTextField: @Composable () -> Unit,
+) {
+    Layout(
+        content = {
+            if (value.isEmpty()) {
+                Text(
+                    placeholder,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            innerTextField()
+        },
+    ) { measurables, constraints ->
+        val fraction = imeAnimation.expansionFraction(this, hasText)
+        val contentConstraints = constraints.copy(minWidth = 0, minHeight = 0)
+        val placeables = measurables.map { it.measure(contentConstraints) }
+        val width = constraints.constrainWidth(placeables.maxOfOrNull { it.width } ?: 0)
+        val height = constraints.constrainHeight(placeables.maxOfOrNull { it.height } ?: 0)
+
+        layout(width, height) {
+            placeables.forEach { placeable ->
+                val centeredY = (height - placeable.height).coerceAtLeast(0) / 2f
+                val y = (centeredY * (1f - fraction)).roundToInt()
+                placeable.placeRelative(0, y)
+            }
+        }
+    }
+}
+
+private class ComposerImeAnimation(
+    private val current: WindowInsets,
+    private val source: WindowInsets,
+    private val target: WindowInsets,
+) {
+    fun expansionFraction(density: Density, hasText: Boolean): Float = composerExpansionFraction(
+        currentBottom = current.getBottom(density),
+        sourceBottom = source.getBottom(density),
+        targetBottom = target.getBottom(density),
+        hasText = hasText,
+    )
+
+    fun isVisibleOrOpening(density: Density): Boolean =
+        current.getBottom(density) > 0 || target.getBottom(density) > 0
+}
+
+internal fun composerExpansionFraction(
+    currentBottom: Int,
+    sourceBottom: Int,
+    targetBottom: Int,
+    hasText: Boolean,
+): Float {
+    if (hasText) return 1f
+    if (sourceBottom > 0 && targetBottom > 0) return 1f
+    val expandedBottom = maxOf(currentBottom, sourceBottom, targetBottom)
+    return if (expandedBottom == 0) {
+        0f
+    } else {
+        (currentBottom.toFloat() / expandedBottom).coerceIn(0f, 1f)
     }
 }
 
