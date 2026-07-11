@@ -5,7 +5,11 @@ package com.hebo.codex.ui.screens.chat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
@@ -15,20 +19,28 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
@@ -59,7 +71,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FabPosition
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -70,7 +81,6 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -79,8 +89,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -92,13 +100,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -158,6 +170,17 @@ private val highlightedMarkdownComponents = markdownComponents(
 )
 
 private const val CHAT_LIST_END_KEY = "chat-list-end"
+private val ChatHeaderControlsHeight = 64.dp
+private val ChatHeaderFadeHeight = 24.dp
+private val ChatComposerOverlayMinHeight = 116.dp
+private val ChatComposerFadeHeight = 44.dp
+private val ComposerCompactCornerRadius = 30.dp
+private val ComposerExpandedCornerRadius = 22.dp
+private val ComposerCompactControlInset = 56.dp
+private val ComposerExpandedTextInset = 12.dp
+private val ComposerExpandedActionsHeight = 54.dp
+private val ComposerTextFieldHeight = 48.dp
+private val ComposerExpandedTextFieldMaxHeight = 140.dp
 
 @Composable
 fun ChatScreen(
@@ -242,101 +265,38 @@ fun ChatScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            ChatTopBar(
-                conversation = conversation,
-                connectionStatus = state.connectionStatus,
-                rateLimitsState = rateLimitsState,
-                showNavigationIcon = showNavigationIcon,
-                onOpenNavigation = onOpenNavigation,
-                onNewTask = { conversation?.let { onNewTask(it.cwd) } },
-                onOpenActions = { dialog = ChatDialog.Actions },
-                onRefreshRateLimits = onRefreshRateLimits,
-            )
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        floatingActionButton = {
-            if (conversation != null && !autoFollow) {
-                SmallFloatingActionButton(
-                    modifier = Modifier.size(46.dp),
-                    shape = CircleShape,
-                    onClick = {
-                        scrollScope.launch {
-                            val lastIndex = listState.layoutInfo.totalItemsCount - 1
-                            if (lastIndex >= 0) {
-                                listState.animateScrollToItem(lastIndex)
-                                autoFollow = true
-                            }
-                        }
-                    },
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    contentColor = MaterialTheme.colorScheme.onSurface,
-                ) {
-                    Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "回到底部")
-                }
-            }
-        },
-        floatingActionButtonPosition = FabPosition.Center,
-        bottomBar = {
-            if (conversation != null) {
-                Column {
-                    TaskProgressBar(
-                        goal = state.goal,
-                        plan = conversation.plan?.takeIf { plan ->
-                            conversation.isRunning || plan.steps.any { it.status != PlanStepStatus.COMPLETED }
-                        },
-                        onOpenGoal = { dialog = ChatDialog.Goal },
-                        onSetGoalStatus = { status ->
-                            state.goal?.let { goal ->
-                                viewModel.setGoal(goal.objective, status, goal.tokenBudget)
-                            }
-                        },
-                    )
-                    conversation.pendingRequests.firstOrNull()?.let { request ->
-                        PendingRequestBanner(
-                            request = request,
-                            requestCount = conversation.pendingRequests.size,
-                            onClick = { activeRequestKey = request.requestKey },
-                        )
-                    }
-                    ChatComposer(
-                        conversation = conversation,
-                        draft = state.draft,
-                        models = state.models,
-                        resources = state.inputResources,
-                        connectionStatus = state.connectionStatus,
-                        isLoadingResources = state.isLoadingResources,
-                        isSending = state.isSendingDraft,
-                        onLoadResources = viewModel::loadInputResources,
-                        onMessageChange = viewModel::updateDraftMessage,
-                        onAddAttachment = viewModel::addDraftAttachment,
-                        onRemoveAttachment = viewModel::removeDraftAttachment,
-                        onOptionsChange = viewModel::updateDraftOptions,
-                        onInputError = viewModel::reportInputError,
-                        onOpenGoal = { dialog = ChatDialog.Goal },
-                        onOpenReview = { dialog = ChatDialog.Review },
-                        onCompact = viewModel::compact,
-                        onSend = {
-                            autoFollow = true
-                            viewModel.sendDraft()
-                        },
-                        onStop = viewModel::interrupt,
-                    )
-                }
-            }
-        },
-    ) { padding ->
+    val density = LocalDensity.current
+    var topControlsHeightPx by remember { mutableStateOf(0) }
+    var bottomControlsHeightPx by remember { mutableStateOf(0) }
+    val statusBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val bottomSystemPadding = maxOf(
+        WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+        WindowInsets.ime.asPaddingValues().calculateBottomPadding(),
+    )
+    val topControlsHeight = with(density) { topControlsHeightPx.toDp() }
+    val bottomControlsHeight = with(density) { bottomControlsHeightPx.toDp() }
+    val topContentPadding = maxOf(
+        topControlsHeight,
+        statusBarPadding + ChatHeaderControlsHeight,
+    ) + ChatHeaderFadeHeight
+    val bottomContentPadding = if (conversation == null) {
+        bottomSystemPadding + 16.dp
+    } else {
+        maxOf(bottomControlsHeight, ChatComposerOverlayMinHeight) + bottomSystemPadding
+    }
+    val backgroundColor = MaterialTheme.colorScheme.background
+
+    Box(Modifier.fillMaxSize()) {
         when {
             state.isLoading -> Box(
-                Modifier.fillMaxSize().padding(padding),
+                Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,
             ) {
                 CircularProgressIndicator()
             }
 
             conversation == null -> Box(
-                Modifier.fillMaxSize().padding(padding),
+                Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,
             ) {
                 Text("无法打开会话")
@@ -344,8 +304,13 @@ fun ChatScreen(
 
             else -> LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize().padding(padding).nestedScroll(userScrollConnection),
-                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 18.dp),
+                modifier = Modifier.fillMaxSize().nestedScroll(userScrollConnection),
+                contentPadding = PaddingValues(
+                    start = 20.dp,
+                    top = topContentPadding,
+                    end = 20.dp,
+                    bottom = bottomContentPadding,
+                ),
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
                 conversation.notices.forEach { notice ->
@@ -406,6 +371,134 @@ fun ChatScreen(
                 }
             }
         }
+
+        Box(
+            Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .height(topContentPadding)
+                .background(
+                    Brush.verticalGradient(
+                        0f to backgroundColor.copy(alpha = 0.96f),
+                        0.55f to backgroundColor.copy(alpha = 0.9f),
+                        1f to Color.Transparent,
+                    ),
+                ),
+        )
+        ChatFloatingHeader(
+            conversation = conversation,
+            connectionStatus = state.connectionStatus,
+            rateLimitsState = rateLimitsState,
+            showNavigationIcon = showNavigationIcon,
+            onOpenNavigation = onOpenNavigation,
+            onNewTask = { conversation?.let { onNewTask(it.cwd) } },
+            onOpenActions = { dialog = ChatDialog.Actions },
+            onRefreshRateLimits = onRefreshRateLimits,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .onSizeChanged { topControlsHeightPx = it.height },
+        )
+
+        if (conversation != null) {
+            Column(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .imePadding(),
+            ) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .onSizeChanged { bottomControlsHeightPx = it.height }
+                        .background(
+                            Brush.verticalGradient(
+                                0f to Color.Transparent,
+                                0.32f to backgroundColor.copy(alpha = 0.88f),
+                                1f to backgroundColor,
+                            ),
+                        )
+                        .padding(top = ChatComposerFadeHeight),
+                ) {
+                    TaskProgressBar(
+                        goal = state.goal,
+                        plan = conversation.plan?.takeIf { plan ->
+                            conversation.isRunning || plan.steps.any { it.status != PlanStepStatus.COMPLETED }
+                        },
+                        onOpenGoal = { dialog = ChatDialog.Goal },
+                        onSetGoalStatus = { status ->
+                            state.goal?.let { goal ->
+                                viewModel.setGoal(goal.objective, status, goal.tokenBudget)
+                            }
+                        },
+                    )
+                    conversation.pendingRequests.firstOrNull()?.let { request ->
+                        PendingRequestBanner(
+                            request = request,
+                            requestCount = conversation.pendingRequests.size,
+                            onClick = { activeRequestKey = request.requestKey },
+                        )
+                    }
+                    ChatComposer(
+                        conversation = conversation,
+                        draft = state.draft,
+                        models = state.models,
+                        resources = state.inputResources,
+                        connectionStatus = state.connectionStatus,
+                        isLoadingResources = state.isLoadingResources,
+                        isSending = state.isSendingDraft,
+                        onLoadResources = viewModel::loadInputResources,
+                        onMessageChange = viewModel::updateDraftMessage,
+                        onAddAttachment = viewModel::addDraftAttachment,
+                        onRemoveAttachment = viewModel::removeDraftAttachment,
+                        onOptionsChange = viewModel::updateDraftOptions,
+                        onInputError = viewModel::reportInputError,
+                        onOpenGoal = { dialog = ChatDialog.Goal },
+                        onOpenReview = { dialog = ChatDialog.Review },
+                        onCompact = viewModel::compact,
+                        onSend = {
+                            autoFollow = true
+                            viewModel.sendDraft()
+                        },
+                        onStop = viewModel::interrupt,
+                    )
+                }
+            }
+        }
+
+        if (conversation != null && !autoFollow) {
+            SmallFloatingActionButton(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = bottomContentPadding + 8.dp)
+                    .size(46.dp),
+                shape = CircleShape,
+                onClick = {
+                    scrollScope.launch {
+                        val lastIndex = listState.layoutInfo.totalItemsCount - 1
+                        if (lastIndex >= 0) {
+                            listState.animateScrollToItem(lastIndex)
+                            autoFollow = true
+                        }
+                    }
+                },
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                contentColor = MaterialTheme.colorScheme.onSurface,
+            ) {
+                Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "回到底部")
+            }
+        }
+
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(
+                    start = 16.dp,
+                    end = 16.dp,
+                    bottom = bottomContentPadding + 8.dp,
+                ),
+        )
     }
 
     when (dialog) {
@@ -525,7 +618,7 @@ fun ChatScreen(
 }
 
 @Composable
-private fun ChatTopBar(
+private fun ChatFloatingHeader(
     conversation: ConversationState?,
     connectionStatus: ConnectionStatus,
     rateLimitsState: RateLimitsUiState,
@@ -534,58 +627,71 @@ private fun ChatTopBar(
     onNewTask: () -> Unit,
     onOpenActions: () -> Unit,
     onRefreshRateLimits: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    TopAppBar(
-        title = {
-            if (!showNavigationIcon && conversation != null) {
-                Column {
-                    Text(
-                        conversation.title,
-                        style = MaterialTheme.typography.titleSmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    val status = when {
-                        connectionStatus !is ConnectionStatus.Connected -> "已断开"
-                        conversation.pendingRequests.isNotEmpty() -> "需要处理"
-                        conversation.isRunning -> "运行中"
-                        conversation.errorMessage != null -> "失败"
-                        else -> "可继续"
-                    }
-                    Text(
-                        "$status · ${projectName(conversation.cwd)} · ${conversation.serverName}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+    Box(
+        modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        if (showNavigationIcon) {
+            Surface(
+                modifier = Modifier.align(Alignment.CenterStart).size(48.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                shadowElevation = 2.dp,
+            ) {
+                IconButton(onClick = onOpenNavigation) {
+                    Icon(Icons.Rounded.Menu, contentDescription = "打开导航")
                 }
             }
-        },
-        navigationIcon = {
-            if (showNavigationIcon) {
-                Surface(
-                    modifier = Modifier.padding(start = 12.dp).size(48.dp),
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                ) {
-                    IconButton(onClick = onOpenNavigation) {
-                        Icon(Icons.Rounded.Menu, contentDescription = "打开导航")
-                    }
+        } else if (conversation != null) {
+            Column(
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .fillMaxWidth()
+                    .padding(start = 4.dp, end = 116.dp),
+            ) {
+                Text(
+                    conversation.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                val status = when {
+                    connectionStatus !is ConnectionStatus.Connected -> "已断开"
+                    conversation.pendingRequests.isNotEmpty() -> "需要处理"
+                    conversation.isRunning -> "运行中"
+                    conversation.errorMessage != null -> "失败"
+                    else -> "可继续"
                 }
+                Text(
+                    "$status · ${projectName(conversation.cwd)} · ${conversation.serverName}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
-        },
-        actions = {
-            if (conversation != null) {
+        }
+
+        if (conversation != null) {
+            Row(
+                modifier = Modifier.align(Alignment.CenterEnd),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 RateLimitIndicator(
                     state = rateLimitsState,
                     onRefresh = onRefreshRateLimits,
                 )
+                Spacer(Modifier.width(4.dp))
                 Surface(
                     shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    shadowElevation = 2.dp,
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (showNavigationIcon) {
@@ -598,14 +704,9 @@ private fun ChatTopBar(
                         }
                     }
                 }
-                Spacer(Modifier.width(12.dp))
             }
-        },
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.background,
-            scrolledContainerColor = MaterialTheme.colorScheme.background,
-        ),
-    )
+        }
+    }
 }
 
 @Composable
@@ -1055,6 +1156,7 @@ private fun ChatComposer(
 ) {
     var dialog by remember { mutableStateOf<ComposerDialog?>(null) }
     var isAddingImage by remember { mutableStateOf(false) }
+    var isInputFocused by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val composerScope = rememberCoroutineScope()
     val imagePicker = rememberLauncherForActivityResult(
@@ -1091,93 +1193,140 @@ private fun ChatComposer(
     }
     val connected = connectionStatus is ConnectionStatus.Connected
     val hasInput = draft.message.isNotBlank() || draft.attachments.isNotEmpty()
+    val composerCornerRadius by animateDpAsState(
+        targetValue = if (isInputFocused) ComposerExpandedCornerRadius else ComposerCompactCornerRadius,
+        label = "输入框圆角",
+    )
+    val composerColor by animateColorAsState(
+        targetValue = if (isInputFocused) {
+            MaterialTheme.colorScheme.surfaceContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerLow
+        },
+        label = "输入框背景",
+    )
+    val composerBorderColor by animateColorAsState(
+        targetValue = if (isInputFocused) {
+            MaterialTheme.colorScheme.outlineVariant
+        } else {
+            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)
+        },
+        label = "输入框边框",
+    )
 
-    Surface(
-        modifier = Modifier.navigationBarsPadding().imePadding(),
-        color = MaterialTheme.colorScheme.background,
+    Column(
+        Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 10.dp),
     ) {
-        Column(
-            Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 10.dp),
-        ) {
-            if (activeToken != null && (paletteEntries.isNotEmpty() || isLoadingResources)) {
-                ComposerPalette(
-                    entries = paletteEntries,
-                    isLoading = isLoadingResources,
-                    onSelect = { entry ->
-                        onMessageChange(removeActiveComposerToken(draft.message, activeToken))
-                        when (entry) {
-                            is ComposerPaletteEntry.Resource -> onAddAttachment(entry.input, null)
-                            is ComposerPaletteEntry.Command -> when (entry.command) {
-                                ComposerCommand.GOAL -> onOpenGoal()
-                                ComposerCommand.REVIEW -> onOpenReview()
-                                ComposerCommand.COMPACT -> onCompact()
-                                ComposerCommand.SETTINGS -> {
-                                    onLoadResources(false)
-                                    dialog = ComposerDialog.Options
-                                }
-                                ComposerCommand.ATTACH -> dialog = ComposerDialog.Attachments
+        if (activeToken != null && (paletteEntries.isNotEmpty() || isLoadingResources)) {
+            ComposerPalette(
+                entries = paletteEntries,
+                isLoading = isLoadingResources,
+                onSelect = { entry ->
+                    onMessageChange(removeActiveComposerToken(draft.message, activeToken))
+                    when (entry) {
+                        is ComposerPaletteEntry.Resource -> onAddAttachment(entry.input, null)
+                        is ComposerPaletteEntry.Command -> when (entry.command) {
+                            ComposerCommand.GOAL -> onOpenGoal()
+                            ComposerCommand.REVIEW -> onOpenReview()
+                            ComposerCommand.COMPACT -> onCompact()
+                            ComposerCommand.SETTINGS -> {
+                                onLoadResources(false)
+                                dialog = ComposerDialog.Options
                             }
+                            ComposerCommand.ATTACH -> dialog = ComposerDialog.Attachments
+                        }
+                    }
+                },
+            )
+            Spacer(Modifier.height(6.dp))
+        }
+        if (draft.attachments.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                draft.attachments.forEach { attachment ->
+                    DraftAttachmentChip(
+                        attachment = attachment,
+                        onRemove = { onRemoveAttachment(attachment.id) },
+                        modifier = Modifier.padding(end = 8.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+        }
+        Surface(
+            modifier = Modifier.fillMaxWidth().animateContentSize(),
+            shape = RoundedCornerShape(composerCornerRadius),
+            color = composerColor,
+            border = BorderStroke(1.dp, composerBorderColor),
+            shadowElevation = 2.dp,
+        ) {
+            Box(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 5.dp),
+            ) {
+                IconButton(
+                    onClick = {
+                        onLoadResources(false)
+                        dialog = ComposerDialog.Attachments
+                    },
+                    enabled = !isSending,
+                    modifier = Modifier
+                        .align(if (isInputFocused) Alignment.BottomStart else Alignment.CenterStart)
+                        .size(48.dp),
+                ) {
+                    Icon(Icons.Rounded.Add, contentDescription = "添加内容或调整设置")
+                }
+                val trailingPadding = ComposerCompactControlInset +
+                    (if (isAddingImage) 28.dp else 0.dp) +
+                    (if (conversation.isRunning && hasInput) 40.dp else 0.dp)
+                BasicTextField(
+                    value = draft.message,
+                    onValueChange = onMessageChange,
+                    enabled = !isSending,
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .fillMaxWidth()
+                        .padding(
+                            start = if (isInputFocused) ComposerExpandedTextInset else ComposerCompactControlInset,
+                            top = if (isInputFocused) 6.dp else 0.dp,
+                            end = if (isInputFocused) ComposerExpandedTextInset else trailingPadding,
+                            bottom = if (isInputFocused) ComposerExpandedActionsHeight else 0.dp,
+                        )
+                        .heightIn(
+                            min = ComposerTextFieldHeight,
+                            max = if (isInputFocused) {
+                                ComposerExpandedTextFieldMaxHeight
+                            } else {
+                                ComposerTextFieldHeight
+                            },
+                        )
+                        .onFocusChanged { isInputFocused = it.isFocused },
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                    minLines = 1,
+                    maxLines = if (isInputFocused) 5 else 1,
+                    decorationBox = { innerTextField ->
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = if (isInputFocused) Alignment.TopStart else Alignment.CenterStart,
+                        ) {
+                            if (draft.message.isEmpty()) {
+                                Text(
+                                    when {
+                                        !connected -> "服务器已断开"
+                                        conversation.isRunning -> "继续对话"
+                                        else -> "向 Codex 发送消息"
+                                    },
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            innerTextField()
                         }
                     },
                 )
-                Spacer(Modifier.height(6.dp))
-            }
-            if (draft.attachments.isNotEmpty()) {
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                    draft.attachments.forEach { attachment ->
-                        DraftAttachmentChip(
-                            attachment = attachment,
-                            onRemove = { onRemoveAttachment(attachment.id) },
-                            modifier = Modifier.padding(end = 8.dp),
-                        )
-                    }
-                }
-                Spacer(Modifier.height(6.dp))
-            }
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.extraLarge,
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 5.dp),
+                    modifier = Modifier.align(
+                        if (isInputFocused) Alignment.BottomEnd else Alignment.CenterEnd,
+                    ),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconButton(
-                        onClick = {
-                            onLoadResources(false)
-                            dialog = ComposerDialog.Attachments
-                        },
-                        enabled = !isSending,
-                        modifier = Modifier.size(48.dp),
-                    ) {
-                        Icon(Icons.Rounded.Add, contentDescription = "添加内容或调整设置")
-                    }
-                    BasicTextField(
-                        value = draft.message,
-                        onValueChange = onMessageChange,
-                        enabled = !isSending,
-                        modifier = Modifier.weight(1f).padding(horizontal = 4.dp, vertical = 10.dp),
-                        textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-                        minLines = 1,
-                        maxLines = 5,
-                        decorationBox = { innerTextField ->
-                            Box(contentAlignment = Alignment.CenterStart) {
-                                if (draft.message.isEmpty()) {
-                                    Text(
-                                        when {
-                                            !connected -> "服务器已断开"
-                                            conversation.isRunning -> "继续对话"
-                                            else -> "向 Codex 发送消息"
-                                        },
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                                innerTextField()
-                            }
-                        },
-                    )
                     if (isAddingImage) {
                         CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                         Spacer(Modifier.width(8.dp))
