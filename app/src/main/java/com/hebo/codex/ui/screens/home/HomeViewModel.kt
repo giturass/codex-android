@@ -33,6 +33,7 @@ data class HomeUiState(
     val activeServerId: String? = null,
     val connectionStatuses: Map<String, ConnectionStatus> = emptyMap(),
     val threads: List<ThreadSummary> = emptyList(),
+    val recentThreads: List<ThreadSummary> = emptyList(),
     val projects: List<RecentProject> = emptyList(),
     val recentProjects: List<RecentProject> = emptyList(),
     val models: List<ModelOption> = emptyList(),
@@ -41,6 +42,7 @@ data class HomeUiState(
     val searchTerm: String = "",
     val showArchived: Boolean = false,
     val nextCursor: String? = null,
+    val recentNextCursor: String? = null,
     val isLoading: Boolean = false,
     val isLoadingMore: Boolean = false,
     val isCreatingConversation: Boolean = false,
@@ -53,6 +55,7 @@ data class HomeUiState(
 
 sealed interface HomeEvent {
     data class OpenConversation(val serverId: String, val threadId: String) : HomeEvent
+    data class ConversationRemoved(val serverId: String, val threadId: String) : HomeEvent
 }
 
 class HomeViewModel(
@@ -102,10 +105,12 @@ class HomeViewModel(
                     mutableState.update {
                         it.copy(
                             threads = emptyList(),
+                            recentThreads = emptyList(),
                             projects = emptyList(),
                             recentProjects = emptyList(),
                             models = emptyList(),
                             nextCursor = null,
+                            recentNextCursor = null,
                             isLoading = false,
                             isLoadingMore = false,
                         )
@@ -114,12 +119,14 @@ class HomeViewModel(
                     mutableState.update {
                         it.copy(
                             threads = emptyList(),
+                            recentThreads = emptyList(),
                             projects = emptyList(),
                             recentProjects = emptyList(),
                             models = emptyList(),
                             searchTerm = "",
                             showArchived = false,
                             nextCursor = null,
+                            recentNextCursor = null,
                             isLoadingMore = false,
                         )
                     }
@@ -164,33 +171,63 @@ class HomeViewModel(
 
     fun search(term: String) {
         refreshJob?.cancel()
+        searchJob?.cancel()
         mutableState.update {
+            val enteringSearch = it.searchTerm.isBlank() && term.isNotBlank() && !it.showArchived
             it.copy(
-                threads = emptyList(),
-                projects = emptyList(),
+                threads = if (enteringSearch) emptyList() else it.threads,
+                projects = if (enteringSearch) emptyList() else it.projects,
                 searchTerm = term,
                 nextCursor = null,
-                isLoading = true,
+                isLoading = term.isNotBlank() || it.showArchived,
             )
         }
-        searchJob?.cancel()
+        if (term.isBlank() && !mutableState.value.showArchived) {
+            restoreRecentState()
+            return
+        }
+        val serverId = mutableState.value.activeServerId ?: return
         searchJob = viewModelScope.launch {
             delay(300)
-            refresh()
+            requestLoad(serverId)
         }
     }
 
     fun setArchived(show: Boolean) {
+        refreshJob?.cancel()
+        searchJob?.cancel()
         mutableState.update {
+            val changingArchive = it.showArchived != show
             it.copy(
-                threads = emptyList(),
-                projects = emptyList(),
+                threads = if (changingArchive) emptyList() else it.threads,
+                projects = if (changingArchive) emptyList() else it.projects,
                 showArchived = show,
                 nextCursor = null,
-                isLoading = true,
+                isLoading = show || it.searchTerm.isNotBlank(),
             )
         }
-        refresh()
+        if (!show && mutableState.value.searchTerm.isBlank()) {
+            restoreRecentState()
+        } else {
+            refresh()
+        }
+    }
+
+    fun showRecent() {
+        searchJob?.cancel()
+        refreshJob?.cancel()
+        mutableState.update {
+            it.copy(
+                threads = it.recentThreads,
+                projects = it.recentProjects,
+                searchTerm = "",
+                showArchived = false,
+                nextCursor = it.recentNextCursor,
+                isLoading = false,
+                isLoadingMore = false,
+            )
+        }
+        mutableState.value.activeServerId?.let(::requestLoad)
     }
 
     fun loadMore() {
@@ -208,19 +245,23 @@ class HomeViewModel(
                     searchTerm = state.searchTerm,
                 )
             }.onSuccess { page ->
-                if (mutableState.value.activeServerId == serverId) {
+                val current = mutableState.value
+                if (
+                    current.activeServerId == serverId &&
+                    current.searchTerm == state.searchTerm &&
+                    current.showArchived == state.showArchived
+                ) {
                     mutableState.update { current ->
                         val threads = (current.threads + page.data).distinctBy(ThreadSummary::id)
                         val projects = groupRecentProjects(threads)
+                        val recentQuery = !state.showArchived && state.searchTerm.isBlank()
                         current.copy(
                             threads = threads,
+                            recentThreads = if (recentQuery) threads else current.recentThreads,
                             projects = projects,
-                            recentProjects = if (!state.showArchived && state.searchTerm.isBlank()) {
-                                projects
-                            } else {
-                                current.recentProjects
-                            },
+                            recentProjects = if (recentQuery) projects else current.recentProjects,
                             nextCursor = page.nextCursor,
+                            recentNextCursor = if (recentQuery) page.nextCursor else current.recentNextCursor,
                         )
                     }
                 }
@@ -279,11 +320,15 @@ class HomeViewModel(
 
     fun archiveConversation(threadId: String) {
         val serverId = mutableState.value.activeServerId ?: return
+        val archived = mutableState.value.showArchived
         viewModelScope.launch {
             runSuspendCatching {
-                if (mutableState.value.showArchived) repository.unarchiveConversation(serverId, threadId)
+                if (archived) repository.unarchiveConversation(serverId, threadId)
                 else repository.archiveConversation(serverId, threadId)
-            }.onSuccess { refresh() }.onFailure(::showError)
+            }.onSuccess {
+                refresh()
+                if (!archived) mutableEvents.send(HomeEvent.ConversationRemoved(serverId, threadId))
+            }.onFailure(::showError)
         }
     }
 
@@ -291,7 +336,10 @@ class HomeViewModel(
         val serverId = mutableState.value.activeServerId ?: return
         viewModelScope.launch {
             runSuspendCatching { repository.deleteConversation(serverId, threadId) }
-                .onSuccess { refresh() }
+                .onSuccess {
+                    refresh()
+                    mutableEvents.send(HomeEvent.ConversationRemoved(serverId, threadId))
+                }
                 .onFailure(::showError)
         }
     }
@@ -310,23 +358,49 @@ class HomeViewModel(
                 searchTerm = query.searchTerm,
             )
         }.onSuccess { page ->
-            if (mutableState.value.activeServerId == serverId) {
+            val current = mutableState.value
+            if (
+                current.activeServerId == serverId &&
+                current.searchTerm == query.searchTerm &&
+                current.showArchived == query.showArchived
+            ) {
                 mutableState.update {
                     val projects = groupRecentProjects(page.data)
+                    val recentQuery = !query.showArchived && query.searchTerm.isBlank()
                     it.copy(
                         threads = page.data,
+                        recentThreads = if (recentQuery) page.data else it.recentThreads,
                         projects = projects,
-                        recentProjects = if (!query.showArchived && query.searchTerm.isBlank()) {
-                            projects
-                        } else {
-                            it.recentProjects
-                        },
+                        recentProjects = if (recentQuery) projects else it.recentProjects,
                         nextCursor = page.nextCursor,
+                        recentNextCursor = if (recentQuery) page.nextCursor else it.recentNextCursor,
                     )
                 }
             }
         }.onFailure(::showError)
-        mutableState.update { it.copy(isLoading = false) }
+        mutableState.update {
+            if (
+                it.activeServerId == serverId &&
+                it.searchTerm == query.searchTerm &&
+                it.showArchived == query.showArchived
+            ) {
+                it.copy(isLoading = false)
+            } else {
+                it
+            }
+        }
+    }
+
+    private fun restoreRecentState() {
+        mutableState.update {
+            it.copy(
+                threads = it.recentThreads,
+                projects = it.recentProjects,
+                nextCursor = it.recentNextCursor,
+                isLoading = false,
+                isLoadingMore = false,
+            )
+        }
     }
 
     private fun loadModels(serverId: String) {

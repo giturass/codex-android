@@ -69,6 +69,7 @@ class ThemeColorContrastTest {
         val background = colorScheme.surfaceContainerLow
         assertContrast("${theme}成功状态", colors.success, background, GRAPHIC_CONTRAST)
         assertContrast("${theme}警告状态", colors.warning, background, GRAPHIC_CONTRAST)
+        assertContrast("${theme}信息状态", colors.info, background, GRAPHIC_CONTRAST)
         assertContrast("${theme}失败状态", colorScheme.error, background, GRAPHIC_CONTRAST)
         assertContrast("${theme}未连接状态", colorScheme.outline, background, GRAPHIC_CONTRAST)
         assertContrast("${theme}主色图标", colorScheme.primary, background, GRAPHIC_CONTRAST)

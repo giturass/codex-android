@@ -90,16 +90,19 @@ internal val CodexShapes = Shapes(
 internal data class CodexStatusColors(
     val success: Color,
     val warning: Color,
+    val info: Color,
 )
 
 internal val LightStatusColors = CodexStatusColors(
     success = Color(0xFF146C2E),
     warning = Color(0xFF7A5900),
+    info = Color(0xFF006FC9),
 )
 
 internal val DarkStatusColors = CodexStatusColors(
     success = Color(0xFF78DC77),
     warning = Color(0xFFF2C14E),
+    info = Color(0xFF68B5F8),
 )
 
 private val LocalCodexStatusColors = staticCompositionLocalOf<CodexStatusColors> {

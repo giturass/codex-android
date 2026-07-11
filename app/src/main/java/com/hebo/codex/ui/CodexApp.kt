@@ -85,6 +85,14 @@ fun CodexApp(
         homeViewModel.events.collect { event ->
             when (event) {
                 is HomeEvent.OpenConversation -> openConversation(event.serverId, event.threadId)
+                is HomeEvent.ConversationRemoved -> {
+                    val arguments = navController.currentBackStackEntry?.arguments
+                    val currentServerId = arguments?.getString("serverId")
+                    val currentThreadId = arguments?.getString("threadId")
+                    if (currentServerId == event.serverId && currentThreadId == event.threadId) {
+                        openNewTask()
+                    }
+                }
             }
         }
     }
@@ -102,8 +110,9 @@ fun CodexApp(
                 servers = homeState.servers,
                 activeServer = homeState.activeServer,
                 connectionStatuses = homeState.connectionStatuses,
-                projects = homeState.projects,
+                projects = homeState.recentProjects,
                 threads = homeState.threads,
+                recentThreads = homeState.recentThreads,
                 threadAttention = homeState.threadAttention,
                 searchTerm = homeState.searchTerm,
                 showArchived = homeState.showArchived,
@@ -127,6 +136,7 @@ fun CodexApp(
                 },
                 onSearch = homeViewModel::search,
                 onShowArchived = homeViewModel::setArchived,
+                onShowRecent = homeViewModel::showRecent,
                 onLoadMore = homeViewModel::loadMore,
                 onRenameConversation = homeViewModel::renameConversation,
                 onForkConversation = homeViewModel::forkConversation,

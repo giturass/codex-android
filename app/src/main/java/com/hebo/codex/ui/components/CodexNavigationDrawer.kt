@@ -22,21 +22,24 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Archive
+import androidx.compose.material.icons.rounded.Circle
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.PriorityHigh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.Unarchive
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -59,6 +62,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hebo.codex.domain.ConnectionStatus
@@ -67,6 +76,7 @@ import com.hebo.codex.domain.ServerProfile
 import com.hebo.codex.domain.ThreadRuntimeStatus
 import com.hebo.codex.domain.ThreadAttention
 import com.hebo.codex.domain.ThreadSummary
+import com.hebo.codex.domain.projectName
 import com.hebo.codex.ui.theme.statusColors
 
 @Composable
@@ -76,6 +86,7 @@ fun CodexNavigationDrawer(
     connectionStatuses: Map<String, ConnectionStatus>,
     projects: List<RecentProject>,
     threads: List<ThreadSummary>,
+    recentThreads: List<ThreadSummary>,
     threadAttention: Map<String, ThreadAttention>,
     searchTerm: String,
     showArchived: Boolean,
@@ -90,6 +101,7 @@ fun CodexNavigationDrawer(
     onOpenProjectSettings: (String) -> Unit,
     onSearch: (String) -> Unit,
     onShowArchived: (Boolean) -> Unit,
+    onShowRecent: () -> Unit,
     onLoadMore: () -> Unit,
     onRenameConversation: (threadId: String, name: String) -> Unit,
     onForkConversation: (String) -> Unit,
@@ -111,6 +123,7 @@ fun CodexNavigationDrawer(
             connectionStatuses = connectionStatuses,
             projects = projects,
             threads = threads,
+            recentThreads = recentThreads,
             threadAttention = threadAttention,
             searchTerm = searchTerm,
             showArchived = showArchived,
@@ -124,6 +137,7 @@ fun CodexNavigationDrawer(
             onOpenProjectSettings = onOpenProjectSettings,
             onSearch = onSearch,
             onShowArchived = onShowArchived,
+            onShowRecent = onShowRecent,
             onLoadMore = onLoadMore,
             onRenameConversation = onRenameConversation,
             onForkConversation = onForkConversation,
@@ -153,6 +167,12 @@ fun CodexNavigationDrawer(
     }
 }
 
+private enum class DrawerPage {
+    RECENT,
+    SEARCH,
+    PROJECTS,
+}
+
 @Composable
 private fun ColumnScope.DrawerContent(
     servers: List<ServerProfile>,
@@ -160,6 +180,7 @@ private fun ColumnScope.DrawerContent(
     connectionStatuses: Map<String, ConnectionStatus>,
     projects: List<RecentProject>,
     threads: List<ThreadSummary>,
+    recentThreads: List<ThreadSummary>,
     threadAttention: Map<String, ThreadAttention>,
     searchTerm: String,
     showArchived: Boolean,
@@ -173,6 +194,7 @@ private fun ColumnScope.DrawerContent(
     onOpenProjectSettings: (String) -> Unit,
     onSearch: (String) -> Unit,
     onShowArchived: (Boolean) -> Unit,
+    onShowRecent: () -> Unit,
     onLoadMore: () -> Unit,
     onRenameConversation: (threadId: String, name: String) -> Unit,
     onForkConversation: (String) -> Unit,
@@ -185,9 +207,27 @@ private fun ColumnScope.DrawerContent(
     onAddServer: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
+    var drawerPage by rememberSaveable(activeServer?.id) { mutableStateOf(DrawerPage.RECENT) }
     var expandedProjects by remember(activeServer?.id) { mutableStateOf(emptySet<String>()) }
     var expansionInitialized by remember(activeServer?.id) { mutableStateOf(false) }
-    var selectedThread by remember { mutableStateOf<ThreadSummary?>(null) }
+    var selectedThread by remember(activeServer?.id) { mutableStateOf<ThreadSummary?>(null) }
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    fun leaveSearch() {
+        focusManager.clearFocus()
+        keyboardController?.hide()
+        onShowRecent()
+    }
+
+    fun showRecent() {
+        if (drawerPage == DrawerPage.SEARCH) leaveSearch()
+        drawerPage = DrawerPage.RECENT
+    }
+
+    fun leaveTransientPage() {
+        showRecent()
+    }
 
     LaunchedEffect(projects, activeThreadId) {
         val activeProject = projects.firstOrNull { project ->
@@ -233,43 +273,28 @@ private fun ColumnScope.DrawerContent(
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(8.dp))
-            NavigationDrawerItem(
-                label = { Text("新建任务") },
-                selected = newTaskSelected,
-                onClick = onNewConversation,
-                icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
-            )
-        }
-
-        if (activeServer != null) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OutlinedTextField(
-                    value = searchTerm,
-                    onValueChange = onSearch,
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text(if (showArchived) "搜索已归档会话" else "搜索项目和会话") },
-                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-                    trailingIcon = {
-                        if (searchTerm.isNotBlank()) {
-                            IconButton(onClick = { onSearch("") }) {
-                                Icon(Icons.Rounded.Close, contentDescription = "清除搜索")
-                            }
-                        }
+            when (drawerPage) {
+                DrawerPage.RECENT -> DrawerPrimaryActions(
+                    newTaskSelected = newTaskSelected,
+                    onNewConversation = {
+                        leaveTransientPage()
+                        onNewConversation()
                     },
-                    singleLine = true,
-                    shape = MaterialTheme.shapes.large,
+                    onSearch = { drawerPage = DrawerPage.SEARCH },
                 )
-                IconButton(onClick = { onShowArchived(!showArchived) }) {
-                    Icon(
-                        imageVector = if (showArchived) Icons.Rounded.Unarchive else Icons.Rounded.Archive,
-                        contentDescription = if (showArchived) "查看当前会话" else "查看已归档会话",
-                        tint = if (showArchived) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+
+                DrawerPage.SEARCH -> DrawerSearchHeader(
+                    searchTerm = searchTerm,
+                    showArchived = showArchived,
+                    onSearch = onSearch,
+                    onShowArchived = onShowArchived,
+                    onBack = ::showRecent,
+                )
+
+                DrawerPage.PROJECTS -> DrawerPageHeader(
+                    title = "项目",
+                    onBack = { drawerPage = DrawerPage.RECENT },
+                )
             }
         }
         if (isLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -282,33 +307,41 @@ private fun ColumnScope.DrawerContent(
                     }
                 }
 
-                activeServer != null && searchTerm.isNotBlank() -> {
-                    item("search-title") {
-                        DrawerSectionTitle(if (showArchived) "已归档搜索结果" else "搜索结果")
-                    }
-                    if (!isLoading && threads.isEmpty()) {
-                        item("search-empty") { DrawerEmptyMessage("没有匹配的会话") }
-                    }
-                    items(threads, key = ThreadSummary::id) { thread ->
-                        DrawerThreadItem(
-                            thread = thread,
-                            attention = threadAttention[thread.id],
-                            selected = thread.id == activeThreadId,
-                            showProject = true,
-                            onClick = { onOpenConversation(thread.id) },
-                            onMenu = { selectedThread = thread },
-                        )
+                activeServer != null && drawerPage == DrawerPage.SEARCH -> {
+                    val hasQuery = searchTerm.isNotBlank() || showArchived
+                    if (!hasQuery) {
+                        item("search-hint") { DrawerEmptyMessage("输入关键词搜索会话") }
+                    } else {
+                        item("search-title") {
+                            val title = when {
+                                showArchived && searchTerm.isNotBlank() -> "已归档搜索结果"
+                                showArchived -> "已归档会话"
+                                else -> "搜索结果"
+                            }
+                            DrawerSectionTitle(title)
+                        }
+                        if (!isLoading && threads.isEmpty()) {
+                            item("search-empty") { DrawerEmptyMessage("没有匹配的会话") }
+                        }
+                        items(threads, key = ThreadSummary::id) { thread ->
+                            DrawerThreadItem(
+                                thread = thread,
+                                attention = threadAttention[thread.id],
+                                selected = thread.id == activeThreadId,
+                                showProject = true,
+                                onClick = {
+                                    leaveTransientPage()
+                                    onOpenConversation(thread.id)
+                                },
+                                onMenu = { selectedThread = thread },
+                            )
+                        }
                     }
                 }
 
-                activeServer != null -> {
-                    if (showArchived) {
-                        item("archived-title") { DrawerSectionTitle("已归档") }
-                    }
+                activeServer != null && drawerPage == DrawerPage.PROJECTS -> {
                     if (!isLoading && projects.isEmpty()) {
-                        item("projects-empty") {
-                            DrawerEmptyMessage(if (showArchived) "没有已归档会话" else "还没有会话")
-                        }
+                        item("projects-empty") { DrawerEmptyMessage("还没有项目") }
                     }
                     items(projects, key = RecentProject::path) { project ->
                         val expanded = project.path in expandedProjects
@@ -325,7 +358,10 @@ private fun ColumnScope.DrawerContent(
                                         expandedProjects + project.path
                                     }
                                 },
-                                onOpenSettings = { onOpenProjectSettings(project.path) },
+                                onOpenSettings = {
+                                    leaveTransientPage()
+                                    onOpenProjectSettings(project.path)
+                                },
                             )
                             if (expanded) {
                                 project.threads.forEach { thread ->
@@ -334,7 +370,10 @@ private fun ColumnScope.DrawerContent(
                                         attention = threadAttention[thread.id],
                                         selected = thread.id == activeThreadId,
                                         showProject = false,
-                                        onClick = { onOpenConversation(thread.id) },
+                                        onClick = {
+                                            leaveTransientPage()
+                                            onOpenConversation(thread.id)
+                                        },
                                         onMenu = { selectedThread = thread },
                                     )
                                 }
@@ -342,9 +381,36 @@ private fun ColumnScope.DrawerContent(
                         }
                     }
                 }
+
+                activeServer != null -> {
+                    item("recent-title") { DrawerSectionTitle("最近会话") }
+                    if (!isLoading && recentThreads.isEmpty()) {
+                        item("recent-empty") { DrawerEmptyMessage("还没有会话") }
+                    }
+                    items(recentThreads, key = ThreadSummary::id) { thread ->
+                        DrawerThreadItem(
+                            thread = thread,
+                            attention = threadAttention[thread.id],
+                            selected = thread.id == activeThreadId,
+                            showProject = true,
+                            onClick = { onOpenConversation(thread.id) },
+                            onMenu = { selectedThread = thread },
+                        )
+                    }
+                    item("projects-entry") {
+                        NavigationDrawerItem(
+                            label = { Text("查看全部项目") },
+                            selected = false,
+                            onClick = { drawerPage = DrawerPage.PROJECTS },
+                            icon = { Icon(Icons.Rounded.Folder, contentDescription = null) },
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                }
             }
 
-            if (hasMore) {
+            val canLoadMore = drawerPage != DrawerPage.SEARCH || searchTerm.isNotBlank() || showArchived
+            if (hasMore && canLoadMore) {
                 item("load-more") {
                     TextButton(
                         onClick = onLoadMore,
@@ -366,7 +432,10 @@ private fun ColumnScope.DrawerContent(
             NavigationDrawerItem(
                 label = { Text("服务器设置") },
                 selected = false,
-                onClick = onOpenSettings,
+                onClick = {
+                    leaveTransientPage()
+                    onOpenSettings()
+                },
                 icon = { Icon(Icons.Rounded.Settings, contentDescription = null) },
                 modifier = Modifier.padding(vertical = 8.dp),
             )
@@ -376,7 +445,7 @@ private fun ColumnScope.DrawerContent(
     selectedThread?.let { thread ->
         ThreadActionsDialog(
             thread = thread,
-            archived = showArchived,
+            archived = drawerPage == DrawerPage.SEARCH && showArchived,
             onDismiss = { selectedThread = null },
             onRename = {
                 onRenameConversation(thread.id, it)
@@ -395,6 +464,101 @@ private fun ColumnScope.DrawerContent(
                 selectedThread = null
             },
         )
+    }
+}
+
+@Composable
+private fun DrawerPrimaryActions(
+    newTaskSelected: Boolean,
+    onNewConversation: () -> Unit,
+    onSearch: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        NavigationDrawerItem(
+            label = { Text("新建任务") },
+            selected = newTaskSelected,
+            onClick = onNewConversation,
+            icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
+            modifier = Modifier.weight(1f),
+        )
+        IconButton(onClick = onSearch) {
+            Icon(Icons.Rounded.Search, contentDescription = "搜索会话")
+        }
+    }
+}
+
+@Composable
+private fun DrawerSearchHeader(
+    searchTerm: String,
+    showArchived: Boolean,
+    onSearch: (String) -> Unit,
+    onShowArchived: (Boolean) -> Unit,
+    onBack: () -> Unit,
+) {
+    val focusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
+
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "退出搜索")
+            }
+            OutlinedTextField(
+                value = searchTerm,
+                onValueChange = onSearch,
+                modifier = Modifier.weight(1f).focusRequester(focusRequester),
+                placeholder = { Text("搜索会话") },
+                trailingIcon = {
+                    if (searchTerm.isNotBlank()) {
+                        IconButton(onClick = { onSearch("") }) {
+                            Icon(Icons.Rounded.Close, contentDescription = "清除搜索")
+                        }
+                    }
+                },
+                singleLine = true,
+                shape = MaterialTheme.shapes.large,
+            )
+        }
+        Row(
+            modifier = Modifier.padding(start = 52.dp, top = 4.dp, bottom = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            FilterChip(
+                selected = !showArchived,
+                onClick = { if (showArchived) onShowArchived(false) },
+                label = { Text("当前") },
+            )
+            FilterChip(
+                selected = showArchived,
+                onClick = { if (!showArchived) onShowArchived(true) },
+                label = { Text("已归档") },
+            )
+        }
+    }
+}
+
+@Composable
+private fun DrawerPageHeader(
+    title: String,
+    onBack: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onBack) {
+            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回最近会话")
+        }
+        Text(title, style = MaterialTheme.typography.titleMedium)
     }
 }
 
@@ -469,30 +633,16 @@ private fun DrawerThreadItem(
     onClick: () -> Unit,
     onMenu: () -> Unit,
 ) {
-    val effectiveAttention = attention ?: if (thread.status == ThreadRuntimeStatus.ACTIVE) {
-        ThreadAttention.RUNNING
-    } else {
-        null
-    }
-    val attentionLabel = when (effectiveAttention) {
-        ThreadAttention.RUNNING -> "运行中"
-        ThreadAttention.NEEDS_INPUT -> "待处理"
-        ThreadAttention.READY -> "可审阅"
-        ThreadAttention.FAILED -> "失败"
-        null -> null
-    }
-    val attentionColor = when (effectiveAttention) {
-        ThreadAttention.RUNNING -> MaterialTheme.statusColors.success
-        ThreadAttention.NEEDS_INPUT -> MaterialTheme.statusColors.warning
-        ThreadAttention.READY -> MaterialTheme.colorScheme.primary
-        ThreadAttention.FAILED -> MaterialTheme.colorScheme.error
-        null -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    val effectiveAttention = effectiveThreadAttention(thread, attention)
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = if (showProject) 4.dp else 34.dp, end = 4.dp, bottom = 2.dp)
-            .combinedClickable(onClick = onClick, onLongClick = onMenu),
+            .combinedClickable(
+                onClick = onClick,
+                onLongClickLabel = "会话操作",
+                onLongClick = onMenu,
+            ),
         shape = MaterialTheme.shapes.medium,
         color = if (selected) MaterialTheme.colorScheme.secondaryContainer
         else MaterialTheme.colorScheme.surface,
@@ -500,58 +650,89 @@ private fun DrawerThreadItem(
         else MaterialTheme.colorScheme.onSurface,
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 12.dp, top = 9.dp, bottom = 9.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        thread.title,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    if (attentionLabel != null) {
-                        Text(
-                            attentionLabel,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = attentionColor,
-                        )
-                    }
-                    Text(
-                        relativeTime(thread.recencyAt ?: thread.updatedAt),
-                        modifier = Modifier.padding(start = 8.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (showProject) {
-                    Text(
-                        thread.cwd,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (thread.preview.isNotBlank()) {
-                    Text(
-                        thread.preview,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            IconButton(onClick = onMenu, modifier = Modifier.size(40.dp)) {
-                Icon(
-                    Icons.Rounded.MoreVert,
-                    contentDescription = "${thread.title} 会话操作",
-                    modifier = Modifier.size(18.dp),
+                Text(
+                    thread.title,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    text = buildString {
+                        if (showProject) {
+                            append(projectName(thread.cwd))
+                            append(" · ")
+                        }
+                        append(relativeTime(thread.recencyAt ?: thread.updatedAt))
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            ThreadStatusIndicator(effectiveAttention)
+        }
+    }
+}
+
+internal fun effectiveThreadAttention(
+    thread: ThreadSummary,
+    attention: ThreadAttention?,
+): ThreadAttention? = attention ?: when (thread.status) {
+    ThreadRuntimeStatus.ACTIVE -> ThreadAttention.RUNNING
+    ThreadRuntimeStatus.SYSTEM_ERROR -> ThreadAttention.FAILED
+    else -> null
+}
+
+@Composable
+private fun ThreadStatusIndicator(attention: ThreadAttention?) {
+    val label = when (attention) {
+        ThreadAttention.RUNNING -> "运行中"
+        ThreadAttention.NEEDS_INPUT -> "待处理"
+        ThreadAttention.READY -> "可审阅"
+        ThreadAttention.FAILED -> "失败"
+        null -> null
+    }
+    val modifier = if (label == null) {
+        Modifier.size(32.dp)
+    } else {
+        Modifier.size(32.dp).semantics { contentDescription = label }
+    }
+
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        when (attention) {
+            ThreadAttention.RUNNING -> CircularProgressIndicator(
+                modifier = Modifier.size(18.dp),
+                color = MaterialTheme.statusColors.success,
+                strokeWidth = 2.dp,
+            )
+
+            ThreadAttention.NEEDS_INPUT -> Icon(
+                imageVector = Icons.Rounded.PriorityHigh,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.statusColors.warning,
+            )
+
+            ThreadAttention.READY -> Icon(
+                imageVector = Icons.Rounded.Circle,
+                contentDescription = null,
+                modifier = Modifier.size(10.dp),
+                tint = MaterialTheme.statusColors.info,
+            )
+
+            ThreadAttention.FAILED -> Icon(
+                imageVector = Icons.Rounded.ErrorOutline,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.error,
+            )
+
+            null -> Unit
         }
     }
 }
@@ -586,36 +767,57 @@ private fun ThreadActionsDialog(
     onDelete: () -> Unit,
 ) {
     var name by rememberSaveable(thread.id) { mutableStateOf(thread.title) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("会话操作") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("名称") },
-                    singleLine = true,
-                )
-                Button(
-                    onClick = { onRename(name) },
-                    enabled = name.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("保存名称")
-                }
-                OutlinedButton(onClick = onFork, modifier = Modifier.fillMaxWidth()) {
-                    Text("分叉会话")
-                }
-                OutlinedButton(onClick = onArchive, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (archived) "恢复归档" else "归档")
-                }
-                TextButton(onClick = onDelete, modifier = Modifier.fillMaxWidth()) {
+    var confirmDelete by rememberSaveable(thread.id) { mutableStateOf(false) }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("永久删除会话") },
+            text = { Text("确定删除“${thread.title}”吗？删除后无法恢复") },
+            confirmButton = {
+                TextButton(onClick = onDelete) {
                     Text("永久删除", color = MaterialTheme.colorScheme.error)
                 }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
-    )
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDelete = false }) { Text("取消") }
+            },
+        )
+    } else {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("会话操作") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("名称") },
+                        singleLine = true,
+                    )
+                    Button(
+                        onClick = { onRename(name) },
+                        enabled = name.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("保存名称")
+                    }
+                    OutlinedButton(onClick = onFork, modifier = Modifier.fillMaxWidth()) {
+                        Text("分叉会话")
+                    }
+                    OutlinedButton(onClick = onArchive, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (archived) "恢复归档" else "归档")
+                    }
+                    TextButton(
+                        onClick = { confirmDelete = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("永久删除", color = MaterialTheme.colorScheme.error)
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+        )
+    }
 }
