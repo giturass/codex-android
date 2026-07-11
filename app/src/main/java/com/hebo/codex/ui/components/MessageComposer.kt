@@ -22,9 +22,11 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -35,6 +37,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp as lerpColor
@@ -92,84 +95,87 @@ internal fun MessageComposer(
     val compactBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)
     val expandedBorderColor = MaterialTheme.colorScheme.outlineVariant
 
-    // Insets 在布局前更新；在布局与绘制阶段读取，才能与 imePadding 保持同一帧
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .graphicsLayer {
-                val fraction = imeAnimation.expansionFraction(this, hasText)
-                shadowElevation = 2.dp.toPx()
-                shape = RoundedCornerShape(
-                    lerpDp(ComposerCompactCornerRadius, ComposerExpandedCornerRadius, fraction),
-                )
-                clip = true
-            }
-            .drawWithContent {
-                val fraction = imeAnimation.expansionFraction(this, hasText)
-                val cornerRadius = lerpDp(
-                    ComposerCompactCornerRadius,
-                    ComposerExpandedCornerRadius,
-                    fraction,
-                ).toPx()
-                drawRoundRect(
-                    color = lerpColor(compactContainerColor, expandedContainerColor, fraction),
-                    cornerRadius = CornerRadius(cornerRadius),
-                )
-                drawContent()
-                val strokeWidth = 1.dp.toPx()
-                drawRoundRect(
-                    color = lerpColor(compactBorderColor, expandedBorderColor, fraction),
-                    topLeft = Offset(strokeWidth / 2f, strokeWidth / 2f),
-                    size = Size(
-                        width = (size.width - strokeWidth).coerceAtLeast(0f),
-                        height = (size.height - strokeWidth).coerceAtLeast(0f),
-                    ),
-                    cornerRadius = CornerRadius((cornerRadius - strokeWidth / 2f).coerceAtLeast(0f)),
-                    style = Stroke(strokeWidth),
-                )
-            }
-            .padding(horizontal = 6.dp, vertical = 5.dp),
-    ) {
+    CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
+        // Insets 在布局前更新；在布局与绘制阶段读取，才能与 imePadding 保持同一帧
         Box(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .size(48.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            leadingContent()
-        }
-        BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
-            enabled = enabled,
-            modifier = Modifier
-                .align(Alignment.TopStart)
+            modifier = modifier
                 .fillMaxWidth()
-                .composerTextFieldLayout(
-                    imeAnimation = imeAnimation,
-                    compactEndExtra = compactEndExtra,
-                    hasText = hasText,
+                .graphicsLayer {
+                    val fraction = imeAnimation.expansionFraction(this, hasText)
+                    shadowElevation = 2.dp.toPx()
+                    shape = RoundedCornerShape(
+                        lerpDp(ComposerCompactCornerRadius, ComposerExpandedCornerRadius, fraction),
+                    )
+                    clip = true
+                }
+                .drawWithContent {
+                    val fraction = imeAnimation.expansionFraction(this, hasText)
+                    val cornerRadius = lerpDp(
+                        ComposerCompactCornerRadius,
+                        ComposerExpandedCornerRadius,
+                        fraction,
+                    ).toPx()
+                    drawRoundRect(
+                        color = lerpColor(compactContainerColor, expandedContainerColor, fraction),
+                        cornerRadius = CornerRadius(cornerRadius),
+                    )
+                    drawContent()
+                    val strokeWidth = 1.dp.toPx()
+                    drawRoundRect(
+                        color = lerpColor(compactBorderColor, expandedBorderColor, fraction),
+                        topLeft = Offset(strokeWidth / 2f, strokeWidth / 2f),
+                        size = Size(
+                            width = (size.width - strokeWidth).coerceAtLeast(0f),
+                            height = (size.height - strokeWidth).coerceAtLeast(0f),
+                        ),
+                        cornerRadius = CornerRadius((cornerRadius - strokeWidth / 2f).coerceAtLeast(0f)),
+                        style = Stroke(strokeWidth),
+                    )
+                }
+                .padding(horizontal = 6.dp, vertical = 5.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .size(48.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                leadingContent()
+            }
+            BasicTextField(
+                value = value,
+                onValueChange = onValueChange,
+                enabled = enabled,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .fillMaxWidth()
+                    .composerTextFieldLayout(
+                        imeAnimation = imeAnimation,
+                        compactEndExtra = compactEndExtra,
+                        hasText = hasText,
+                    ),
+                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                    color = MaterialTheme.colorScheme.onSurface,
                 ),
-            textStyle = MaterialTheme.typography.bodyLarge.copy(
-                color = MaterialTheme.colorScheme.onSurface,
-            ),
-            minLines = 1,
-            maxLines = if (allowsMultipleLines) 5 else 1,
-            decorationBox = { innerTextField ->
-                ComposerTextFieldDecoration(
-                    value = value,
-                    placeholder = placeholder,
-                    imeAnimation = imeAnimation,
-                    hasText = hasText,
-                    innerTextField = innerTextField,
-                )
-            },
-        )
-        Row(
-            modifier = Modifier.align(Alignment.BottomEnd),
-            verticalAlignment = Alignment.CenterVertically,
-            content = trailingContent,
-        )
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                minLines = 1,
+                maxLines = if (allowsMultipleLines) 5 else 1,
+                decorationBox = { innerTextField ->
+                    ComposerTextFieldDecoration(
+                        value = value,
+                        placeholder = placeholder,
+                        imeAnimation = imeAnimation,
+                        hasText = hasText,
+                        innerTextField = innerTextField,
+                    )
+                },
+            )
+            Row(
+                modifier = Modifier.align(Alignment.BottomEnd),
+                verticalAlignment = Alignment.CenterVertically,
+                content = trailingContent,
+            )
+        }
     }
 }
 
