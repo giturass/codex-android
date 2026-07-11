@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -20,6 +21,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material.icons.rounded.Code
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -40,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.hebo.codex.R
 import com.hebo.codex.domain.AccountOverview
@@ -55,6 +59,7 @@ import com.hebo.codex.domain.ServerConfiguration
 import com.hebo.codex.domain.SpendControlLimit
 import com.hebo.codex.ui.components.relativeTime
 import com.hebo.codex.ui.displayLabelRes
+import com.hebo.codex.ui.formatCompactCount
 import com.hebo.codex.ui.formatCount
 import com.hebo.codex.ui.formatDateTime
 import com.hebo.codex.ui.formatDurationSeconds
@@ -280,10 +285,37 @@ private fun SpendControlLimitView(limit: SpendControlLimit) {
 
 @Composable
 private fun RateLimitResetCreditsView(resetCredits: RateLimitResetCredits) {
+    val credits = resetCredits.credits
+    val hasDetails = !credits.isNullOrEmpty()
+    var detailsExpanded by rememberSaveable { mutableStateOf(false) }
+    val headerModifier = if (hasDetails) {
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clickable(role = Role.Button) { detailsExpanded = !detailsExpanded }
+    } else {
+        Modifier.fillMaxWidth()
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("额度重置", style = MaterialTheme.typography.labelLarge)
-        MetricValue("可用次数", formatCount(resetCredits.availableCount))
-        val credits = resetCredits.credits
+        Row(
+            modifier = headerModifier,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("额度重置", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
+            Text(
+                "可用 ${formatCount(resetCredits.availableCount)} 次",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (hasDetails) {
+                Icon(
+                    if (detailsExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                    contentDescription = if (detailsExpanded) "收起额度重置明细" else "展开额度重置明细",
+                )
+            }
+        }
         if (credits == null) {
             Text(
                 "服务端仅提供可用次数，暂无重置明细",
@@ -298,9 +330,12 @@ private fun RateLimitResetCreditsView(resetCredits: RateLimitResetCredits) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            credits.forEachIndexed { index, credit ->
-                if (index > 0) HorizontalDivider()
-                RateLimitResetCreditView(credit)
+            if (detailsExpanded) {
+                HorizontalDivider()
+                credits.forEachIndexed { index, credit ->
+                    if (index > 0) HorizontalDivider()
+                    RateLimitResetCreditView(credit)
+                }
             }
         }
     }
@@ -361,8 +396,8 @@ private fun AccountUsageCard(usage: AccountUsage) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("用量概览", style = MaterialTheme.typography.titleMedium)
-            usage.lifetimeTokens?.let { MetricValue("累计 Token", formatCount(it)) }
-            usage.peakDailyTokens?.let { MetricValue("单日最高 Token", formatCount(it)) }
+            usage.lifetimeTokens?.let { MetricValue("累计 Token", formatCompactCount(it)) }
+            usage.peakDailyTokens?.let { MetricValue("单日最高 Token", formatCompactCount(it)) }
             usage.longestRunningTurnSeconds?.let { MetricValue("最长任务", formatDurationSeconds(it)) }
             usage.currentStreakDays?.let { MetricValue("当前连续使用", "$it 天") }
             usage.longestStreakDays?.let { MetricValue("最长连续使用", "$it 天") }

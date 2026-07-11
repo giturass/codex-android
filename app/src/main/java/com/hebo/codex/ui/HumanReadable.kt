@@ -140,25 +140,42 @@ val WorkspaceMessageType.displayLabelRes: Int
 
 fun formatCount(value: Long): String = NumberFormat.getIntegerInstance(Locale.CHINA).format(value)
 
+private data class CompactCountUnit(
+    val divisor: Double,
+    val suffix: String,
+)
+
+private val compactCountUnits = listOf(
+    CompactCountUnit(1_000.0, "K"),
+    CompactCountUnit(1_000_000.0, "M"),
+    CompactCountUnit(1_000_000_000.0, "B"),
+    CompactCountUnit(1_000_000_000_000.0, "T"),
+)
+
 fun formatCompactCount(value: Long): String {
     val safeValue = value.coerceAtLeast(0)
     if (safeValue < 1_000) return safeValue.toString()
 
-    val (divisor, suffix) = when {
-        safeValue >= 1_000_000_000_000 -> 1_000_000_000_000.0 to "T"
-        safeValue >= 1_000_000_000 -> 1_000_000_000.0 to "B"
-        safeValue >= 1_000_000 -> 1_000_000.0 to "M"
-        else -> 1_000.0 to "K"
+    var unitIndex = compactCountUnits.indexOfLast { safeValue >= it.divisor }
+    var unit = compactCountUnits[unitIndex]
+    var formatted = formatCompactDecimal(safeValue / unit.divisor)
+    if (formatted == "1000" && unitIndex < compactCountUnits.lastIndex) {
+        unit = compactCountUnits[++unitIndex]
+        formatted = formatCompactDecimal(safeValue / unit.divisor)
     }
-    val scaled = safeValue / divisor
+
+    return "$formatted${unit.suffix}"
+}
+
+private fun formatCompactDecimal(value: Double): String {
     val decimalPlaces = when {
-        scaled < 10 -> 2
-        scaled < 100 -> 1
+        value < 10 -> 2
+        value < 100 -> 1
         else -> 0
     }
-    var formatted = String.format(Locale.ROOT, "%.${decimalPlaces}f", scaled)
+    var formatted = String.format(Locale.ROOT, "%.${decimalPlaces}f", value)
     if ('.' in formatted) formatted = formatted.trimEnd('0').trimEnd('.')
-    return "$formatted$suffix"
+    return formatted
 }
 
 fun formatDurationSeconds(seconds: Long): String {
