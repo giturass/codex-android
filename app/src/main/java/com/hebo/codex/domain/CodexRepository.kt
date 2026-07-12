@@ -10,6 +10,7 @@ import com.hebo.codex.data.remote.ProtocolMapper
 import com.hebo.codex.data.remote.ServerEvent
 import com.hebo.codex.data.remote.StableFeatureApi
 import com.hebo.codex.data.remote.StableRpcMethod
+import com.hebo.codex.data.remote.ThreadSnapshot
 import com.hebo.codex.data.remote.optionalBoolean
 import com.hebo.codex.data.remote.optionalLong
 import com.hebo.codex.data.remote.optionalString
@@ -56,6 +57,7 @@ class CodexRepository(
     private val connections = ConcurrentHashMap<String, AppServerConnection>()
     private val connectionObservers = mutableMapOf<String, List<Job>>()
     private val conversations = ConcurrentHashMap<ConversationKey, MutableStateFlow<ConversationState>>()
+    private val pendingResumeGoalSnapshots = ConcurrentHashMap.newKeySet<ConversationKey>()
     private val pendingRequestRoutes = ConcurrentHashMap<String, PendingRequestRoute>()
     private val mutableConnectionStatuses = MutableStateFlow<Map<String, ConnectionStatus>>(emptyMap())
     private val mutableThreadRevisions = MutableStateFlow<Map<String, Long>>(emptyMap())
@@ -208,7 +210,7 @@ class CodexRepository(
         }
         return conversationMutex.withLock {
             conversations[key]?.let { return@withLock it }
-            val snapshot = ProtocolMapper.threadSnapshot(api(serverId).resumeThread(threadId))
+            val snapshot = resumeConversation(key)
             val state = MutableStateFlow(snapshot.toConversationState(awaitServer(serverId)))
             conversations[key] = state
             state
@@ -388,6 +390,8 @@ class CodexRepository(
     }
 
     fun closeConversation(serverId: String, threadId: String) {
+        val key = ConversationKey(serverId, threadId)
+        pendingResumeGoalSnapshots.remove(key)
         applicationScope.launch {
             runSuspendCatching {
                 api(serverId).request(
@@ -395,7 +399,7 @@ class CodexRepository(
                     buildJsonObject { put("threadId", threadId) },
                 )
             }
-            conversations.remove(ConversationKey(serverId, threadId))
+            conversations.remove(key)
             removePendingRequests(serverId, threadId)
         }
     }
@@ -610,6 +614,7 @@ class CodexRepository(
     private fun closeConnectionLocked(serverId: String) {
         connectionObservers.remove(serverId)?.forEach { it.cancel() }
         connections.remove(serverId)?.close()
+        pendingResumeGoalSnapshots.removeIf { it.serverId == serverId }
         clearServerPendingRequests(serverId)
     }
 
@@ -621,11 +626,13 @@ class CodexRepository(
         conversations.entries
             .filter { it.key.serverId == serverId }
             .forEach { (key, state) ->
+                pendingResumeGoalSnapshots.add(key)
                 runSuspendCatching { ProtocolMapper.threadSnapshot(api.resumeThread(key.threadId)) }
                     .onSuccess { snapshot ->
                         state.value = snapshot.toConversationState(server)
                     }
                     .onFailure { error ->
+                        pendingResumeGoalSnapshots.remove(key)
                         state.updateState {
                             it.copy(isRunning = false, errorMessage = error.toUserFacingError("恢复会话失败"))
                         }
@@ -814,11 +821,15 @@ class CodexRepository(
         }
 
         val threadId = params.optionalString("threadId")
-        if (method.startsWith("thread/") && method != "thread/tokenUsage/updated" && method != "thread/goal/updated") {
+        if (
+            method.startsWith("thread/") && method != "thread/tokenUsage/updated" &&
+            method != "thread/goal/updated" && method != "thread/goal/cleared"
+        ) {
             bumpThreadRevision(serverId)
         }
         if (threadId == null) return
-        val state = conversations[ConversationKey(serverId, threadId)]
+        val key = ConversationKey(serverId, threadId)
+        val state = conversations[key]
         fun updateNotifiedItem(transform: (ConversationItem) -> ConversationItem) {
             state?.updateItem(
                 turnId = params.requiredString("turnId"),
@@ -861,7 +872,8 @@ class CodexRepository(
                         )).takeLast(MAX_NOTICES),
                     )
                 }
-                conversations.remove(ConversationKey(serverId, threadId))
+                pendingResumeGoalSnapshots.remove(key)
+                conversations.remove(key)
             }
 
             "thread/unarchived" -> bumpThreadRevision(serverId)
@@ -870,27 +882,15 @@ class CodexRepository(
                 it.copy(tokenUsage = ProtocolMapper.tokenUsage(params))
             }
 
-            "thread/goal/updated" -> state?.updateState { current ->
+            "thread/goal/updated" -> {
                 val goal = params.requiredObject("goal").toThreadGoal()
-                current.copy(
-                    goal = goal,
-                    goalLoaded = true,
-                    notices = (current.notices + ConversationNotice(
-                        UUID.randomUUID().toString(),
-                        "目标已更新：${goal.objective}",
-                    )).takeLast(MAX_NOTICES),
-                )
+                val announce = !pendingResumeGoalSnapshots.remove(key)
+                state?.updateState { current -> current.withGoal(goal, announce) }
             }
 
-            "thread/goal/cleared" -> state?.updateState { current ->
-                current.copy(
-                    goal = null,
-                    goalLoaded = true,
-                    notices = (current.notices + ConversationNotice(
-                        UUID.randomUUID().toString(),
-                        "目标已清除",
-                    )).takeLast(MAX_NOTICES),
-                )
+            "thread/goal/cleared" -> {
+                val announce = !pendingResumeGoalSnapshots.remove(key)
+                state?.updateState { current -> current.withGoal(null, announce) }
             }
 
             "turn/started" -> {
@@ -1084,6 +1084,16 @@ class CodexRepository(
     private fun requireConversation(serverId: String, threadId: String): MutableStateFlow<ConversationState> =
         conversations[ConversationKey(serverId, threadId)] ?: error("会话尚未打开")
 
+    private suspend fun resumeConversation(key: ConversationKey): ThreadSnapshot {
+        pendingResumeGoalSnapshots.add(key)
+        return try {
+            ProtocolMapper.threadSnapshot(api(key.serverId).resumeThread(key.threadId))
+        } catch (error: Throwable) {
+            pendingResumeGoalSnapshots.remove(key)
+            throw error
+        }
+    }
+
     private suspend fun awaitServer(serverId: String): ServerProfile =
         withTimeoutOrNull(SERVER_LOAD_TIMEOUT_MILLIS) {
             serverSettings
@@ -1264,7 +1274,6 @@ class CodexRepository(
         const val METHOD_NOT_FOUND = -32601
         const val INVALID_REQUEST = -32600
         const val SERVER_LOAD_TIMEOUT_MILLIS = 5_000L
-        const val MAX_NOTICES = 20
         val SUPPORTED_SERVER_REQUESTS = setOf(
             "item/commandExecution/requestApproval",
             "item/fileChange/requestApproval",
