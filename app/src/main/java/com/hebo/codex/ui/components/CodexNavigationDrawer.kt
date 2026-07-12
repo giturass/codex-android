@@ -31,7 +31,6 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Circle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ErrorOutline
-import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
@@ -734,19 +733,17 @@ private fun ProjectHeader(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        IconButton(onClick = onNewTask) {
+            Icon(
+                Icons.Rounded.Add,
+                contentDescription = "在「${project.name}」中新建会话",
+            )
+        }
         Box {
             IconButton(onClick = { menuExpanded = true }) {
                 Icon(Icons.Rounded.MoreVert, contentDescription = "${project.name} 项目操作")
             }
             DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                DropdownMenuItem(
-                    text = { Text("在此项目新建任务") },
-                    leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
-                    onClick = {
-                        menuExpanded = false
-                        onNewTask()
-                    },
-                )
                 DropdownMenuItem(
                     text = { Text("项目设置") },
                     leadingIcon = { Icon(Icons.Rounded.Settings, contentDescription = null) },
