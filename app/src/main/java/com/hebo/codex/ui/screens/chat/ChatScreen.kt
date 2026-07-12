@@ -52,6 +52,7 @@ import androidx.compose.material.icons.automirrored.rounded.CallSplit
 import androidx.compose.material.icons.automirrored.rounded.HelpOutline
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.BarChart
@@ -78,10 +79,13 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -129,7 +133,6 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.hebo.codex.R
@@ -169,7 +172,6 @@ import com.hebo.codex.ui.formatPercent
 import com.hebo.codex.ui.components.MessageComposer
 import com.hebo.codex.ui.components.MessageComposerAction
 import com.hebo.codex.ui.components.MessageComposerActionButton
-import com.hebo.codex.ui.components.MessageComposerAddButton
 import com.hebo.codex.ui.components.QuickPhraseManagerDialog
 import com.hebo.codex.ui.components.QuickPhraseMenuContent
 import com.hebo.codex.ui.components.ScrollChromeState
@@ -1775,20 +1777,31 @@ private fun ComposerAddMenu(
     onSelectQuickPhrase: (QuickPhrase) -> Unit,
     onInsertTrigger: (Char) -> Unit,
 ) {
-    Box {
-        MessageComposerAddButton(
-            onClick = {
-                onShowQuickPhrases(false)
-                onExpandedChange(!expanded)
-            },
-            enabled = enabled,
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { nextExpanded ->
+            if (nextExpanded) onShowQuickPhrases(false)
+            onExpandedChange(nextExpanded)
+        },
+    ) {
+        val addButtonColors = IconButtonDefaults.iconButtonColors()
+        Icon(
+            imageVector = Icons.Rounded.Add,
             contentDescription = "添加内容",
+            modifier = Modifier
+                .size(48.dp)
+                .menuAnchor(
+                    type = ExposedDropdownMenuAnchorType.SecondaryEditable,
+                    enabled = enabled,
+                )
+                .padding(12.dp),
+            tint = if (enabled) addButtonColors.contentColor else addButtonColors.disabledContentColor,
         )
-        DropdownMenu(
+        ExposedDropdownMenu(
             expanded = expanded,
             onDismissRequest = { onExpandedChange(false) },
             modifier = Modifier.widthIn(min = 280.dp, max = 400.dp),
-            properties = PopupProperties(focusable = false),
+            matchAnchorWidth = false,
         ) {
             if (showQuickPhrases) {
                 QuickPhraseMenuContent(

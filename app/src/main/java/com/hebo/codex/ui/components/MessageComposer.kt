@@ -15,13 +15,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -334,21 +332,6 @@ internal fun composerExpandedContentVisible(
     if (hasText) return true
     if (targetBottom == 0) return false
     return composerExpansionFraction(currentBottom, sourceBottom, targetBottom, hasText) == 1f
-}
-
-@Composable
-internal fun MessageComposerAddButton(
-    onClick: () -> Unit,
-    enabled: Boolean,
-    contentDescription: String,
-) {
-    IconButton(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = Modifier.size(48.dp),
-    ) {
-        Icon(Icons.Rounded.Add, contentDescription = contentDescription)
-    }
 }
 
 @Composable
