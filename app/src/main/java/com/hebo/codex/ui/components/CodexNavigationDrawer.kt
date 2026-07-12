@@ -13,13 +13,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -68,25 +68,26 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import com.hebo.codex.domain.ConnectionStatus
@@ -100,7 +101,8 @@ import com.hebo.codex.domain.ThreadAttention
 import com.hebo.codex.domain.ThreadSummary
 import com.hebo.codex.domain.projectName
 import com.hebo.codex.ui.theme.statusColors
-import kotlin.math.roundToInt
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 @Composable
 fun CodexNavigationDrawer(
@@ -249,6 +251,10 @@ private fun ColumnScope.DrawerContent(
     var selectedDraft by remember(activeServer?.id) { mutableStateOf<DraftSummary?>(null) }
     val recentListState = key(activeServer?.id, DrawerPage.RECENT) { rememberLazyListState() }
     val searchListState = key(activeServer?.id, DrawerPage.SEARCH) { rememberLazyListState() }
+    val drawerListState = when (drawerPage) {
+        DrawerPage.RECENT -> recentListState
+        DrawerPage.SEARCH -> searchListState
+    }
     val currentDraftKeys: Set<DraftKey> = remember(drafts) {
         drafts.mapTo(mutableSetOf()) { it.key }
     }
@@ -295,7 +301,7 @@ private fun ColumnScope.DrawerContent(
         }
     }
 
-    val drawerBody: @Composable ColumnScope.() -> Unit = {
+    val drawerBody: @Composable ColumnScope.(PaddingValues) -> Unit = { listContentPadding ->
         if (servers.isNotEmpty() && drawerPage == DrawerPage.SEARCH) {
             DrawerSearchHeader(
                 searchTerm = searchTerm,
@@ -308,10 +314,7 @@ private fun ColumnScope.DrawerContent(
         if (isLoading && !isRefreshing) LinearProgressIndicator(Modifier.fillMaxWidth())
 
         RefreshableDrawerList(
-            state = when (drawerPage) {
-                DrawerPage.RECENT -> recentListState
-                DrawerPage.SEARCH -> searchListState
-            },
+            state = drawerListState,
             isRefreshing = isRefreshing,
             enabled = activeServer != null &&
                 !isLoading &&
@@ -319,6 +322,7 @@ private fun ColumnScope.DrawerContent(
                 (drawerPage == DrawerPage.RECENT || searchTerm.isNotBlank() || showArchived),
             onRefresh = onRefresh,
             modifier = Modifier.weight(1f),
+            contentPadding = listContentPadding,
         ) {
             val visibleDrafts = drafts
             val visibleRecentThreads = threadsWithoutDrafts(recentThreads, visibleDrafts)
@@ -488,12 +492,15 @@ private fun ColumnScope.DrawerContent(
                 onClick = onAddServer,
                 icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
             )
-            drawerBody()
+            drawerBody(PaddingValues())
         } else {
-            CollapsibleDrawerServerHeader(
+            CollapsibleDrawerServerFooter(
                 modifier = Modifier.weight(1f),
-                header = { headerModifier ->
-                    Column(headerModifier) {
+                resetKey = activeServer?.id,
+                forceVisible = !drawerListState.canScrollBackward,
+                footer = { footerModifier ->
+                    Column(footerModifier) {
+                        Spacer(Modifier.height(8.dp))
                         ServerSelector(
                             servers = servers,
                             activeServer = activeServer,
@@ -509,7 +516,7 @@ private fun ColumnScope.DrawerContent(
                             onAdd = onAddServer,
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(12.dp))
                     }
                 },
                 content = drawerBody,
@@ -562,130 +569,111 @@ private fun ColumnScope.DrawerContent(
     }
 }
 
-private const val DRAWER_SERVER_HEADER_SETTLE_DURATION_MILLIS = 160
+private const val DRAWER_SERVER_FOOTER_SETTLE_DURATION_MILLIS = 160
 
-internal data class DrawerServerHeaderScrollState(
-    val hidden: Boolean = false,
-    val offset: Float = 0f,
-)
-
-internal data class DrawerServerHeaderScrollResult(
-    val state: DrawerServerHeaderScrollState,
-    val consumedY: Float,
-)
-
-internal fun DrawerServerHeaderScrollState.consumeUserScroll(
+internal fun ScrollChromeState.afterDrawerUserScroll(
     deltaY: Float,
     hideDistance: Float,
-): DrawerServerHeaderScrollResult {
-    if (hideDistance <= 0f) return DrawerServerHeaderScrollResult(this, 0f)
-
-    val nextOffset = (offset - deltaY).coerceIn(0f, hideDistance)
-    val nextState = copy(
-        hidden = when (nextOffset) {
-            0f -> false
-            hideDistance -> true
-            else -> hidden
-        },
-        offset = nextOffset,
-    )
-    return DrawerServerHeaderScrollResult(
-        state = nextState,
-        consumedY = offset - nextOffset,
-    )
-}
-
-internal fun DrawerServerHeaderScrollState.settleTarget(hideDistance: Float): Float =
-    if (hidden) hideDistance else 0f
+): ScrollChromeState = afterUserScroll(
+    hideDelta = -deltaY,
+    hideDistance = hideDistance,
+)
 
 @Composable
-private fun CollapsibleDrawerServerHeader(
-    header: @Composable (Modifier) -> Unit,
+private fun CollapsibleDrawerServerFooter(
+    resetKey: Any?,
+    forceVisible: Boolean,
+    footer: @Composable (Modifier) -> Unit,
     modifier: Modifier = Modifier,
-    content: @Composable ColumnScope.() -> Unit,
+    content: @Composable ColumnScope.(PaddingValues) -> Unit,
 ) {
-    var headerHeightPx by remember { mutableStateOf(0) }
-    var scrollState by remember { mutableStateOf(DrawerServerHeaderScrollState()) }
+    var footerHeightPx by remember { mutableStateOf(0) }
+    var scrollState by remember(resetKey) { mutableStateOf(ScrollChromeState()) }
+    var settleJob by remember(resetKey) { mutableStateOf<Job?>(null) }
+    val scrollScope = rememberCoroutineScope()
+    val density = LocalDensity.current
 
-    LaunchedEffect(headerHeightPx) {
-        val hideDistance = headerHeightPx.toFloat()
-        scrollState = if (scrollState.hidden) {
+    LaunchedEffect(forceVisible) {
+        if (forceVisible) {
+            settleJob?.cancel()
+            settleJob = null
+            scrollState = ScrollChromeState()
+        }
+    }
+    LaunchedEffect(footerHeightPx) {
+        val hideDistance = footerHeightPx.toFloat()
+        scrollState = if (scrollState.fullyHidden) {
             scrollState.copy(offset = hideDistance)
         } else {
             scrollState.copy(offset = scrollState.offset.coerceAtMost(hideDistance))
         }
     }
 
-    val scrollConnection = remember(headerHeightPx) {
+    val scrollConnection = remember(resetKey, footerHeightPx) {
         object : NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (source != NestedScrollSource.UserInput) return Offset.Zero
-
-                val result = scrollState.consumeUserScroll(
-                    deltaY = available.y,
-                    hideDistance = headerHeightPx.toFloat(),
-                )
-                scrollState = result.state
-                return Offset(x = 0f, y = result.consumedY)
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset {
+                if (source == NestedScrollSource.UserInput && consumed.y != 0f) {
+                    settleJob?.cancel()
+                    settleJob = null
+                    scrollState = scrollState.afterDrawerUserScroll(
+                        deltaY = consumed.y,
+                        hideDistance = footerHeightPx.toFloat(),
+                    )
+                }
+                return Offset.Zero
             }
 
             override suspend fun onPreFling(available: Velocity): Velocity {
-                val hideDistance = headerHeightPx.toFloat()
+                val hideDistance = footerHeightPx.toFloat()
                 val targetOffset = scrollState.settleTarget(hideDistance)
-                if (targetOffset == scrollState.offset) return Velocity.Zero
-
-                animate(
-                    initialValue = scrollState.offset,
-                    targetValue = targetOffset,
-                    animationSpec = tween(DRAWER_SERVER_HEADER_SETTLE_DURATION_MILLIS),
-                ) { value, _ ->
-                    scrollState = scrollState.copy(offset = value)
+                val targetHidden = hideDistance > 0f && targetOffset == hideDistance
+                scrollState = scrollState.copy(settledHidden = targetHidden)
+                if (targetOffset != scrollState.offset) {
+                    val initialOffset = scrollState.offset
+                    settleJob?.cancel()
+                    settleJob = scrollScope.launch {
+                        animate(
+                            initialValue = initialOffset,
+                            targetValue = targetOffset,
+                            animationSpec = tween(DRAWER_SERVER_FOOTER_SETTLE_DURATION_MILLIS),
+                        ) { value, _ ->
+                            scrollState = scrollState.copy(offset = value)
+                        }
+                        scrollState = if (targetOffset == 0f) {
+                            ScrollChromeState()
+                        } else {
+                            ScrollChromeState(
+                                fullyHidden = true,
+                                offset = targetOffset,
+                                settledHidden = true,
+                            )
+                        }
+                    }
                 }
-                scrollState = DrawerServerHeaderScrollState(
-                    hidden = targetOffset == hideDistance,
-                    offset = targetOffset,
-                )
-                return Velocity(x = 0f, y = available.y)
+                return Velocity.Zero
             }
         }
     }
-
-    Box(modifier.clipToBounds().nestedScroll(scrollConnection)) {
-        Column(
-            modifier = Modifier
-                .placeBelowDrawerHeader(
-                    headerHeight = { headerHeightPx },
-                    headerOffset = { scrollState.offset },
-                )
-                .fillMaxSize(),
-            content = content,
-        )
-        header(
-            Modifier
-                .fillMaxWidth()
-                .onSizeChanged { headerHeightPx = it.height }
-                .offset { IntOffset(x = 0, y = -scrollState.offset.roundToInt()) },
-        )
-    }
-}
-
-private fun Modifier.placeBelowDrawerHeader(
-    headerHeight: () -> Int,
-    headerOffset: () -> Float,
-): Modifier = layout { measurable, constraints ->
-    val visibleHeaderHeight = (headerHeight() - headerOffset().roundToInt())
-        .coerceIn(0, constraints.maxHeight)
-    val bodyMaxHeight = (constraints.maxHeight - visibleHeaderHeight).coerceAtLeast(0)
-    val bodyMinHeight = (constraints.minHeight - visibleHeaderHeight).coerceIn(0, bodyMaxHeight)
-    val placeable = measurable.measure(
-        constraints.copy(
-            minHeight = bodyMinHeight,
-            maxHeight = bodyMaxHeight,
-        ),
+    val footerHeight = with(density) { footerHeightPx.toDp() }
+    val listContentPadding = PaddingValues(
+        bottom = footerHeight.takeUnless { scrollState.fullyHidden } ?: 0.dp,
     )
 
-    layout(constraints.maxWidth, constraints.maxHeight) {
-        placeable.placeRelative(x = 0, y = visibleHeaderHeight)
+    Box(modifier.clipToBounds().nestedScroll(scrollConnection)) {
+        Column(Modifier.fillMaxSize()) {
+            content(listContentPadding)
+        }
+        footer(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .onSizeChanged { footerHeightPx = it.height }
+                .graphicsLayer { translationY = scrollState.offset },
+        )
     }
 }
 
@@ -696,6 +684,7 @@ private fun RefreshableDrawerList(
     enabled: Boolean,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(),
     content: LazyListScope.() -> Unit,
 ) {
     if (enabled || isRefreshing) {
@@ -704,10 +693,20 @@ private fun RefreshableDrawerList(
             onRefresh = onRefresh,
             modifier = modifier,
         ) {
-            LazyColumn(state = state, modifier = Modifier.fillMaxSize(), content = content)
+            LazyColumn(
+                state = state,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = contentPadding,
+                content = content,
+            )
         }
     } else {
-        LazyColumn(state = state, modifier = modifier.fillMaxSize(), content = content)
+        LazyColumn(
+            state = state,
+            modifier = modifier.fillMaxSize(),
+            contentPadding = contentPadding,
+            content = content,
+        )
     }
 }
 

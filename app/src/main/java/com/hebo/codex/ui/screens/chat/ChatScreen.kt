@@ -171,8 +171,11 @@ import com.hebo.codex.ui.components.MessageComposerActionButton
 import com.hebo.codex.ui.components.MessageComposerAddButton
 import com.hebo.codex.ui.components.QuickPhraseManagerDialog
 import com.hebo.codex.ui.components.QuickPhraseMenuContent
+import com.hebo.codex.ui.components.ScrollChromeState
 import com.hebo.codex.ui.components.UserFacingErrorDialog
+import com.hebo.codex.ui.components.afterUserScroll
 import com.hebo.codex.ui.components.insertQuickPhrase
+import com.hebo.codex.ui.components.settleTarget
 import com.hebo.codex.ui.quickphrases.QuickPhraseViewModel
 import com.hebo.codex.ui.ratelimits.RateLimitIndicator
 import com.hebo.codex.ui.ratelimits.RateLimitsUiState
@@ -202,46 +205,6 @@ private val ChatComposerOverlayMinHeight = 116.dp
 private val ChatComposerMaxWidth = 760.dp
 private const val CHAT_CHROME_SETTLE_DURATION_MILLIS = 160
 
-internal data class ChatChromeScrollState(
-    val controlsHidden: Boolean = false,
-    val offset: Float = 0f,
-    val settledHidden: Boolean = false,
-)
-
-internal fun ChatChromeScrollState.afterUserScroll(
-    deltaY: Float,
-    hideDistance: Float,
-): ChatChromeScrollState = when {
-    hideDistance <= 0f -> this
-
-    deltaY > 0f && !controlsHidden -> {
-        val nextOffset = (offset + deltaY).coerceAtMost(hideDistance)
-        copy(
-            controlsHidden = nextOffset >= hideDistance,
-            offset = nextOffset,
-        )
-    }
-
-    deltaY < 0f -> {
-        copy(
-            controlsHidden = false,
-            offset = (offset + deltaY).coerceAtLeast(0f),
-        )
-    }
-
-    else -> this
-}
-
-internal fun ChatChromeScrollState.settleTarget(hideDistance: Float): Float {
-    val halfway = hideDistance / 2f
-    return when {
-        offset > halfway -> hideDistance
-        offset < halfway -> 0f
-        settledHidden -> hideDistance
-        else -> 0f
-    }
-}
-
 @Composable
 fun ChatScreen(
     viewModel: ChatViewModel,
@@ -264,7 +227,7 @@ fun ChatScreen(
     val scrollScope = rememberCoroutineScope()
     var autoFollow by rememberSaveable(conversation?.threadId) { mutableStateOf(true) }
     var showScrollToBottomButton by remember(conversation?.threadId) { mutableStateOf(false) }
-    var chromeScrollState by remember(conversation?.threadId) { mutableStateOf(ChatChromeScrollState()) }
+    var chromeScrollState by remember(conversation?.threadId) { mutableStateOf(ScrollChromeState()) }
     var chromeSettleJob by remember(conversation?.threadId) { mutableStateOf<Job?>(null) }
     var topControlsHeightPx by remember { mutableStateOf(0) }
     var bottomControlsHeightPx by remember { mutableStateOf(0) }
@@ -302,7 +265,7 @@ fun ChatScreen(
                     chromeSettleJob = null
                     autoFollow = false
                     chromeScrollState = chromeScrollState.afterUserScroll(
-                        deltaY = consumed.y,
+                        hideDelta = consumed.y,
                         hideDistance = chromeHideDistancePx,
                     )
                 }
@@ -325,10 +288,10 @@ fun ChatScreen(
                             chromeScrollState = chromeScrollState.copy(offset = value)
                         }
                         chromeScrollState = if (targetOffset == 0f) {
-                            ChatChromeScrollState()
+                            ScrollChromeState()
                         } else {
-                            ChatChromeScrollState(
-                                controlsHidden = true,
+                            ScrollChromeState(
+                                fullyHidden = true,
                                 offset = targetOffset,
                                 settledHidden = true,
                             )
@@ -399,11 +362,11 @@ fun ChatScreen(
         if (autoFollow) {
             chromeSettleJob?.cancel()
             chromeSettleJob = null
-            chromeScrollState = ChatChromeScrollState()
+            chromeScrollState = ScrollChromeState()
         }
     }
     LaunchedEffect(chromeHideDistancePx) {
-        chromeScrollState = if (chromeScrollState.controlsHidden) {
+        chromeScrollState = if (chromeScrollState.fullyHidden) {
             chromeScrollState.copy(offset = chromeHideDistancePx)
         } else {
             chromeScrollState.copy(offset = chromeScrollState.offset.coerceAtMost(chromeHideDistancePx))
@@ -427,9 +390,9 @@ fun ChatScreen(
     )
     val topControlsHeight = with(density) { topControlsHeightPx.toDp() }
     val bottomControlsHeight = with(density) { bottomControlsHeightPx.toDp() }
-    val showFullBottomControls = !bottomControlsCanHide || !chromeScrollState.controlsHidden
+    val showFullBottomControls = !bottomControlsCanHide || !chromeScrollState.fullyHidden
     val showCompactStop = bottomControlsCanHide &&
-        chromeScrollState.controlsHidden &&
+        chromeScrollState.fullyHidden &&
         conversation?.isRunning == true
     val topContentPadding = maxOf(
         topControlsHeight,
@@ -588,7 +551,7 @@ fun ChatScreen(
                         onSend = {
                             chromeSettleJob?.cancel()
                             chromeSettleJob = null
-                            chromeScrollState = ChatChromeScrollState()
+                            chromeScrollState = ScrollChromeState()
                             autoFollow = true
                             viewModel.sendDraft()
                         },
@@ -635,7 +598,7 @@ fun ChatScreen(
                     showScrollToBottomButton = false
                     chromeSettleJob?.cancel()
                     chromeSettleJob = null
-                    chromeScrollState = ChatChromeScrollState()
+                    chromeScrollState = ScrollChromeState()
                     scrollScope.launch {
                         val lastIndex = listState.layoutInfo.totalItemsCount - 1
                         if (lastIndex >= 0) {
