@@ -650,7 +650,7 @@ private fun ChatFloatingHeader(
             Surface(
                 modifier = Modifier.align(Alignment.CenterEnd),
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 shadowElevation = 2.dp,
             ) {
