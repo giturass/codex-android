@@ -312,19 +312,8 @@ private fun ColumnScope.DrawerContent(
                 modifier = Modifier.fillMaxWidth(),
             )
             Spacer(Modifier.height(8.dp))
-            when (drawerPage) {
-                DrawerPage.RECENT -> DrawerMainHeader(
-                    newTaskSelected = newTaskSelected,
-                    groupByProject = groupByProject,
-                    onNewConversation = {
-                        leaveTransientPage()
-                        onNewConversation()
-                    },
-                    onSearch = { drawerPage = DrawerPage.SEARCH },
-                    onGroupByProjectChange = { groupByProject = it },
-                )
-
-                DrawerPage.SEARCH -> DrawerSearchHeader(
+            if (drawerPage == DrawerPage.SEARCH) {
+                DrawerSearchHeader(
                     searchTerm = searchTerm,
                     showArchived = showArchived,
                     onSearch = onSearch,
@@ -366,9 +355,13 @@ private fun ColumnScope.DrawerContent(
                     }
                 }
                 item("recent-title") {
-                    DrawerSectionTitle(
-                        text = "最近会话",
+                    DrawerRecentHeader(
+                        newTaskSelected = newTaskSelected,
+                        groupByProject = groupByProject,
                         refreshEnabled = !isLoading && !isLoadingMore,
+                        onNewConversation = onNewConversation,
+                        onSearch = { drawerPage = DrawerPage.SEARCH },
+                        onGroupByProjectChange = { groupByProject = it },
                         onRefresh = onRefresh,
                     )
                 }
@@ -581,19 +574,21 @@ private fun RefreshableDrawerList(
 }
 
 @Composable
-private fun DrawerMainHeader(
+private fun DrawerRecentHeader(
     newTaskSelected: Boolean,
     groupByProject: Boolean,
+    refreshEnabled: Boolean,
     onNewConversation: () -> Unit,
     onSearch: () -> Unit,
     onGroupByProjectChange: (Boolean) -> Unit,
+    onRefresh: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(start = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = "会话",
+            text = "最近会话",
             modifier = Modifier.weight(1f),
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -618,6 +613,9 @@ private fun DrawerMainHeader(
                 Icons.Rounded.Folder,
                 contentDescription = "按项目分组",
             )
+        }
+        IconButton(onClick = onRefresh, enabled = refreshEnabled) {
+            Icon(Icons.Rounded.Refresh, contentDescription = "刷新会话列表")
         }
     }
 }
