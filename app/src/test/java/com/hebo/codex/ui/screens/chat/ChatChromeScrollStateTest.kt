@@ -45,18 +45,52 @@ class ChatChromeScrollStateTest {
     }
 
     @Test
-    fun `未完全隐藏时松手目标为完整展示`() {
-        val state = ChatChromeScrollState().scroll(deltaY = 99f)
+    fun `显示时隐藏未超过一半松手保持显示`() {
+        val state = ChatChromeScrollState().scroll(deltaY = 49f)
 
         assertEquals(0f, state.settleTarget(hideDistance = 100f), 0.0001f)
     }
 
     @Test
-    fun `完全隐藏后松手保持隐藏`() {
-        val state = ChatChromeScrollState().scroll(deltaY = 100f)
+    fun `显示时隐藏超过一半松手改为隐藏`() {
+        val state = ChatChromeScrollState().scroll(deltaY = 51f)
 
         assertEquals(100f, state.settleTarget(hideDistance = 100f), 0.0001f)
     }
+
+    @Test
+    fun `显示时隐藏刚好一半松手保持显示`() {
+        val state = ChatChromeScrollState().scroll(deltaY = 50f)
+
+        assertEquals(0f, state.settleTarget(hideDistance = 100f), 0.0001f)
+    }
+
+    @Test
+    fun `隐藏时显示未超过一半松手保持隐藏`() {
+        val state = hiddenState().scroll(deltaY = -49f)
+
+        assertEquals(100f, state.settleTarget(hideDistance = 100f), 0.0001f)
+    }
+
+    @Test
+    fun `隐藏时显示超过一半松手改为显示`() {
+        val state = hiddenState().scroll(deltaY = -51f)
+
+        assertEquals(0f, state.settleTarget(hideDistance = 100f), 0.0001f)
+    }
+
+    @Test
+    fun `隐藏时显示刚好一半松手保持隐藏`() {
+        val state = hiddenState().scroll(deltaY = -50f)
+
+        assertEquals(100f, state.settleTarget(hideDistance = 100f), 0.0001f)
+    }
+
+    private fun hiddenState() = ChatChromeScrollState(
+        controlsHidden = true,
+        offset = 100f,
+        settledHidden = true,
+    )
 
     private fun ChatChromeScrollState.scroll(deltaY: Float) = afterUserScroll(
         deltaY = deltaY,

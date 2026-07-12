@@ -191,6 +191,7 @@ private const val CHAT_CHROME_SETTLE_DURATION_MILLIS = 160
 internal data class ChatChromeScrollState(
     val controlsHidden: Boolean = false,
     val offset: Float = 0f,
+    val settledHidden: Boolean = false,
 )
 
 internal fun ChatChromeScrollState.afterUserScroll(
@@ -217,8 +218,15 @@ internal fun ChatChromeScrollState.afterUserScroll(
     else -> this
 }
 
-internal fun ChatChromeScrollState.settleTarget(hideDistance: Float): Float =
-    if (controlsHidden) hideDistance else 0f
+internal fun ChatChromeScrollState.settleTarget(hideDistance: Float): Float {
+    val halfway = hideDistance / 2f
+    return when {
+        offset > halfway -> hideDistance
+        offset < halfway -> 0f
+        settledHidden -> hideDistance
+        else -> 0f
+    }
+}
 
 @Composable
 fun ChatScreen(
@@ -286,6 +294,8 @@ fun ChatScreen(
 
             override suspend fun onPreFling(available: Velocity): Velocity {
                 val targetOffset = chromeScrollState.settleTarget(chromeHideDistancePx)
+                val targetHidden = chromeHideDistancePx > 0f && targetOffset == chromeHideDistancePx
+                chromeScrollState = chromeScrollState.copy(settledHidden = targetHidden)
                 if (targetOffset != chromeScrollState.offset) {
                     val initialOffset = chromeScrollState.offset
                     chromeSettleJob?.cancel()
@@ -300,7 +310,11 @@ fun ChatScreen(
                         chromeScrollState = if (targetOffset == 0f) {
                             ChatChromeScrollState()
                         } else {
-                            ChatChromeScrollState(controlsHidden = true, offset = targetOffset)
+                            ChatChromeScrollState(
+                                controlsHidden = true,
+                                offset = targetOffset,
+                                settledHidden = true,
+                            )
                         }
                     }
                 }
