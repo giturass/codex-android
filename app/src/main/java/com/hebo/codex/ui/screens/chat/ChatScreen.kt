@@ -136,6 +136,7 @@ import com.hebo.codex.domain.NetworkPolicyRuleAction
 import com.hebo.codex.domain.PendingServerRequest
 import com.hebo.codex.domain.Personality
 import com.hebo.codex.domain.PlanStepStatus
+import com.hebo.codex.domain.QuickPhrase
 import com.hebo.codex.domain.ReasoningSummary
 import com.hebo.codex.domain.ReviewDelivery
 import com.hebo.codex.domain.ReviewTarget
@@ -157,7 +158,10 @@ import com.hebo.codex.ui.components.MessageComposer
 import com.hebo.codex.ui.components.MessageComposerAction
 import com.hebo.codex.ui.components.MessageComposerActionButton
 import com.hebo.codex.ui.components.MessageComposerAddButton
+import com.hebo.codex.ui.components.QuickPhraseSheet
 import com.hebo.codex.ui.components.UserFacingErrorDialog
+import com.hebo.codex.ui.components.insertQuickPhrase
+import com.hebo.codex.ui.quickphrases.QuickPhraseViewModel
 import com.hebo.codex.ui.ratelimits.RateLimitIndicator
 import com.hebo.codex.ui.ratelimits.RateLimitsUiState
 import com.mikepenz.markdown.compose.components.markdownComponents
@@ -229,6 +233,7 @@ internal fun ChatChromeScrollState.settleTarget(hideDistance: Float): Float {
 @Composable
 fun ChatScreen(
     viewModel: ChatViewModel,
+    quickPhraseViewModel: QuickPhraseViewModel,
     rateLimitsState: RateLimitsUiState,
     showNavigationIcon: Boolean,
     onOpenNavigation: () -> Unit,
@@ -237,6 +242,7 @@ fun ChatScreen(
     onRefreshRateLimits: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val quickPhraseState by quickPhraseViewModel.state.collectAsStateWithLifecycle()
     val conversation = state.conversation
     val conversationRows = remember(conversation?.items) {
         buildConversationRows(conversation?.items.orEmpty())
@@ -526,10 +532,16 @@ fun ChatScreen(
                         draft = state.draft,
                         models = state.models,
                         resources = state.inputResources,
+                        quickPhrases = quickPhraseState.phrases,
                         connectionStatus = state.connectionStatus,
                         isLoadingResources = state.isLoadingResources,
                         isSending = state.isSendingDraft,
                         onLoadResources = viewModel::loadInputResources,
+                        onAddQuickPhrase = quickPhraseViewModel::add,
+                        onUpdateQuickPhrase = quickPhraseViewModel::update,
+                        onDeleteQuickPhrase = quickPhraseViewModel::delete,
+                        onMoveQuickPhraseUp = quickPhraseViewModel::moveUp,
+                        onMoveQuickPhraseDown = quickPhraseViewModel::moveDown,
                         onMessageChange = viewModel::updateDraftMessage,
                         onAddAttachment = viewModel::addDraftAttachment,
                         onRemoveAttachment = viewModel::removeDraftAttachment,
@@ -1329,10 +1341,16 @@ private fun ChatComposer(
     draft: ChatDraft,
     models: List<ModelOption>,
     resources: List<FeatureEntry>,
+    quickPhrases: List<QuickPhrase>,
     connectionStatus: ConnectionStatus,
     isLoadingResources: Boolean,
     isSending: Boolean,
     onLoadResources: (Boolean) -> Unit,
+    onAddQuickPhrase: (String, String) -> Unit,
+    onUpdateQuickPhrase: (String, String, String) -> Unit,
+    onDeleteQuickPhrase: (String) -> Unit,
+    onMoveQuickPhraseUp: (String) -> Unit,
+    onMoveQuickPhraseDown: (String) -> Unit,
     onMessageChange: (String) -> Unit,
     onAddAttachment: (UserInputPart, String?) -> Unit,
     onRemoveAttachment: (String) -> Unit,
@@ -1445,6 +1463,7 @@ private fun ChatComposer(
                     when (entry) {
                         is ComposerPaletteEntry.Resource -> onAddAttachment(entry.input, null)
                         is ComposerPaletteEntry.Command -> when (entry.command) {
+                            ComposerCommand.PHRASE -> dialog = ComposerDialog.QuickPhrases
                             ComposerCommand.GOAL -> onOpenGoal()
                             ComposerCommand.REVIEW -> onOpenReview()
                             ComposerCommand.COMPACT -> onCompact()
@@ -1497,6 +1516,7 @@ private fun ChatComposer(
                         )
                     },
                     onAddImageAddress = { dialog = ComposerDialog.ImageAddress },
+                    onOpenQuickPhrases = { dialog = ComposerDialog.QuickPhrases },
                     onInsertTrigger = { trigger ->
                         val nextValue = insertComposerTrigger(composerValue, trigger)
                         composerValue = nextValue
@@ -1553,6 +1573,24 @@ private fun ChatComposer(
     }
 
     when (dialog) {
+        ComposerDialog.QuickPhrases -> QuickPhraseSheet(
+            phrases = quickPhrases,
+            onDismiss = { dialog = null },
+            onSelect = { phrase ->
+                val nextValue = insertQuickPhrase(composerValue, phrase.content)
+                composerValue = nextValue
+                onMessageChange(nextValue.text)
+                dialog = null
+                focusRequester.requestFocus()
+                keyboardController?.show()
+            },
+            onAdd = onAddQuickPhrase,
+            onUpdate = onUpdateQuickPhrase,
+            onDelete = onDeleteQuickPhrase,
+            onMoveUp = onMoveQuickPhraseUp,
+            onMoveDown = onMoveQuickPhraseDown,
+        )
+
         ComposerDialog.ImageAddress -> ImageAddressDialog(
             onDismiss = { dialog = null },
             onAdd = {
@@ -1582,6 +1620,7 @@ private fun ComposerAddMenu(
     enabled: Boolean,
     onPickImage: () -> Unit,
     onAddImageAddress: () -> Unit,
+    onOpenQuickPhrases: () -> Unit,
     onInsertTrigger: (Char) -> Unit,
 ) {
     Box {
@@ -1595,6 +1634,15 @@ private fun ComposerAddMenu(
             onDismissRequest = { onExpandedChange(false) },
             properties = PopupProperties(focusable = false),
         ) {
+            DropdownMenuItem(
+                text = { Text("快捷短语") },
+                leadingIcon = { Icon(Icons.Rounded.Description, contentDescription = null) },
+                onClick = {
+                    onExpandedChange(false)
+                    onOpenQuickPhrases()
+                },
+            )
+            HorizontalDivider()
             DropdownMenuItem(
                 text = { Text("设备图片") },
                 leadingIcon = { Icon(Icons.Rounded.Image, contentDescription = null) },
@@ -2189,6 +2237,7 @@ private sealed interface ChatDialog {
 }
 
 private enum class ComposerDialog {
+    QuickPhrases,
     ImageAddress,
     Options,
 }

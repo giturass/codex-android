@@ -59,6 +59,7 @@ internal data class ComposerToken(
 )
 
 internal enum class ComposerCommand(val label: String, val description: String) {
+    PHRASE("/phrase", "插入或管理快捷短语"),
     GOAL("/goal", "创建或管理持续目标"),
     REVIEW("/review", "审查代码修改"),
     COMPACT("/compact", "压缩当前会话上下文"),

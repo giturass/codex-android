@@ -5,11 +5,13 @@ import androidx.room3.Room
 import androidx.sqlite.driver.AndroidSQLiteDriver
 import com.hebo.codex.data.local.CodexDatabase
 import com.hebo.codex.data.local.RoomDraftRepository
+import com.hebo.codex.data.local.QuickPhraseStore
 import com.hebo.codex.data.local.ServerStore
 import com.hebo.codex.data.local.TokenCipher
 import com.hebo.codex.data.remote.AppServerClientFactory
 import com.hebo.codex.domain.CodexRepository
 import com.hebo.codex.domain.DraftRepository
+import com.hebo.codex.domain.QuickPhraseRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -36,6 +38,10 @@ class AppContainer(context: Context) {
         filesDir = context.filesDir,
         json = json,
         applicationScope = applicationScope,
+    )
+    val quickPhraseRepository: QuickPhraseRepository = QuickPhraseStore(
+        context = context,
+        json = json,
     )
 
     val repository = CodexRepository(

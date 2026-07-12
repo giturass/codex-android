@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Dns
+import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Menu
@@ -52,6 +53,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
@@ -66,6 +69,7 @@ import com.hebo.codex.domain.ApprovalReviewer
 import com.hebo.codex.domain.ModelOption
 import com.hebo.codex.domain.Personality
 import com.hebo.codex.domain.RecentProject
+import com.hebo.codex.domain.QuickPhrase
 import com.hebo.codex.domain.SandboxMode
 import com.hebo.codex.domain.ThreadOptions
 import com.hebo.codex.domain.UserFacingError
@@ -73,15 +77,20 @@ import com.hebo.codex.domain.projectName
 import com.hebo.codex.ui.components.MessageComposer
 import com.hebo.codex.ui.components.MessageComposerAction
 import com.hebo.codex.ui.components.MessageComposerActionButton
+import com.hebo.codex.ui.components.MessageComposerAddButton
+import com.hebo.codex.ui.components.QuickPhraseSheet
+import com.hebo.codex.ui.components.insertQuickPhrase
 import com.hebo.codex.ui.displayDescriptionRes
 import com.hebo.codex.ui.displayLabelRes
 import com.hebo.codex.ui.ratelimits.RateLimitIndicator
 import com.hebo.codex.ui.ratelimits.RateLimitsUiState
+import com.hebo.codex.ui.quickphrases.QuickPhraseViewModel
 
 @Composable
 fun HomeScreen(
     viewModel: HomeViewModel,
     newTaskViewModel: NewTaskViewModel,
+    quickPhraseViewModel: QuickPhraseViewModel,
     rateLimitsState: RateLimitsUiState,
     showNavigationIcon: Boolean,
     onOpenNavigation: () -> Unit,
@@ -91,6 +100,7 @@ fun HomeScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val newTaskState by newTaskViewModel.state.collectAsStateWithLifecycle()
+    val quickPhraseState by quickPhraseViewModel.state.collectAsStateWithLifecycle()
     var showProjectMenu by remember { mutableStateOf(false) }
     var showCustomPathDialog by remember { mutableStateOf(false) }
     var showOptions by remember { mutableStateOf(false) }
@@ -186,6 +196,7 @@ fun HomeScreen(
                     ?: "默认模型",
                 cwd = newTaskState.cwd,
                 projects = state.recentProjects,
+                quickPhrases = quickPhraseState.phrases,
                 isCreating = newTaskState.isCreatingConversation || newTaskState.isLoadingDraft,
                 projectMenuExpanded = showProjectMenu,
                 onMessageChange = newTaskViewModel::updateMessage,
@@ -200,6 +211,11 @@ fun HomeScreen(
                     showCustomPathDialog = true
                 },
                 onOpenOptions = { showOptions = true },
+                onAddQuickPhrase = quickPhraseViewModel::add,
+                onUpdateQuickPhrase = quickPhraseViewModel::update,
+                onDeleteQuickPhrase = quickPhraseViewModel::delete,
+                onMoveQuickPhraseUp = quickPhraseViewModel::moveUp,
+                onMoveQuickPhraseDown = quickPhraseViewModel::moveDown,
                 onSend = newTaskViewModel::startConversation,
                 modifier = Modifier.fillMaxSize().padding(padding),
             )
@@ -235,6 +251,7 @@ private fun NewTaskContent(
     modelLabel: String,
     cwd: String,
     projects: List<RecentProject>,
+    quickPhrases: List<QuickPhrase>,
     isCreating: Boolean,
     projectMenuExpanded: Boolean,
     onMessageChange: (String) -> Unit,
@@ -243,9 +260,16 @@ private fun NewTaskContent(
     onSelectProject: (String) -> Unit,
     onSelectCustomPath: () -> Unit,
     onOpenOptions: () -> Unit,
+    onAddQuickPhrase: (String, String) -> Unit,
+    onUpdateQuickPhrase: (String, String, String) -> Unit,
+    onDeleteQuickPhrase: (String) -> Unit,
+    onMoveQuickPhraseUp: (String) -> Unit,
+    onMoveQuickPhraseDown: (String) -> Unit,
     onSend: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var addMenuExpanded by remember { mutableStateOf(false) }
+    var showQuickPhrases by remember { mutableStateOf(false) }
     var composerValue by remember {
         mutableStateOf(
             TextFieldValue(
@@ -262,6 +286,8 @@ private fun NewTaskContent(
             )
         }
     }
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
     Column(
         modifier = modifier.imePadding(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -310,6 +336,28 @@ private fun NewTaskContent(
                 .widthIn(max = 760.dp)
                 .fillMaxWidth()
                 .padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 10.dp),
+            leadingContent = {
+                Box {
+                    MessageComposerAddButton(
+                        onClick = { addMenuExpanded = true },
+                        enabled = !isCreating,
+                        contentDescription = "添加内容",
+                    )
+                    DropdownMenu(
+                        expanded = addMenuExpanded,
+                        onDismissRequest = { addMenuExpanded = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("快捷短语") },
+                            leadingIcon = { Icon(Icons.Rounded.Description, contentDescription = null) },
+                            onClick = {
+                                addMenuExpanded = false
+                                showQuickPhrases = true
+                            },
+                        )
+                    }
+                }
+            },
             expandedContent = {
                 TextButton(
                     onClick = onOpenOptions,
@@ -328,6 +376,26 @@ private fun NewTaskContent(
                     contentDescription = "开始任务",
                 )
             },
+            focusRequester = focusRequester,
+        )
+    }
+    if (showQuickPhrases) {
+        QuickPhraseSheet(
+            phrases = quickPhrases,
+            onDismiss = { showQuickPhrases = false },
+            onSelect = { phrase ->
+                val nextValue = insertQuickPhrase(composerValue, phrase.content)
+                composerValue = nextValue
+                onMessageChange(nextValue.text)
+                showQuickPhrases = false
+                focusRequester.requestFocus()
+                keyboardController?.show()
+            },
+            onAdd = onAddQuickPhrase,
+            onUpdate = onUpdateQuickPhrase,
+            onDelete = onDeleteQuickPhrase,
+            onMoveUp = onMoveQuickPhraseUp,
+            onMoveDown = onMoveQuickPhraseDown,
         )
     }
 }

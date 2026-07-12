@@ -32,6 +32,7 @@ class MainActivity : ComponentActivity() {
                 CodexApp(
                     repository = container.repository,
                     draftRepository = container.draftRepository,
+                    quickPhraseRepository = container.quickPhraseRepository,
                     notificationTargets = notificationTargetFlow,
                 )
             }

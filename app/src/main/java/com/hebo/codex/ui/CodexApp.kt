@@ -36,11 +36,13 @@ import com.hebo.codex.R
 import com.hebo.codex.domain.CodexRepository
 import com.hebo.codex.domain.DraftRepository
 import com.hebo.codex.domain.DraftTarget
+import com.hebo.codex.domain.QuickPhraseRepository
 import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.ui.components.CodexNavigationDrawer
 import com.hebo.codex.ui.components.UserFacingErrorDialog
 import com.hebo.codex.ui.ratelimits.RateLimitsUiState
 import com.hebo.codex.ui.ratelimits.RateLimitsViewModel
+import com.hebo.codex.ui.quickphrases.QuickPhraseViewModel
 import com.hebo.codex.ui.screens.chat.ChatScreen
 import com.hebo.codex.ui.screens.chat.ChatViewModel
 import com.hebo.codex.ui.screens.home.HomeEvent
@@ -79,6 +81,7 @@ private data class ServerHubRoute(val serverId: String, val cwd: String? = null)
 fun CodexApp(
     repository: CodexRepository,
     draftRepository: DraftRepository,
+    quickPhraseRepository: QuickPhraseRepository,
     notificationTargets: Flow<ConversationTarget> = emptyFlow(),
     navController: NavHostController = rememberNavController(),
 ) {
@@ -86,6 +89,10 @@ fun CodexApp(
         factory = HomeViewModel.factory(repository, draftRepository),
     )
     val homeState by homeViewModel.state.collectAsStateWithLifecycle()
+    val quickPhraseViewModel: QuickPhraseViewModel = viewModel(
+        factory = QuickPhraseViewModel.factory(quickPhraseRepository),
+    )
+    val quickPhraseState by quickPhraseViewModel.state.collectAsStateWithLifecycle()
     val rateLimitsViewModel: RateLimitsViewModel = viewModel(factory = RateLimitsViewModel.factory(repository))
     val rateLimitsStates by rateLimitsViewModel.state.collectAsStateWithLifecycle()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
@@ -169,6 +176,12 @@ fun CodexApp(
         homeState.errorMessage?.let { error ->
             showUserFacingError(error)
             homeViewModel.clearError()
+        }
+    }
+    LaunchedEffect(quickPhraseState.error) {
+        quickPhraseState.error?.let { error ->
+            showUserFacingError(error)
+            quickPhraseViewModel.clearError()
         }
     }
     LaunchedEffect(homeState.serverNotices.lastOrNull()?.id) {
@@ -289,6 +302,7 @@ fun CodexApp(
                     HomeScreen(
                         viewModel = homeViewModel,
                         newTaskViewModel = newTaskViewModel,
+                        quickPhraseViewModel = quickPhraseViewModel,
                         rateLimitsState = homeState.activeServerId?.let(rateLimitsStates::get) ?: RateLimitsUiState(),
                         showNavigationIcon = !isPermanent,
                         onOpenNavigation = ::openDrawer,
@@ -320,6 +334,7 @@ fun CodexApp(
                     )
                     ChatScreen(
                         viewModel = viewModel,
+                        quickPhraseViewModel = quickPhraseViewModel,
                         rateLimitsState = rateLimitsStates[route.serverId] ?: RateLimitsUiState(),
                         showNavigationIcon = !isPermanent,
                         onOpenNavigation = ::openDrawer,

@@ -45,6 +45,13 @@ class ComposerPaletteTest {
         assertTrue((mentions.single() as ComposerPaletteEntry.Resource).input is UserInputPart.Mention)
     }
 
+    @Test
+    fun `通过 phrase 命令打开快捷短语`() {
+        val entries = composerPaletteEntries(ComposerToken(0, 5, '/', "phra"), emptyList())
+
+        assertEquals(ComposerCommand.PHRASE, (entries.single() as ComposerPaletteEntry.Command).command)
+    }
+
     private fun entry(kind: FeatureKind, title: String) = FeatureEntry(
         kind = kind,
         id = title,
