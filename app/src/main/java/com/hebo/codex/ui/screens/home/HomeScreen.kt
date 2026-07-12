@@ -78,7 +78,8 @@ import com.hebo.codex.ui.components.MessageComposer
 import com.hebo.codex.ui.components.MessageComposerAction
 import com.hebo.codex.ui.components.MessageComposerActionButton
 import com.hebo.codex.ui.components.MessageComposerAddButton
-import com.hebo.codex.ui.components.QuickPhraseSheet
+import com.hebo.codex.ui.components.QuickPhraseManagerDialog
+import com.hebo.codex.ui.components.QuickPhraseMenuContent
 import com.hebo.codex.ui.components.insertQuickPhrase
 import com.hebo.codex.ui.displayDescriptionRes
 import com.hebo.codex.ui.displayLabelRes
@@ -260,8 +261,8 @@ private fun NewTaskContent(
     onSelectProject: (String) -> Unit,
     onSelectCustomPath: () -> Unit,
     onOpenOptions: () -> Unit,
-    onAddQuickPhrase: (String, String) -> Unit,
-    onUpdateQuickPhrase: (String, String, String) -> Unit,
+    onAddQuickPhrase: (String) -> Unit,
+    onUpdateQuickPhrase: (String, String) -> Unit,
     onDeleteQuickPhrase: (String) -> Unit,
     onMoveQuickPhraseUp: (String) -> Unit,
     onMoveQuickPhraseDown: (String) -> Unit,
@@ -270,6 +271,7 @@ private fun NewTaskContent(
 ) {
     var addMenuExpanded by remember { mutableStateOf(false) }
     var showQuickPhrases by remember { mutableStateOf(false) }
+    var showQuickPhraseManager by remember { mutableStateOf(false) }
     var composerValue by remember {
         mutableStateOf(
             TextFieldValue(
@@ -339,22 +341,47 @@ private fun NewTaskContent(
             leadingContent = {
                 Box {
                     MessageComposerAddButton(
-                        onClick = { addMenuExpanded = true },
+                        onClick = {
+                            showQuickPhrases = false
+                            addMenuExpanded = true
+                        },
                         enabled = !isCreating,
                         contentDescription = "添加内容",
                     )
                     DropdownMenu(
                         expanded = addMenuExpanded,
-                        onDismissRequest = { addMenuExpanded = false },
+                        onDismissRequest = {
+                            addMenuExpanded = false
+                            showQuickPhrases = false
+                        },
+                        modifier = Modifier.widthIn(min = 280.dp, max = 400.dp),
                     ) {
-                        DropdownMenuItem(
-                            text = { Text("快捷短语") },
-                            leadingIcon = { Icon(Icons.Rounded.Description, contentDescription = null) },
-                            onClick = {
-                                addMenuExpanded = false
-                                showQuickPhrases = true
-                            },
-                        )
+                        if (showQuickPhrases) {
+                            QuickPhraseMenuContent(
+                                phrases = quickPhrases,
+                                onBack = { showQuickPhrases = false },
+                                onManage = {
+                                    addMenuExpanded = false
+                                    showQuickPhrases = false
+                                    showQuickPhraseManager = true
+                                },
+                                onSelect = { phrase ->
+                                    val nextValue = insertQuickPhrase(composerValue, phrase.content)
+                                    composerValue = nextValue
+                                    onMessageChange(nextValue.text)
+                                    addMenuExpanded = false
+                                    showQuickPhrases = false
+                                    focusRequester.requestFocus()
+                                    keyboardController?.show()
+                                },
+                            )
+                        } else {
+                            DropdownMenuItem(
+                                text = { Text("快捷短语") },
+                                leadingIcon = { Icon(Icons.Rounded.Description, contentDescription = null) },
+                                onClick = { showQuickPhrases = true },
+                            )
+                        }
                     }
                 }
             },
@@ -379,18 +406,10 @@ private fun NewTaskContent(
             focusRequester = focusRequester,
         )
     }
-    if (showQuickPhrases) {
-        QuickPhraseSheet(
+    if (showQuickPhraseManager) {
+        QuickPhraseManagerDialog(
             phrases = quickPhrases,
-            onDismiss = { showQuickPhrases = false },
-            onSelect = { phrase ->
-                val nextValue = insertQuickPhrase(composerValue, phrase.content)
-                composerValue = nextValue
-                onMessageChange(nextValue.text)
-                showQuickPhrases = false
-                focusRequester.requestFocus()
-                keyboardController?.show()
-            },
+            onDismiss = { showQuickPhraseManager = false },
             onAdd = onAddQuickPhrase,
             onUpdate = onUpdateQuickPhrase,
             onDelete = onDeleteQuickPhrase,

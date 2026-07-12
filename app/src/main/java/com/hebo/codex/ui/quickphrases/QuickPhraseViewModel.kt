@@ -35,12 +35,12 @@ class QuickPhraseViewModel(
         }
     }
 
-    fun add(name: String, content: String) {
-        mutate("无法添加快捷短语") { repository.add(name, content) }
+    fun add(content: String) {
+        mutate("无法添加快捷短语") { repository.add(content) }
     }
 
-    fun update(id: String, name: String, content: String) {
-        mutate("无法更新快捷短语") { repository.update(id, name, content) }
+    fun update(id: String, content: String) {
+        mutate("无法更新快捷短语") { repository.update(id, content) }
     }
 
     fun delete(id: String) {

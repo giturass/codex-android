@@ -168,7 +168,8 @@ import com.hebo.codex.ui.components.MessageComposer
 import com.hebo.codex.ui.components.MessageComposerAction
 import com.hebo.codex.ui.components.MessageComposerActionButton
 import com.hebo.codex.ui.components.MessageComposerAddButton
-import com.hebo.codex.ui.components.QuickPhraseSheet
+import com.hebo.codex.ui.components.QuickPhraseManagerDialog
+import com.hebo.codex.ui.components.QuickPhraseMenuContent
 import com.hebo.codex.ui.components.UserFacingErrorDialog
 import com.hebo.codex.ui.components.insertQuickPhrase
 import com.hebo.codex.ui.quickphrases.QuickPhraseViewModel
@@ -1356,8 +1357,8 @@ private fun ChatComposer(
     isLoadingResources: Boolean,
     isSending: Boolean,
     onLoadResources: (Boolean) -> Unit,
-    onAddQuickPhrase: (String, String) -> Unit,
-    onUpdateQuickPhrase: (String, String, String) -> Unit,
+    onAddQuickPhrase: (String) -> Unit,
+    onUpdateQuickPhrase: (String, String) -> Unit,
     onDeleteQuickPhrase: (String) -> Unit,
     onMoveQuickPhraseUp: (String) -> Unit,
     onMoveQuickPhraseDown: (String) -> Unit,
@@ -1374,6 +1375,8 @@ private fun ChatComposer(
 ) {
     var dialog by remember { mutableStateOf<ComposerDialog?>(null) }
     var addMenuExpanded by remember { mutableStateOf(false) }
+    var showQuickPhrases by remember { mutableStateOf(false) }
+    var showQuickPhraseManager by remember { mutableStateOf(false) }
     var isAddingImage by remember { mutableStateOf(false) }
     var composerValue by remember {
         mutableStateOf(
@@ -1452,7 +1455,10 @@ private fun ChatComposer(
                     when (entry) {
                         is ComposerPaletteEntry.Resource -> onAddAttachment(entry.input, null)
                         is ComposerPaletteEntry.Command -> when (entry.command) {
-                            ComposerCommand.PHRASE -> dialog = ComposerDialog.QuickPhrases
+                            ComposerCommand.PHRASE -> {
+                                showQuickPhrases = true
+                                addMenuExpanded = true
+                            }
                             ComposerCommand.GOAL -> onOpenGoal()
                             ComposerCommand.REVIEW -> onOpenReview()
                             ComposerCommand.COMPACT -> onCompact()
@@ -1497,7 +1503,13 @@ private fun ChatComposer(
             leadingContent = {
                 ComposerAddMenu(
                     expanded = addMenuExpanded,
-                    onExpandedChange = { addMenuExpanded = it },
+                    onExpandedChange = {
+                        addMenuExpanded = it
+                        if (!it) showQuickPhrases = false
+                    },
+                    showQuickPhrases = showQuickPhrases,
+                    onShowQuickPhrases = { showQuickPhrases = it },
+                    quickPhrases = quickPhrases,
                     enabled = !isSending,
                     onPickImage = {
                         imagePicker.launch(
@@ -1505,7 +1517,20 @@ private fun ChatComposer(
                         )
                     },
                     onAddImageAddress = { dialog = ComposerDialog.ImageAddress },
-                    onOpenQuickPhrases = { dialog = ComposerDialog.QuickPhrases },
+                    onManageQuickPhrases = {
+                        addMenuExpanded = false
+                        showQuickPhrases = false
+                        showQuickPhraseManager = true
+                    },
+                    onSelectQuickPhrase = { phrase ->
+                        val nextValue = insertQuickPhrase(composerValue, phrase.content)
+                        composerValue = nextValue
+                        onMessageChange(nextValue.text)
+                        addMenuExpanded = false
+                        showQuickPhrases = false
+                        focusRequester.requestFocus()
+                        keyboardController?.show()
+                    },
                     onInsertTrigger = { trigger ->
                         val nextValue = insertComposerTrigger(composerValue, trigger)
                         composerValue = nextValue
@@ -1561,25 +1586,19 @@ private fun ChatComposer(
         )
     }
 
-    when (dialog) {
-        ComposerDialog.QuickPhrases -> QuickPhraseSheet(
+    if (showQuickPhraseManager) {
+        QuickPhraseManagerDialog(
             phrases = quickPhrases,
-            onDismiss = { dialog = null },
-            onSelect = { phrase ->
-                val nextValue = insertQuickPhrase(composerValue, phrase.content)
-                composerValue = nextValue
-                onMessageChange(nextValue.text)
-                dialog = null
-                focusRequester.requestFocus()
-                keyboardController?.show()
-            },
+            onDismiss = { showQuickPhraseManager = false },
             onAdd = onAddQuickPhrase,
             onUpdate = onUpdateQuickPhrase,
             onDelete = onDeleteQuickPhrase,
             onMoveUp = onMoveQuickPhraseUp,
             onMoveDown = onMoveQuickPhraseDown,
         )
+    }
 
+    when (dialog) {
         ComposerDialog.ImageAddress -> ImageAddressDialog(
             onDismiss = { dialog = null },
             onAdd = {
@@ -1736,65 +1755,79 @@ private const val ACTIVE_PLAN_CONTENT_FADE_DURATION_MILLIS = 100
 private fun ComposerAddMenu(
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
+    showQuickPhrases: Boolean,
+    onShowQuickPhrases: (Boolean) -> Unit,
+    quickPhrases: List<QuickPhrase>,
     enabled: Boolean,
     onPickImage: () -> Unit,
     onAddImageAddress: () -> Unit,
-    onOpenQuickPhrases: () -> Unit,
+    onManageQuickPhrases: () -> Unit,
+    onSelectQuickPhrase: (QuickPhrase) -> Unit,
     onInsertTrigger: (Char) -> Unit,
 ) {
     Box {
         MessageComposerAddButton(
-            onClick = { onExpandedChange(true) },
+            onClick = {
+                onShowQuickPhrases(false)
+                onExpandedChange(true)
+            },
             enabled = enabled,
             contentDescription = "添加内容",
         )
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { onExpandedChange(false) },
+            modifier = Modifier.widthIn(min = 280.dp, max = 400.dp),
             properties = PopupProperties(focusable = false),
         ) {
-            DropdownMenuItem(
-                text = { Text("快捷短语") },
-                leadingIcon = { Icon(Icons.Rounded.Description, contentDescription = null) },
-                onClick = {
-                    onExpandedChange(false)
-                    onOpenQuickPhrases()
-                },
-            )
-            HorizontalDivider()
-            DropdownMenuItem(
-                text = { Text("设备图片") },
-                leadingIcon = { Icon(Icons.Rounded.Image, contentDescription = null) },
-                onClick = {
-                    onExpandedChange(false)
-                    onPickImage()
-                },
-            )
-            DropdownMenuItem(
-                text = { Text("图片地址") },
-                leadingIcon = { Icon(Icons.Rounded.Link, contentDescription = null) },
-                onClick = {
-                    onExpandedChange(false)
-                    onAddImageAddress()
-                },
-            )
-            HorizontalDivider()
-            DropdownMenuItem(
-                text = { Text("Skill") },
-                leadingIcon = { Icon(Icons.Rounded.AutoAwesome, contentDescription = null) },
-                onClick = {
-                    onExpandedChange(false)
-                    onInsertTrigger('$')
-                },
-            )
-            DropdownMenuItem(
-                text = { Text("App 与 Plugin") },
-                leadingIcon = { Icon(Icons.Rounded.Apps, contentDescription = null) },
-                onClick = {
-                    onExpandedChange(false)
-                    onInsertTrigger('@')
-                },
-            )
+            if (showQuickPhrases) {
+                QuickPhraseMenuContent(
+                    phrases = quickPhrases,
+                    onBack = { onShowQuickPhrases(false) },
+                    onManage = onManageQuickPhrases,
+                    onSelect = onSelectQuickPhrase,
+                )
+            } else {
+                DropdownMenuItem(
+                    text = { Text("快捷短语") },
+                    leadingIcon = { Icon(Icons.Rounded.Description, contentDescription = null) },
+                    onClick = { onShowQuickPhrases(true) },
+                )
+                HorizontalDivider()
+                DropdownMenuItem(
+                    text = { Text("设备图片") },
+                    leadingIcon = { Icon(Icons.Rounded.Image, contentDescription = null) },
+                    onClick = {
+                        onExpandedChange(false)
+                        onPickImage()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("图片地址") },
+                    leadingIcon = { Icon(Icons.Rounded.Link, contentDescription = null) },
+                    onClick = {
+                        onExpandedChange(false)
+                        onAddImageAddress()
+                    },
+                )
+                HorizontalDivider()
+                DropdownMenuItem(
+                    text = { Text("Skill") },
+                    leadingIcon = { Icon(Icons.Rounded.AutoAwesome, contentDescription = null) },
+                    onClick = {
+                        onExpandedChange(false)
+                        onInsertTrigger('$')
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("App 与 Plugin") },
+                    leadingIcon = { Icon(Icons.Rounded.Apps, contentDescription = null) },
+                    onClick = {
+                        onExpandedChange(false)
+                        onInsertTrigger('@')
+                    },
+                )
+            }
         }
     }
 }
@@ -2356,7 +2389,6 @@ private sealed interface ChatDialog {
 }
 
 private enum class ComposerDialog {
-    QuickPhrases,
     ImageAddress,
     Options,
 }

@@ -1,20 +1,16 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-
 package com.hebo.codex.ui.components
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.ArrowUpward
@@ -28,7 +24,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -57,103 +52,142 @@ internal fun insertQuickPhrase(value: TextFieldValue, content: String): TextFiel
 }
 
 @Composable
-fun QuickPhraseSheet(
+fun QuickPhraseMenuContent(
+    phrases: List<QuickPhrase>,
+    onBack: () -> Unit,
+    onManage: () -> Unit,
+    onSelect: (QuickPhrase) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onBack) {
+            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, contentDescription = "返回添加菜单")
+        }
+        Text(
+            text = "快捷短语",
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.titleSmall,
+        )
+        TextButton(onClick = onManage) {
+            Text("管理")
+        }
+    }
+    HorizontalDivider()
+    if (phrases.isEmpty()) {
+        DropdownMenuItem(
+            text = {
+                Text(
+                    text = "还没有快捷短语",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            enabled = false,
+            onClick = {},
+        )
+    } else {
+        phrases.forEach { phrase ->
+            DropdownMenuItem(
+                text = {
+                    Text(
+                        text = phrase.content,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                onClick = { onSelect(phrase) },
+            )
+        }
+    }
+}
+
+@Composable
+fun QuickPhraseManagerDialog(
     phrases: List<QuickPhrase>,
     onDismiss: () -> Unit,
-    onSelect: (QuickPhrase) -> Unit,
-    onAdd: (String, String) -> Unit,
-    onUpdate: (String, String, String) -> Unit,
+    onAdd: (String) -> Unit,
+    onUpdate: (String, String) -> Unit,
     onDelete: (String) -> Unit,
     onMoveUp: (String) -> Unit,
     onMoveDown: (String) -> Unit,
 ) {
-    var searchTerm by rememberSaveable { mutableStateOf("") }
-    var editedPhrase by remember { mutableStateOf<QuickPhrase?>(null) }
     var showEditor by remember { mutableStateOf(false) }
+    var editedPhrase by remember { mutableStateOf<QuickPhrase?>(null) }
     var deletedPhrase by remember { mutableStateOf<QuickPhrase?>(null) }
-    val filteredPhrases = remember(phrases, searchTerm) {
-        val query = searchTerm.trim()
-        if (query.isEmpty()) {
-            phrases
-        } else {
-            phrases.filter {
-                it.name.contains(query, ignoreCase = true) || it.content.contains(query, ignoreCase = true)
-            }
-        }
-    }
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text("快捷短语", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-            TextButton(
-                onClick = {
-                    editedPhrase = null
-                    showEditor = true
-                },
-            ) {
-                Icon(Icons.Rounded.Add, contentDescription = null)
-                Text("新增")
-            }
-        }
-        OutlinedTextField(
-            value = searchTerm,
-            onValueChange = { searchTerm = it },
-            label = { Text("搜索") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp),
-        )
-        if (filteredPhrases.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxWidth().height(160.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    if (phrases.isEmpty()) "还没有快捷短语" else "没有匹配的快捷短语",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        } else {
-            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 480.dp)) {
-                itemsIndexed(filteredPhrases, key = { _, phrase -> phrase.id }) { _, phrase ->
-                    val sourceIndex = phrases.indexOfFirst { it.id == phrase.id }
-                    QuickPhraseRow(
-                        phrase = phrase,
-                        canMoveUp = sourceIndex > 0,
-                        canMoveDown = sourceIndex in 0 until phrases.lastIndex,
-                        onSelect = { onSelect(phrase) },
-                        onEdit = {
-                            editedPhrase = phrase
+    if (!showEditor && deletedPhrase == null) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("管理快捷短语", modifier = Modifier.weight(1f))
+                    IconButton(
+                        onClick = {
+                            editedPhrase = null
                             showEditor = true
                         },
-                        onDelete = { deletedPhrase = phrase },
-                        onMoveUp = { onMoveUp(phrase.id) },
-                        onMoveDown = { onMoveDown(phrase.id) },
-                    )
+                    ) {
+                        Icon(Icons.Rounded.Add, contentDescription = "新增快捷短语")
+                    }
                 }
-            }
-        }
-        Spacer(Modifier.height(24.dp))
+            },
+            text = {
+                if (phrases.isEmpty()) {
+                    Text(
+                        text = "还没有快捷短语",
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 400.dp)) {
+                        itemsIndexed(phrases, key = { _, phrase -> phrase.id }) { index, phrase ->
+                            QuickPhraseManageRow(
+                                phrase = phrase,
+                                canMoveUp = index > 0,
+                                canMoveDown = index < phrases.lastIndex,
+                                onEdit = {
+                                    editedPhrase = phrase
+                                    showEditor = true
+                                },
+                                onDelete = { deletedPhrase = phrase },
+                                onMoveUp = { onMoveUp(phrase.id) },
+                                onMoveDown = { onMoveDown(phrase.id) },
+                            )
+                            if (index < phrases.lastIndex) HorizontalDivider()
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = onDismiss) { Text("完成") }
+            },
+        )
     }
 
     if (showEditor) {
         QuickPhraseEditorDialog(
             phrase = editedPhrase,
             onDismiss = { showEditor = false },
-            onSave = { name, content ->
+            onSave = { content ->
                 val phrase = editedPhrase
-                if (phrase == null) onAdd(name, content) else onUpdate(phrase.id, name, content)
+                if (phrase == null) onAdd(content) else onUpdate(phrase.id, content)
                 showEditor = false
             },
         )
     }
+
     deletedPhrase?.let { phrase ->
         AlertDialog(
             onDismissRequest = { deletedPhrase = null },
             title = { Text("删除快捷短语？") },
-            text = { Text("将删除“${phrase.name}”") },
+            text = {
+                Text(
+                    text = phrase.content,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -170,86 +204,75 @@ fun QuickPhraseSheet(
 }
 
 @Composable
-private fun QuickPhraseRow(
+private fun QuickPhraseManageRow(
     phrase: QuickPhrase,
     canMoveUp: Boolean,
     canMoveDown: Boolean,
-    onSelect: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
-    Surface(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onSelect),
-        color = MaterialTheme.colorScheme.surface,
-    ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 24.dp, top = 12.dp, bottom = 12.dp, end = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(phrase.name, style = MaterialTheme.typography.titleSmall)
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        phrase.content,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
+    Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onEdit)
+                .padding(start = 12.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = phrase.content,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Column {
+                IconButton(onClick = { menuExpanded = true }) {
+                    Icon(Icons.Rounded.MoreVert, contentDescription = "管理快捷短语")
+                }
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("编辑") },
+                        leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onEdit()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("上移") },
+                        leadingIcon = { Icon(Icons.Rounded.ArrowUpward, contentDescription = null) },
+                        enabled = canMoveUp,
+                        onClick = {
+                            menuExpanded = false
+                            onMoveUp()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("下移") },
+                        leadingIcon = { Icon(Icons.Rounded.ArrowDownward, contentDescription = null) },
+                        enabled = canMoveDown,
+                        onClick = {
+                            menuExpanded = false
+                            onMoveDown()
+                        },
+                    )
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("删除") },
+                        leadingIcon = { Icon(Icons.Rounded.Delete, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onDelete()
+                        },
                     )
                 }
-                Box {
-                    IconButton(onClick = { menuExpanded = true }) {
-                        Icon(Icons.Rounded.MoreVert, contentDescription = "管理${phrase.name}")
-                    }
-                    DropdownMenu(
-                        expanded = menuExpanded,
-                        onDismissRequest = { menuExpanded = false },
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("编辑") },
-                            leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
-                            onClick = {
-                                menuExpanded = false
-                                onEdit()
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("上移") },
-                            leadingIcon = { Icon(Icons.Rounded.ArrowUpward, contentDescription = null) },
-                            enabled = canMoveUp,
-                            onClick = {
-                                menuExpanded = false
-                                onMoveUp()
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("下移") },
-                            leadingIcon = { Icon(Icons.Rounded.ArrowDownward, contentDescription = null) },
-                            enabled = canMoveDown,
-                            onClick = {
-                                menuExpanded = false
-                                onMoveDown()
-                            },
-                        )
-                        HorizontalDivider()
-                        DropdownMenuItem(
-                            text = { Text("删除") },
-                            leadingIcon = { Icon(Icons.Rounded.Delete, contentDescription = null) },
-                            onClick = {
-                                menuExpanded = false
-                                onDelete()
-                            },
-                        )
-                    }
-                }
             }
-            HorizontalDivider()
         }
     }
 }
@@ -258,22 +281,14 @@ private fun QuickPhraseRow(
 private fun QuickPhraseEditorDialog(
     phrase: QuickPhrase?,
     onDismiss: () -> Unit,
-    onSave: (String, String) -> Unit,
+    onSave: (String) -> Unit,
 ) {
-    var name by rememberSaveable(phrase?.id) { mutableStateOf(phrase?.name.orEmpty()) }
     var content by rememberSaveable(phrase?.id) { mutableStateOf(phrase?.content.orEmpty()) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (phrase == null) "新增快捷短语" else "编辑快捷短语") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("名称") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
                 OutlinedTextField(
                     value = content,
                     onValueChange = { content = it },
@@ -286,8 +301,8 @@ private fun QuickPhraseEditorDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { onSave(name.trim(), content) },
-                enabled = name.isNotBlank() && content.isNotBlank(),
+                onClick = { onSave(content) },
+                enabled = content.isNotBlank(),
             ) { Text("保存") }
         },
         dismissButton = {

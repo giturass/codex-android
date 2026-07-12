@@ -4,7 +4,6 @@ import kotlinx.coroutines.flow.Flow
 
 data class QuickPhrase(
     val id: String,
-    val name: String,
     val content: String,
     val sortOrder: Int,
 )
@@ -12,9 +11,9 @@ data class QuickPhrase(
 interface QuickPhraseRepository {
     val phrases: Flow<List<QuickPhrase>>
 
-    suspend fun add(name: String, content: String)
+    suspend fun add(content: String)
 
-    suspend fun update(id: String, name: String, content: String)
+    suspend fun update(id: String, content: String)
 
     suspend fun delete(id: String)
 

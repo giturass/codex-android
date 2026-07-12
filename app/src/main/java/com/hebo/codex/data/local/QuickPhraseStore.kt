@@ -27,26 +27,23 @@ class QuickPhraseStore(
             .map(StoredQuickPhrase::toDomain)
     }
 
-    override suspend fun add(name: String, content: String) {
-        require(name.isNotBlank()) { "快捷短语名称不能为空" }
+    override suspend fun add(content: String) {
         require(content.isNotBlank()) { "快捷短语内容不能为空" }
         update { phrases ->
             phrases + StoredQuickPhrase(
                 id = UUID.randomUUID().toString(),
-                name = name.trim(),
                 content = content,
                 sortOrder = phrases.size,
             )
         }
     }
 
-    override suspend fun update(id: String, name: String, content: String) {
-        require(name.isNotBlank()) { "快捷短语名称不能为空" }
+    override suspend fun update(id: String, content: String) {
         require(content.isNotBlank()) { "快捷短语内容不能为空" }
         update { phrases ->
             require(phrases.any { it.id == id }) { "快捷短语不存在" }
             phrases.map { phrase ->
-                if (phrase.id == id) phrase.copy(name = name.trim(), content = content) else phrase
+                if (phrase.id == id) phrase.copy(content = content) else phrase
             }
         }
     }
@@ -96,13 +93,11 @@ private data class StoredQuickPhrases(
 @Serializable
 private data class StoredQuickPhrase(
     val id: String,
-    val name: String,
     val content: String,
     val sortOrder: Int,
 ) {
     fun toDomain(): QuickPhrase = QuickPhrase(
         id = id,
-        name = name,
         content = content,
         sortOrder = sortOrder,
     )
