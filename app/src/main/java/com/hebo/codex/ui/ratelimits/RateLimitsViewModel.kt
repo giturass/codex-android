@@ -6,11 +6,13 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.lifecycle.viewModelScope
 import com.hebo.codex.domain.AccountRateLimits
+import com.hebo.codex.domain.AccountUsage
 import com.hebo.codex.domain.CodexRepository
 import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.util.runSuspendCatching
 import com.hebo.codex.util.toUserFacingError
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -19,9 +21,11 @@ import java.time.Instant
 
 data class RateLimitsUiState(
     val rateLimits: AccountRateLimits? = null,
+    val usage: AccountUsage? = null,
     val updatedAt: Long? = null,
     val isRefreshing: Boolean = false,
     val errorMessage: UserFacingError? = null,
+    val usageErrorMessage: UserFacingError? = null,
 )
 
 class RateLimitsViewModel(
@@ -55,31 +59,27 @@ class RateLimitsViewModel(
             current + (serverId to current.getOrDefault(serverId, RateLimitsUiState()).copy(
                 isRefreshing = true,
                 errorMessage = null,
+                usageErrorMessage = null,
             ))
         }
         refreshJobs[serverId] = viewModelScope.launch {
-            runSuspendCatching { repository.rateLimits(serverId) }
-                .onSuccess { rateLimits ->
-                    if (refreshGenerations[serverId] == generation) {
-                        mutableState.update { current ->
-                            current + (serverId to RateLimitsUiState(
-                                rateLimits = rateLimits,
-                                updatedAt = Instant.now().epochSecond,
-                            ))
-                        }
-                    }
+            val rateLimitsResult = async { runSuspendCatching { repository.rateLimits(serverId) } }
+            val usageResult = async { runSuspendCatching { repository.accountUsage(serverId) } }
+            val rateLimits = rateLimitsResult.await()
+            val usage = usageResult.await()
+            if (refreshGenerations[serverId] == generation) {
+                mutableState.update { current ->
+                    val previous = current.getOrDefault(serverId, RateLimitsUiState())
+                    current + (serverId to previous.copy(
+                        rateLimits = rateLimits.getOrElse { previous.rateLimits },
+                        usage = usage.getOrElse { previous.usage },
+                        updatedAt = if (rateLimits.isSuccess) Instant.now().epochSecond else previous.updatedAt,
+                        isRefreshing = false,
+                        errorMessage = rateLimits.exceptionOrNull()?.toUserFacingError("无法刷新额度"),
+                        usageErrorMessage = usage.exceptionOrNull()?.toUserFacingError("无法刷新 Token 用量"),
+                    ))
                 }
-                .onFailure { error ->
-                    if (refreshGenerations[serverId] == generation) {
-                        mutableState.update { current ->
-                            val previous = current.getOrDefault(serverId, RateLimitsUiState())
-                            current + (serverId to previous.copy(
-                                isRefreshing = false,
-                                errorMessage = error.toUserFacingError("无法刷新额度"),
-                            ))
-                        }
-                    }
-                }
+            }
             if (refreshGenerations[serverId] == generation) refreshJobs.remove(serverId)
         }
     }

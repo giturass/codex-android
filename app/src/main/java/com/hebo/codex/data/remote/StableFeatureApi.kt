@@ -3,6 +3,7 @@ package com.hebo.codex.data.remote
 import com.hebo.codex.domain.AccountRateLimits
 import com.hebo.codex.domain.AccountOverview
 import com.hebo.codex.domain.AccountType
+import com.hebo.codex.domain.AccountUsage
 import com.hebo.codex.domain.FeatureAction
 import com.hebo.codex.domain.FeatureActionResult
 import com.hebo.codex.domain.FeatureArea
@@ -123,6 +124,19 @@ class StableFeatureApi(
 
         return AccountFeatureMapper.rateLimits(
             api.request(StableRpcMethod.ACCOUNT_RATE_LIMITS).jsonObject,
+        )
+    }
+
+    suspend fun accountUsage(): AccountUsage? {
+        val response = api.request(
+            StableRpcMethod.ACCOUNT_READ,
+            buildJsonObject { put("refreshToken", false) },
+        ).jsonObject
+        val account = response["account"] as? JsonObject ?: return null
+        if (account.requiredString("type").toAccountType() != AccountType.CHATGPT) return null
+
+        return AccountFeatureMapper.usage(
+            api.request(StableRpcMethod.ACCOUNT_USAGE).jsonObject,
         )
     }
 

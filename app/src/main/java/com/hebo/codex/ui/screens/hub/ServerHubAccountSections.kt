@@ -57,6 +57,8 @@ import com.hebo.codex.domain.RateLimitResetCredits
 import com.hebo.codex.domain.RateLimitResetCreditStatus
 import com.hebo.codex.domain.ServerConfiguration
 import com.hebo.codex.domain.SpendControlLimit
+import com.hebo.codex.ui.components.DAILY_TOKEN_USAGE_DAY_COUNT
+import com.hebo.codex.ui.components.DailyTokenUsageChart
 import com.hebo.codex.ui.components.relativeTime
 import com.hebo.codex.ui.displayLabelRes
 import com.hebo.codex.ui.formatCompactCount

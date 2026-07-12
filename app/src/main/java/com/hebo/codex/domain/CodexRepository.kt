@@ -551,6 +551,8 @@ class CodexRepository(
 
     suspend fun rateLimits(serverId: String): AccountRateLimits? = StableFeatureApi(api(serverId)).rateLimits()
 
+    suspend fun accountUsage(serverId: String): AccountUsage? = StableFeatureApi(api(serverId)).accountUsage()
+
     suspend fun loginWithApiKey(serverId: String, apiKey: String): LoginChallenge =
         StableFeatureApi(api(serverId)).loginWithApiKey(apiKey)
 

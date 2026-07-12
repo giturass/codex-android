@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.CircularProgressIndicator
@@ -56,6 +58,8 @@ import androidx.compose.ui.window.PopupProperties
 import com.hebo.codex.domain.AccountRateLimit
 import com.hebo.codex.domain.AccountRateLimits
 import com.hebo.codex.domain.RateLimitWindow
+import com.hebo.codex.ui.components.CompactDailyTokenUsageChart
+import com.hebo.codex.ui.components.DAILY_TOKEN_USAGE_DAY_COUNT
 import com.hebo.codex.ui.components.relativeTime
 import com.hebo.codex.ui.formatDateTime
 import com.hebo.codex.ui.formatPercent
@@ -68,7 +72,6 @@ import kotlin.math.roundToInt
 private val IndicatorTouchSize = 48.dp
 private val IndicatorVisualSize = 36.dp
 private val RingStrokeWidth = 3.dp
-private val InnerRingInset = 7.dp
 private val DetailsPopupWidth = 300.dp
 private val DetailsPopupGap = 4.dp
 private val DetailsPopupWindowMargin = 8.dp
@@ -98,10 +101,7 @@ fun RateLimitIndicator(
     val weeklyColor = weeklyRemaining?.let {
         rateLimitColor(it, MaterialTheme.statusColors.info)
     }
-    val description = buildString {
-        append("5 小时额度剩余 ${formatPercent(fiveHourRemaining)}")
-        weeklyRemaining?.let { append("，周额度剩余 ${formatPercent(it)}") }
-    }
+    val description = "5 小时额度剩余 ${formatPercent(fiveHourRemaining)}"
 
     Box {
         IconButton(
@@ -110,11 +110,9 @@ fun RateLimitIndicator(
                 .size(IndicatorTouchSize)
                 .semantics { contentDescription = description },
         ) {
-            RateLimitRings(
+            RateLimitRing(
                 fiveHourRemaining = fiveHourRemaining,
-                weeklyRemaining = weeklyRemaining,
                 fiveHourColor = fiveHourColor,
-                weeklyColor = weeklyColor,
             )
         }
 
@@ -132,11 +130,9 @@ fun RateLimitIndicator(
 }
 
 @Composable
-private fun RateLimitRings(
+private fun RateLimitRing(
     fiveHourRemaining: Double,
-    weeklyRemaining: Double?,
     fiveHourColor: Color,
-    weeklyColor: Color?,
 ) {
     val trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
     Box(
@@ -153,22 +149,13 @@ private fun RateLimitRings(
                 inset = outerInset,
                 strokeWidth = strokeWidth,
             )
-            if (weeklyRemaining != null && weeklyColor != null) {
-                drawRing(
-                    progress = weeklyRemaining / 100.0,
-                    color = weeklyColor,
-                    trackColor = trackColor,
-                    inset = InnerRingInset.toPx(),
-                    strokeWidth = strokeWidth,
-                )
-            }
         }
         Text(
             text = fiveHourRemaining.roundToInt().toString(),
             modifier = Modifier.clearAndSetSemantics {},
             color = MaterialTheme.colorScheme.onSurface,
-            fontSize = 8.sp,
-            lineHeight = 8.sp,
+            fontSize = 10.sp,
+            lineHeight = 10.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
         )
@@ -236,25 +223,18 @@ private fun RateLimitDetailsPopup(
             shadowElevation = 6.dp,
         ) {
             Column(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("额度", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.weight(1f))
-                    IconButton(onClick = onRefresh, enabled = !state.isRefreshing) {
-                        if (state.isRefreshing) {
-                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(Icons.Rounded.Refresh, contentDescription = "刷新额度")
-                        }
-                    }
-                }
                 RateLimitWindowDetails(
-                    label = "5 小时限额",
+                    label = "5 小时",
                     window = windows.fiveHour,
                     color = fiveHourColor,
                     nowEpochSeconds = nowEpochSeconds,
+                    onRefresh = onRefresh,
+                    isRefreshing = state.isRefreshing,
                 )
                 windows.weekly?.let { weekly ->
                     HorizontalDivider()
@@ -265,9 +245,11 @@ private fun RateLimitDetailsPopup(
                         nowEpochSeconds = nowEpochSeconds,
                     )
                 }
+                HorizontalDivider()
+                TokenUsageDetails(state)
                 state.errorMessage?.let { error ->
                     Text(
-                        text = "刷新失败：${error.summary}",
+                        text = "额度刷新失败：${error.summary}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -334,14 +316,25 @@ private fun RateLimitWindowDetails(
     window: RateLimitWindow,
     color: Color,
     nowEpochSeconds: Long,
+    onRefresh: (() -> Unit)? = null,
+    isRefreshing: Boolean = false,
 ) {
     val remaining = window.remainingPercent()
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(8.dp).background(color, CircleShape))
             Text(label, modifier = Modifier.padding(start = 8.dp), style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.weight(1f))
             Text("${formatPercent(remaining)} 剩余", style = MaterialTheme.typography.labelLarge)
+            onRefresh?.let {
+                IconButton(onClick = it, enabled = !isRefreshing) {
+                    if (isRefreshing) {
+                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Rounded.Refresh, contentDescription = "刷新额度与 Token 用量")
+                    }
+                }
+            }
         }
         LinearProgressIndicator(
             progress = { (remaining / 100.0).toFloat() },
@@ -358,6 +351,50 @@ private fun RateLimitWindowDetails(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+@Composable
+private fun TokenUsageDetails(state: RateLimitsUiState) {
+    val buckets = state.usage?.dailyBuckets
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Token 用量", style = MaterialTheme.typography.labelLarge)
+            Text(
+                "最近 $DAILY_TOKEN_USAGE_DAY_COUNT 天",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        when {
+            buckets == null && state.isRefreshing -> Text(
+                "正在加载每日用量",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            buckets == null -> Text(
+                "服务端暂未提供每日用量明细",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            buckets.isEmpty() -> Text(
+                "暂无每日用量记录",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            else -> CompactDailyTokenUsageChart(buckets)
+        }
+        state.usageErrorMessage?.let { error ->
+            Text(
+                text = "Token 用量刷新失败：${error.summary}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
     }
 }
 

@@ -1,4 +1,4 @@
-package com.hebo.codex.ui.screens.hub
+package com.hebo.codex.ui.components
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -34,6 +34,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.hebo.codex.domain.DailyTokenUsage
 import com.hebo.codex.ui.formatCompactCount
@@ -106,10 +107,45 @@ internal fun DailyTokenUsageChart(
 }
 
 @Composable
+internal fun CompactDailyTokenUsageChart(
+    buckets: List<DailyTokenUsage>,
+    endDate: LocalDate = LocalDate.now(),
+) {
+    val values = remember(buckets, endDate) {
+        normalizeDailyTokenUsage(buckets, endDate, DAILY_TOKEN_USAGE_DAY_COUNT)
+    }
+    var selectedIndex by rememberSaveable(
+        values.first().date.toEpochDay(),
+        values.last().date.toEpochDay(),
+    ) {
+        mutableIntStateOf(values.indexOfLast { it.tokens > 0 }.takeIf { it >= 0 } ?: values.lastIndex)
+    }
+    val selected = values[selectedIndex.coerceIn(values.indices)]
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(
+                formatDate(selected.date),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text("${formatCompactCount(selected.tokens)} Token", style = MaterialTheme.typography.labelLarge)
+        }
+        DailyTokenUsagePlot(
+            values = values,
+            selectedIndex = selectedIndex,
+            onSelected = { selectedIndex = it },
+            height = 92.dp,
+        )
+    }
+}
+
+@Composable
 private fun DailyTokenUsagePlot(
     values: List<DailyTokenUsage>,
     selectedIndex: Int,
     onSelected: (Int) -> Unit,
+    height: Dp = 124.dp,
 ) {
     val maxTokens = values.maxOf(DailyTokenUsage::tokens)
     val axisMaximum = dailyTokenUsageAxisMaximum(maxTokens)
@@ -120,11 +156,11 @@ private fun DailyTokenUsagePlot(
     val selected = values[selectedIndex.coerceIn(values.indices)]
     val chartDescription = remember(selected, values) {
         "最近 $DAILY_TOKEN_USAGE_DAY_COUNT 天每日 Token 用量图表，当前选择${formatDate(selected.date)}，" +
-            "${formatCompactCount(selected.tokens)} Token，可展开查看每日明细"
+            "${formatCompactCount(selected.tokens)} Token，可点击或滑动查看每日用量"
     }
 
     Row(modifier = Modifier.fillMaxWidth()) {
-        Box(modifier = Modifier.width(44.dp).height(124.dp)) {
+        Box(modifier = Modifier.width(44.dp).height(height)) {
             if (axisMaximum > 0) {
                 Text(
                     formatCompactCount(axisMaximum),
@@ -153,7 +189,7 @@ private fun DailyTokenUsagePlot(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(124.dp)
+                    .height(height)
                     .pointerInput(values) {
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false)

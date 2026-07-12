@@ -1,4 +1,4 @@
-package com.hebo.codex.ui.screens.hub
+package com.hebo.codex.ui.components
 
 import com.hebo.codex.domain.DailyTokenUsage
 import java.time.LocalDate
