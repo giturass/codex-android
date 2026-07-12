@@ -44,6 +44,55 @@ class DrawerDraftsTest {
         assertTrue(hasNewDraft(setOf(existing.key), listOf(existing, added)))
     }
 
+    @Test
+    fun draftSelectionMatchesTargetTypeAndServer() {
+        val newTaskDraft = draft(DraftTarget.NewTask("draft-1"))
+        val threadDraft = draft(DraftTarget.Thread("thread-1"))
+
+        assertTrue(
+            isDraftSelected(
+                newTaskDraft,
+                DrawerActiveTarget.NewTaskDraft("server-1", "draft-1"),
+            ),
+        )
+        assertTrue(
+            isDraftSelected(
+                threadDraft,
+                DrawerActiveTarget.Thread("server-1", "thread-1"),
+            ),
+        )
+        assertFalse(
+            isDraftSelected(
+                threadDraft,
+                DrawerActiveTarget.Thread("server-2", "thread-1"),
+            ),
+        )
+        assertFalse(
+            isDraftSelected(
+                newTaskDraft,
+                DrawerActiveTarget.Thread("server-1", "draft-1"),
+            ),
+        )
+    }
+
+    @Test
+    fun threadSelectionMatchesThreadTargetExactly() {
+        assertTrue(
+            isThreadSelected(
+                "server-1",
+                "thread-1",
+                DrawerActiveTarget.Thread("server-1", "thread-1"),
+            ),
+        )
+        assertFalse(
+            isThreadSelected(
+                "server-1",
+                "thread-1",
+                DrawerActiveTarget.NewTaskDraft("server-1", "thread-1"),
+            ),
+        )
+    }
+
     private fun draft(target: DraftTarget) = DraftSummary(
         key = DraftKey("server-1", target),
         preview = "待处理内容",

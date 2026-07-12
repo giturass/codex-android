@@ -39,6 +39,7 @@ import com.hebo.codex.domain.DraftTarget
 import com.hebo.codex.domain.QuickPhraseRepository
 import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.ui.components.CodexNavigationDrawer
+import com.hebo.codex.ui.components.DrawerActiveTarget
 import com.hebo.codex.ui.components.UserFacingErrorDialog
 import com.hebo.codex.ui.ratelimits.RateLimitsUiState
 import com.hebo.codex.ui.ratelimits.RateLimitsViewModel
@@ -103,7 +104,23 @@ fun CodexApp(
     val detailsLabel = stringResource(R.string.common_details)
     val scope = rememberCoroutineScope()
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
-    val activeThreadId = currentBackStackEntry?.arguments?.getString("threadId")
+    val activeDrawerTarget = currentBackStackEntry?.arguments?.let { arguments ->
+        val serverId = arguments.getString("serverId") ?: homeState.activeServerId
+        when {
+            serverId == null -> null
+            arguments.getString("threadId") != null -> DrawerActiveTarget.Thread(
+                serverId = serverId,
+                threadId = requireNotNull(arguments.getString("threadId")),
+            )
+
+            arguments.getString("draftId") != null -> DrawerActiveTarget.NewTaskDraft(
+                serverId = serverId,
+                draftId = requireNotNull(arguments.getString("draftId")),
+            )
+
+            else -> null
+        }
+    }
 
     suspend fun showUserFacingError(error: UserFacingError) {
         val result = snackbarHostState.showSnackbar(
@@ -213,7 +230,7 @@ fun CodexApp(
                 isRefreshing = homeState.isRefreshing,
                 isLoadingMore = homeState.isLoadingMore,
                 hasMore = homeState.nextCursor != null,
-                activeThreadId = activeThreadId,
+                activeTarget = activeDrawerTarget,
                 isPermanent = isPermanent,
                 onNewConversation = {
                     closeDrawer()

@@ -7,7 +7,6 @@ package com.hebo.codex.ui.components
 
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -120,7 +119,7 @@ fun CodexNavigationDrawer(
     isRefreshing: Boolean,
     isLoadingMore: Boolean,
     hasMore: Boolean,
-    activeThreadId: String?,
+    activeTarget: DrawerActiveTarget?,
     isPermanent: Boolean,
     onNewConversation: () -> Unit,
     onOpenConversation: (String) -> Unit,
@@ -161,7 +160,7 @@ fun CodexNavigationDrawer(
             isRefreshing = isRefreshing,
             isLoadingMore = isLoadingMore,
             hasMore = hasMore,
-            activeThreadId = activeThreadId,
+            activeTarget = activeTarget,
             onNewConversation = onNewConversation,
             onOpenConversation = onOpenConversation,
             onOpenDraft = onOpenDraft,
@@ -205,6 +204,27 @@ private enum class DrawerPage {
     SEARCH,
 }
 
+sealed interface DrawerActiveTarget {
+    val serverId: String
+
+    data class Thread(
+        override val serverId: String,
+        val threadId: String,
+    ) : DrawerActiveTarget
+
+    data class NewTaskDraft(
+        override val serverId: String,
+        val draftId: String,
+    ) : DrawerActiveTarget
+}
+
+private data class ThreadActionSelection(
+    val threadId: String,
+    val title: String,
+    val archived: Boolean,
+    val draftKey: DraftKey? = null,
+)
+
 @Composable
 private fun ColumnScope.DrawerContent(
     servers: List<ServerProfile>,
@@ -221,7 +241,7 @@ private fun ColumnScope.DrawerContent(
     isRefreshing: Boolean,
     isLoadingMore: Boolean,
     hasMore: Boolean,
-    activeThreadId: String?,
+    activeTarget: DrawerActiveTarget?,
     onNewConversation: () -> Unit,
     onOpenConversation: (String) -> Unit,
     onOpenDraft: (DraftSummary) -> Unit,
@@ -247,7 +267,7 @@ private fun ColumnScope.DrawerContent(
     var groupByProject by rememberSaveable { mutableStateOf(false) }
     var expandedProjects by remember(activeServer?.id) { mutableStateOf(emptySet<String>()) }
     var expansionInitialized by remember(activeServer?.id) { mutableStateOf(false) }
-    var selectedThread by remember(activeServer?.id) { mutableStateOf<ThreadSummary?>(null) }
+    var selectedThread by remember(activeServer?.id) { mutableStateOf<ThreadActionSelection?>(null) }
     var selectedDraft by remember(activeServer?.id) { mutableStateOf<DraftSummary?>(null) }
     val recentListState = key(activeServer?.id, DrawerPage.RECENT) { rememberLazyListState() }
     val searchListState = key(activeServer?.id, DrawerPage.SEARCH) { rememberLazyListState() }
@@ -283,6 +303,10 @@ private fun ColumnScope.DrawerContent(
         }
         previousDraftKeys = currentDraftKeys
     }
+
+    val activeThreadId = (activeTarget as? DrawerActiveTarget.Thread)
+        ?.takeIf { it.serverId == activeServer?.id }
+        ?.threadId
 
     LaunchedEffect(projects, activeThreadId) {
         val activeProject = projects.firstOrNull { project ->
@@ -327,15 +351,28 @@ private fun ColumnScope.DrawerContent(
             val visibleDrafts = drafts
             val visibleRecentThreads = threadsWithoutDrafts(recentThreads, visibleDrafts)
             val visibleProjects = projectsWithoutDrafts(projects, visibleDrafts)
+            val recentThreadsById = recentThreads.associateBy(ThreadSummary::id)
             if (activeServer != null && drawerPage == DrawerPage.RECENT) {
                 if (visibleDrafts.isNotEmpty()) {
                     item("drafts-title") { DrawerSectionTitle("草稿") }
                     items(visibleDrafts, key = { it.drawerKey }) { draft ->
                         DrawerDraftItem(
                             draft = draft,
+                            thread = (draft.key.target as? DraftTarget.Thread)?.id?.let(recentThreadsById::get),
+                            attention = (draft.key.target as? DraftTarget.Thread)?.id?.let(threadAttention::get),
+                            selected = isDraftSelected(draft, activeTarget),
                             onClick = {
                                 leaveTransientPage()
                                 onOpenDraft(draft)
+                            },
+                            onThreadMenu = {
+                                val target = draft.key.target as DraftTarget.Thread
+                                selectedThread = ThreadActionSelection(
+                                    threadId = target.id,
+                                    title = draft.contextTitle,
+                                    archived = false,
+                                    draftKey = draft.key,
+                                )
                             },
                             onDelete = { selectedDraft = draft },
                         )
@@ -383,13 +420,19 @@ private fun ColumnScope.DrawerContent(
                             DrawerThreadItem(
                                 thread = thread,
                                 attention = threadAttention[thread.id],
-                                selected = thread.id == activeThreadId,
+                                selected = isThreadSelected(activeServer.id, thread.id, activeTarget),
                                 showProject = true,
                                 onClick = {
                                     leaveTransientPage()
                                     onOpenConversation(thread.id)
                                 },
-                                onMenu = { selectedThread = thread },
+                                onMenu = {
+                                    selectedThread = ThreadActionSelection(
+                                        threadId = thread.id,
+                                        title = thread.title,
+                                        archived = showArchived,
+                                    )
+                                },
                             )
                         }
                     }
@@ -426,13 +469,19 @@ private fun ColumnScope.DrawerContent(
                                     DrawerThreadItem(
                                         thread = thread,
                                         attention = threadAttention[thread.id],
-                                        selected = thread.id == activeThreadId,
+                                        selected = isThreadSelected(activeServer.id, thread.id, activeTarget),
                                         showProject = false,
                                         onClick = {
                                             leaveTransientPage()
                                             onOpenConversation(thread.id)
                                         },
-                                        onMenu = { selectedThread = thread },
+                                        onMenu = {
+                                            selectedThread = ThreadActionSelection(
+                                                threadId = thread.id,
+                                                title = thread.title,
+                                                archived = false,
+                                            )
+                                        },
                                     )
                                 }
                             }
@@ -450,10 +499,16 @@ private fun ColumnScope.DrawerContent(
                         DrawerThreadItem(
                             thread = thread,
                             attention = threadAttention[thread.id],
-                            selected = thread.id == activeThreadId,
+                            selected = isThreadSelected(activeServer.id, thread.id, activeTarget),
                             showProject = true,
                             onClick = { onOpenConversation(thread.id) },
-                            onMenu = { selectedThread = thread },
+                            onMenu = {
+                                selectedThread = ThreadActionSelection(
+                                    threadId = thread.id,
+                                    title = thread.title,
+                                    archived = false,
+                                )
+                            },
                         )
                     }
                 }
@@ -526,24 +581,31 @@ private fun ColumnScope.DrawerContent(
 
     selectedThread?.let { thread ->
         ThreadActionsDialog(
-            thread = thread,
-            archived = drawerPage == DrawerPage.SEARCH && showArchived,
+            threadId = thread.threadId,
+            title = thread.title,
+            archived = thread.archived,
             onDismiss = { selectedThread = null },
             onRename = {
-                onRenameConversation(thread.id, it)
+                onRenameConversation(thread.threadId, it)
                 selectedThread = null
             },
             onFork = {
-                onForkConversation(thread.id)
+                onForkConversation(thread.threadId)
                 selectedThread = null
             },
             onArchive = {
-                onArchiveConversation(thread.id)
+                onArchiveConversation(thread.threadId)
                 selectedThread = null
             },
             onDelete = {
-                onDeleteConversation(thread.id)
+                onDeleteConversation(thread.threadId)
                 selectedThread = null
+            },
+            onDiscardDraft = thread.draftKey?.let { draftKey ->
+                {
+                    onDeleteDraft(draftKey)
+                    selectedThread = null
+                }
             },
         )
     }
@@ -906,6 +968,23 @@ internal fun projectsWithoutDrafts(
 internal fun hasNewDraft(previousKeys: Set<DraftKey>, drafts: List<DraftSummary>): Boolean =
     drafts.any { it.key !in previousKeys }
 
+internal fun isThreadSelected(
+    serverId: String,
+    threadId: String,
+    activeTarget: DrawerActiveTarget?,
+): Boolean = activeTarget is DrawerActiveTarget.Thread &&
+    activeTarget.serverId == serverId &&
+    activeTarget.threadId == threadId
+
+internal fun isDraftSelected(draft: DraftSummary, activeTarget: DrawerActiveTarget?): Boolean =
+    activeTarget?.serverId == draft.key.serverId && when (val target = draft.key.target) {
+        is DraftTarget.NewTask -> activeTarget is DrawerActiveTarget.NewTaskDraft &&
+            activeTarget.draftId == target.id
+
+        is DraftTarget.Thread -> activeTarget is DrawerActiveTarget.Thread &&
+            activeTarget.threadId == target.id
+    }
+
 private val DraftSummary.drawerKey: String
     get() = when (val target = key.target) {
         is DraftTarget.NewTask -> "draft:${key.serverId}:new:${target.id}"
@@ -915,53 +994,41 @@ private val DraftSummary.drawerKey: String
 @Composable
 private fun DrawerDraftItem(
     draft: DraftSummary,
+    thread: ThreadSummary?,
+    attention: ThreadAttention?,
+    selected: Boolean,
     onClick: () -> Unit,
+    onThreadMenu: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 4.dp, end = 4.dp, bottom = 4.dp)
-            .combinedClickable(
-                onClick = onClick,
-                onLongClickLabel = "删除草稿",
-                onLongClick = onDelete,
-            ),
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+    val isThreadDraft = draft.key.target is DraftTarget.Thread
+    val effectiveAttention = attention ?: thread?.let { effectiveThreadAttention(it, null) }
+    DrawerConversationItem(
+        title = draft.preview,
+        subtitle = buildList {
+            add(draft.contextTitle)
+            draft.cwd.takeIf(String::isNotBlank)?.let { add(projectName(it)) }
+            add(relativeTime(draft.updatedAtMillis / 1_000))
+        }.joinToString(" · "),
+        selected = selected,
+        nested = false,
+        onClick = onClick,
+        onLongClickLabel = if (isThreadDraft) "会话操作" else "删除草稿",
+        onLongClick = if (isThreadDraft) onThreadMenu else onDelete,
+        leadingContent = {
             Icon(
                 Icons.Rounded.EditNote,
                 contentDescription = null,
                 modifier = Modifier.size(22.dp),
                 tint = MaterialTheme.colorScheme.primary,
             )
-            Column(Modifier.weight(1f).padding(start = 10.dp)) {
-                Text(
-                    draft.preview,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Text(
-                    text = buildList {
-                        add(draft.contextTitle)
-                        draft.cwd.takeIf(String::isNotBlank)?.let { add(projectName(it)) }
-                        add(relativeTime(draft.updatedAtMillis / 1_000))
-                    }.joinToString(" · "),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.76f),
-                )
-            }
-        }
-    }
+        },
+        trailingContent = if (isThreadDraft) {
+            { ThreadStatusIndicator(effectiveAttention) }
+        } else {
+            null
+        },
+    )
 }
 
 @Composable
@@ -974,49 +1041,22 @@ private fun DrawerThreadItem(
     onMenu: () -> Unit,
 ) {
     val effectiveAttention = effectiveThreadAttention(thread, attention)
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = if (showProject) 4.dp else 34.dp, end = 4.dp, bottom = 2.dp)
-            .combinedClickable(
-                onClick = onClick,
-                onLongClickLabel = "会话操作",
-                onLongClick = onMenu,
-            ),
-        shape = MaterialTheme.shapes.medium,
-        color = if (selected) MaterialTheme.colorScheme.secondaryContainer
-        else MaterialTheme.colorScheme.surface,
-        contentColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
-        else MaterialTheme.colorScheme.onSurface,
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    thread.title,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Text(
-                    text = buildString {
-                        if (showProject) {
-                            append(projectName(thread.cwd))
-                            append(" · ")
-                        }
-                        append(relativeTime(thread.recencyAt ?: thread.updatedAt))
-                    },
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+    DrawerConversationItem(
+        title = thread.title,
+        subtitle = buildString {
+            if (showProject) {
+                append(projectName(thread.cwd))
+                append(" · ")
             }
-            ThreadStatusIndicator(effectiveAttention)
-        }
-    }
+            append(relativeTime(thread.recencyAt ?: thread.updatedAt))
+        },
+        selected = selected,
+        nested = !showProject,
+        onClick = onClick,
+        onLongClickLabel = "会话操作",
+        onLongClick = onMenu,
+        trailingContent = { ThreadStatusIndicator(effectiveAttention) },
+    )
 }
 
 internal fun effectiveThreadAttention(
@@ -1119,22 +1159,39 @@ private fun DrawerEmptyMessage(text: String) {
 
 @Composable
 private fun ThreadActionsDialog(
-    thread: ThreadSummary,
+    threadId: String,
+    title: String,
     archived: Boolean,
     onDismiss: () -> Unit,
     onRename: (String) -> Unit,
     onFork: () -> Unit,
     onArchive: () -> Unit,
     onDelete: () -> Unit,
+    onDiscardDraft: (() -> Unit)? = null,
 ) {
-    var name by rememberSaveable(thread.id) { mutableStateOf(thread.title) }
-    var confirmDelete by rememberSaveable(thread.id) { mutableStateOf(false) }
+    var name by rememberSaveable(threadId) { mutableStateOf(title) }
+    var confirmDelete by rememberSaveable(threadId) { mutableStateOf(false) }
+    var confirmDiscardDraft by rememberSaveable(threadId) { mutableStateOf(false) }
 
-    if (confirmDelete) {
+    if (confirmDiscardDraft) {
+        AlertDialog(
+            onDismissRequest = { confirmDiscardDraft = false },
+            title = { Text("放弃草稿？") },
+            text = { Text("草稿内容将被删除，会话本身会保留") },
+            confirmButton = {
+                TextButton(onClick = requireNotNull(onDiscardDraft)) {
+                    Text("放弃草稿", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDiscardDraft = false }) { Text("取消") }
+            },
+        )
+    } else if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
             title = { Text("永久删除会话") },
-            text = { Text("确定删除“${thread.title}”吗？删除后无法恢复") },
+            text = { Text("确定删除“$title”吗？删除后无法恢复") },
             confirmButton = {
                 TextButton(onClick = onDelete) {
                     Text("永久删除", color = MaterialTheme.colorScheme.error)
@@ -1169,6 +1226,14 @@ private fun ThreadActionsDialog(
                     }
                     OutlinedButton(onClick = onArchive, modifier = Modifier.fillMaxWidth()) {
                         Text(if (archived) "恢复归档" else "归档")
+                    }
+                    if (onDiscardDraft != null) {
+                        TextButton(
+                            onClick = { confirmDiscardDraft = true },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("放弃草稿", color = MaterialTheme.colorScheme.error)
+                        }
                     }
                     TextButton(
                         onClick = { confirmDelete = true },
