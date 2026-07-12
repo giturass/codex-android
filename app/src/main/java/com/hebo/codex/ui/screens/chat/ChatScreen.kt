@@ -139,6 +139,7 @@ import com.hebo.codex.domain.ApprovalType
 import com.hebo.codex.domain.ConnectionStatus
 import com.hebo.codex.domain.ConversationItem
 import com.hebo.codex.domain.ConversationState
+import com.hebo.codex.domain.DraftAttachment
 import com.hebo.codex.domain.FeatureEntry
 import com.hebo.codex.domain.ModelOption
 import com.hebo.codex.domain.NetworkPolicyRuleAction
@@ -269,6 +270,7 @@ fun ChatScreen(
     var bottomControlsHeightPx by remember { mutableStateOf(0) }
     var bottomControlsTranslationHeightPx by remember { mutableStateOf(0) }
     var dialog by remember { mutableStateOf<ChatDialog?>(null) }
+    var showTurnOptions by remember { mutableStateOf(false) }
     var activeRequestKey by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
     var shownNoticeId by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
     var technicalError by remember { mutableStateOf<UserFacingError?>(null) }
@@ -498,17 +500,21 @@ fun ChatScreen(
                 .fillMaxWidth()
                 .graphicsLayer { translationY = topControlsTranslationY },
         ) {
-            ChatFloatingHeader(
+            ConversationFloatingHeader(
                 conversation = conversation,
+                newConversationTitle = null,
+                newConversationSubtitle = null,
                 connectionStatus = state.connectionStatus,
                 rateLimitsState = rateLimitsState,
                 showNavigationIcon = showNavigationIcon,
                 onOpenNavigation = onOpenNavigation,
-                onNewTask = { conversation?.let { onNewTask(it.cwd) } },
-                onRename = { dialog = ChatDialog.Rename },
-                onFork = { dialog = ChatDialog.Fork },
-                onOpenGoal = { dialog = ChatDialog.Goal },
-                onOpenStatistics = { dialog = ChatDialog.Statistics },
+                actions = ConversationHeaderActions(
+                    onNewTask = { conversation?.let { onNewTask(it.cwd) } },
+                    onRename = { dialog = ChatDialog.Rename },
+                    onFork = { dialog = ChatDialog.Fork },
+                    onOpenGoal = { dialog = ChatDialog.Goal },
+                    onOpenStatistics = { dialog = ChatDialog.Statistics },
+                ),
                 onRefreshRateLimits = onRefreshRateLimits,
                 modifier = Modifier.onSizeChanged { topControlsHeightPx = it.height },
             )
@@ -538,15 +544,28 @@ fun ChatScreen(
                             onClick = { activeRequestKey = request.requestKey },
                         )
                     }
-                    ChatComposer(
-                        conversation = conversation,
-                        draft = state.draft,
-                        models = state.models,
+                    ConversationComposer(
+                        isRunning = conversation.isRunning,
+                        plan = conversation.plan,
+                        activeTurnId = conversation.activeTurnId,
+                        message = state.draft.message,
+                        attachments = state.draft.attachments,
+                        modelLabel = composerModelLabel(
+                            model = state.draft.options.model,
+                            reasoningEffort = state.draft.options.reasoningEffort,
+                            models = state.models,
+                        ),
                         resources = state.inputResources,
                         quickPhrases = quickPhraseState.phrases,
-                        connectionStatus = state.connectionStatus,
                         isLoadingResources = state.isLoadingResources,
                         isSending = state.isSendingDraft,
+                        sendEnabled = state.connectionStatus is ConnectionStatus.Connected,
+                        placeholder = when {
+                            state.connectionStatus !is ConnectionStatus.Connected -> "服务器已断开"
+                            conversation.isRunning -> "继续对话"
+                            else -> "向 Codex 发送消息"
+                        },
+                        commands = ComposerCommand.entries,
                         onLoadResources = viewModel::loadInputResources,
                         onAddQuickPhrase = quickPhraseViewModel::add,
                         onUpdateQuickPhrase = quickPhraseViewModel::update,
@@ -556,11 +575,16 @@ fun ChatScreen(
                         onMessageChange = viewModel::updateDraftMessage,
                         onAddAttachment = viewModel::addDraftAttachment,
                         onRemoveAttachment = viewModel::removeDraftAttachment,
-                        onOptionsChange = viewModel::updateDraftOptions,
                         onInputError = viewModel::reportInputError,
-                        onOpenGoal = { dialog = ChatDialog.Goal },
-                        onOpenReview = { dialog = ChatDialog.Review },
-                        onCompact = viewModel::compact,
+                        onOpenOptions = { showTurnOptions = true },
+                        onCommand = { command ->
+                            when (command) {
+                                ComposerCommand.GOAL -> dialog = ChatDialog.Goal
+                                ComposerCommand.REVIEW -> dialog = ChatDialog.Review
+                                ComposerCommand.COMPACT -> viewModel.compact()
+                                else -> Unit
+                            }
+                        },
                         onSend = {
                             chromeSettleJob?.cancel()
                             chromeSettleJob = null
@@ -750,24 +774,52 @@ fun ChatScreen(
     technicalError?.let { error ->
         UserFacingErrorDialog(error = error, onDismiss = { technicalError = null })
     }
+    if (showTurnOptions) {
+        TurnOptionsSheet(
+            value = state.draft.options,
+            models = state.models,
+            onDismiss = { showTurnOptions = false },
+            onSave = {
+                viewModel.updateDraftOptions(it)
+                showTurnOptions = false
+            },
+        )
+    }
 }
 
+internal data class ConversationHeaderActions(
+    val onNewTask: () -> Unit,
+    val onRename: () -> Unit,
+    val onFork: () -> Unit,
+    val onOpenGoal: () -> Unit,
+    val onOpenStatistics: () -> Unit,
+)
+
 @Composable
-private fun ChatFloatingHeader(
+internal fun ConversationFloatingHeader(
     conversation: ConversationState?,
+    newConversationTitle: String?,
+    newConversationSubtitle: String?,
     connectionStatus: ConnectionStatus,
     rateLimitsState: RateLimitsUiState,
     showNavigationIcon: Boolean,
     onOpenNavigation: () -> Unit,
-    onNewTask: () -> Unit,
-    onRename: () -> Unit,
-    onFork: () -> Unit,
-    onOpenGoal: () -> Unit,
-    onOpenStatistics: () -> Unit,
+    actions: ConversationHeaderActions?,
     onRefreshRateLimits: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var actionsExpanded by remember { mutableStateOf(false) }
+    val headerTitle = conversation?.title ?: newConversationTitle
+    val headerSubtitle = conversation?.let {
+        val status = when {
+            connectionStatus !is ConnectionStatus.Connected -> "已断开"
+            it.pendingRequests.isNotEmpty() -> "需要处理"
+            it.isRunning -> "运行中"
+            it.errorMessage != null -> "失败"
+            else -> "可继续"
+        }
+        "$status · ${projectName(it.cwd)} · ${it.serverName}"
+    } ?: newConversationSubtitle
     Box(
         modifier
             .fillMaxWidth()
@@ -786,7 +838,7 @@ private fun ChatFloatingHeader(
                     Icon(Icons.Rounded.Menu, contentDescription = "打开导航")
                 }
             }
-        } else if (conversation != null) {
+        } else if (headerTitle != null) {
             Surface(
                 modifier = Modifier
                     .align(Alignment.CenterStart)
@@ -799,20 +851,13 @@ private fun ChatFloatingHeader(
             ) {
                 Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
                     Text(
-                        conversation.title,
+                        headerTitle,
                         style = MaterialTheme.typography.titleSmall,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    val status = when {
-                        connectionStatus !is ConnectionStatus.Connected -> "已断开"
-                        conversation.pendingRequests.isNotEmpty() -> "需要处理"
-                        conversation.isRunning -> "运行中"
-                        conversation.errorMessage != null -> "失败"
-                        else -> "可继续"
-                    }
                     Text(
-                        "$status · ${projectName(conversation.cwd)} · ${conversation.serverName}",
+                        headerSubtitle.orEmpty(),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -822,7 +867,7 @@ private fun ChatFloatingHeader(
             }
         }
 
-        if (conversation != null) {
+        if (headerTitle != null) {
             Surface(
                 modifier = Modifier.align(Alignment.CenterEnd),
                 shape = CircleShape,
@@ -835,51 +880,53 @@ private fun ChatFloatingHeader(
                         state = rateLimitsState,
                         onRefresh = onRefreshRateLimits,
                     )
-                    if (showNavigationIcon) {
-                        IconButton(onClick = onNewTask) {
+                    if (showNavigationIcon && actions != null) {
+                        IconButton(onClick = actions.onNewTask) {
                             Icon(Icons.Rounded.Edit, contentDescription = "新建任务")
                         }
                     }
-                    Box {
-                        IconButton(onClick = { actionsExpanded = true }) {
-                            Icon(Icons.Rounded.MoreVert, contentDescription = "会话操作")
-                        }
-                        DropdownMenu(
-                            expanded = actionsExpanded,
-                            onDismissRequest = { actionsExpanded = false },
-                        ) {
-                            ChatActionMenuItem(
-                                text = "重命名",
-                                icon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
-                                onClick = {
-                                    actionsExpanded = false
-                                    onRename()
-                                },
-                            )
-                            ChatActionMenuItem(
-                                text = "分叉会话",
-                                icon = { Icon(Icons.AutoMirrored.Rounded.CallSplit, contentDescription = null) },
-                                onClick = {
-                                    actionsExpanded = false
-                                    onFork()
-                                },
-                            )
-                            ChatActionMenuItem(
-                                text = "目标管理",
-                                icon = { Icon(Icons.Rounded.Flag, contentDescription = null) },
-                                onClick = {
-                                    actionsExpanded = false
-                                    onOpenGoal()
-                                },
-                            )
-                            ChatActionMenuItem(
-                                text = "对话统计",
-                                icon = { Icon(Icons.Rounded.BarChart, contentDescription = null) },
-                                onClick = {
-                                    actionsExpanded = false
-                                    onOpenStatistics()
-                                },
-                            )
+                    if (actions != null) {
+                        Box {
+                            IconButton(onClick = { actionsExpanded = true }) {
+                                Icon(Icons.Rounded.MoreVert, contentDescription = "会话操作")
+                            }
+                            DropdownMenu(
+                                expanded = actionsExpanded,
+                                onDismissRequest = { actionsExpanded = false },
+                            ) {
+                                ChatActionMenuItem(
+                                    text = "重命名",
+                                    icon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
+                                    onClick = {
+                                        actionsExpanded = false
+                                        actions.onRename()
+                                    },
+                                )
+                                ChatActionMenuItem(
+                                    text = "分叉会话",
+                                    icon = { Icon(Icons.AutoMirrored.Rounded.CallSplit, contentDescription = null) },
+                                    onClick = {
+                                        actionsExpanded = false
+                                        actions.onFork()
+                                    },
+                                )
+                                ChatActionMenuItem(
+                                    text = "目标管理",
+                                    icon = { Icon(Icons.Rounded.Flag, contentDescription = null) },
+                                    onClick = {
+                                        actionsExpanded = false
+                                        actions.onOpenGoal()
+                                    },
+                                )
+                                ChatActionMenuItem(
+                                    text = "对话统计",
+                                    icon = { Icon(Icons.Rounded.BarChart, contentDescription = null) },
+                                    onClick = {
+                                        actionsExpanded = false
+                                        actions.onOpenStatistics()
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -1347,15 +1394,20 @@ private fun PermissionsCard(
 }
 
 @Composable
-private fun ChatComposer(
-    conversation: ConversationState,
-    draft: ChatDraft,
-    models: List<ModelOption>,
+internal fun ConversationComposer(
+    isRunning: Boolean,
+    plan: TurnPlan?,
+    activeTurnId: String?,
+    message: String,
+    attachments: List<DraftAttachment>,
+    modelLabel: String,
     resources: List<FeatureEntry>,
     quickPhrases: List<QuickPhrase>,
-    connectionStatus: ConnectionStatus,
     isLoadingResources: Boolean,
     isSending: Boolean,
+    sendEnabled: Boolean,
+    placeholder: String,
+    commands: List<ComposerCommand>,
     onLoadResources: (Boolean) -> Unit,
     onAddQuickPhrase: (String) -> Unit,
     onUpdateQuickPhrase: (String, String) -> Unit,
@@ -1365,13 +1417,11 @@ private fun ChatComposer(
     onMessageChange: (String) -> Unit,
     onAddAttachment: (UserInputPart, String?) -> Unit,
     onRemoveAttachment: (String) -> Unit,
-    onOptionsChange: (TurnOptions) -> Unit,
     onInputError: (Throwable) -> Unit,
-    onOpenGoal: () -> Unit,
-    onOpenReview: () -> Unit,
-    onCompact: () -> Unit,
+    onOpenOptions: () -> Unit,
+    onCommand: (ComposerCommand) -> Unit,
     onSend: () -> Unit,
-    onStop: () -> Unit,
+    onStop: (() -> Unit)?,
 ) {
     var dialog by remember { mutableStateOf<ComposerDialog?>(null) }
     var addMenuExpanded by remember { mutableStateOf(false) }
@@ -1381,8 +1431,8 @@ private fun ChatComposer(
     var composerValue by remember {
         mutableStateOf(
             TextFieldValue(
-                text = draft.message,
-                selection = TextRange(draft.message.length),
+                text = message,
+                selection = TextRange(message.length),
             ),
         )
     }
@@ -1390,11 +1440,11 @@ private fun ChatComposer(
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
     val composerScope = rememberCoroutineScope()
-    LaunchedEffect(draft.message) {
-        if (draft.message != composerValue.text) {
+    LaunchedEffect(message) {
+        if (message != composerValue.text) {
             composerValue = TextFieldValue(
-                text = draft.message,
-                selection = TextRange(draft.message.length),
+                text = message,
+                selection = TextRange(message.length),
             )
         }
     }
@@ -1411,33 +1461,24 @@ private fun ChatComposer(
             }
         }
     }
-    val selectedModel = models.firstOrNull { it.model == draft.options.model }
-    val effortLabel = draft.options.reasoningEffort?.let { effort ->
-        selectedModel?.reasoningEfforts?.firstOrNull { it.value == effort }?.label ?: effort
-    }
-    val modelLabel = listOfNotNull(
-        selectedModel?.displayName ?: draft.options.model ?: "默认模型",
-        effortLabel,
-    ).joinToString(" · ")
     val activeToken = composerValue.selection.takeIf { it.collapsed }?.let {
         activeComposerToken(composerValue.text, it.start)
     }
-    val paletteEntries = remember(activeToken, resources) {
-        composerPaletteEntries(activeToken, resources)
+    val paletteEntries = remember(activeToken, resources, commands) {
+        composerPaletteEntries(activeToken, resources, commands)
     }
     LaunchedEffect(activeToken?.trigger) {
         if (activeToken?.trigger == '$' || activeToken?.trigger == '@') onLoadResources(false)
     }
-    val connected = connectionStatus is ConnectionStatus.Connected
-    val hasInput = composerValue.text.isNotBlank() || draft.attachments.isNotEmpty()
+    val hasInput = composerValue.text.isNotBlank() || attachments.isNotEmpty()
 
     Column(
         Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 12.dp),
     ) {
-        if (conversation.isRunning) {
+        if (isRunning) {
             ActivePlanCard(
-                plan = conversation.plan,
-                activeTurnId = conversation.activeTurnId,
+                plan = plan,
+                activeTurnId = activeTurnId,
             )
         }
         if (activeToken != null && (paletteEntries.isNotEmpty() || isLoadingResources)) {
@@ -1459,23 +1500,21 @@ private fun ChatComposer(
                                 showQuickPhrases = true
                                 addMenuExpanded = true
                             }
-                            ComposerCommand.GOAL -> onOpenGoal()
-                            ComposerCommand.REVIEW -> onOpenReview()
-                            ComposerCommand.COMPACT -> onCompact()
                             ComposerCommand.SETTINGS -> {
                                 onLoadResources(false)
-                                dialog = ComposerDialog.Options
+                                onOpenOptions()
                             }
                             ComposerCommand.ATTACH -> addMenuExpanded = true
+                            else -> onCommand(entry.command)
                         }
                     }
                 },
             )
             Spacer(Modifier.height(6.dp))
         }
-        if (draft.attachments.isNotEmpty()) {
+        if (attachments.isNotEmpty()) {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                draft.attachments.forEach { attachment ->
+                attachments.forEach { attachment ->
                     DraftAttachmentChip(
                         attachment = attachment,
                         onRemove = { onRemoveAttachment(attachment.id) },
@@ -1486,18 +1525,14 @@ private fun ChatComposer(
             Spacer(Modifier.height(6.dp))
         }
         val compactEndExtra = (if (isAddingImage) 28.dp else 0.dp) +
-            (if (conversation.isRunning && hasInput) 40.dp else 0.dp)
+            (if (isRunning && hasInput) 40.dp else 0.dp)
         MessageComposer(
             value = composerValue,
             onValueChange = {
                 composerValue = it
                 onMessageChange(it.text)
             },
-            placeholder = when {
-                !connected -> "服务器已断开"
-                conversation.isRunning -> "继续对话"
-                else -> "向 Codex 发送消息"
-            },
+            placeholder = placeholder,
             enabled = !isSending,
             compactEndExtra = compactEndExtra,
             leadingContent = {
@@ -1542,8 +1577,8 @@ private fun ChatComposer(
             },
             expandedContent = {
                 TextButton(
-                    onClick = { dialog = ComposerDialog.Options },
-                    enabled = !conversation.isRunning && !isSending,
+                    onClick = onOpenOptions,
+                    enabled = !isRunning && !isSending,
                     modifier = Modifier.fillMaxWidth(),
                     contentPadding = PaddingValues(horizontal = 8.dp),
                 ) {
@@ -1555,22 +1590,23 @@ private fun ChatComposer(
                     CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(8.dp))
                 }
-                if (conversation.isRunning && hasInput) {
+                if (isRunning && hasInput) {
                     IconButton(
-                        onClick = onStop,
+                        onClick = requireNotNull(onStop),
                         enabled = !isSending,
                         modifier = Modifier.size(40.dp),
                     ) {
                         Icon(Icons.Rounded.Stop, contentDescription = "停止")
                     }
                 }
-                val stopsActiveTurn = conversation.isRunning && !hasInput
+                val stopsActiveTurn = isRunning && !hasInput
+                val action = if (stopsActiveTurn) requireNotNull(onStop) else onSend
                 MessageComposerActionButton(
-                    onClick = if (stopsActiveTurn) onStop else onSend,
+                    onClick = action,
                     enabled = if (stopsActiveTurn) {
                         !isSending
                     } else {
-                        hasInput && connected && !isSending
+                        hasInput && sendEnabled && !isSending
                     },
                     action = if (stopsActiveTurn) {
                         MessageComposerAction.STOP
@@ -1607,18 +1643,23 @@ private fun ChatComposer(
             },
         )
 
-        ComposerDialog.Options -> TurnOptionsSheet(
-            value = draft.options,
-            models = models,
-            onDismiss = { dialog = null },
-            onSave = {
-                onOptionsChange(it)
-                dialog = null
-            },
-        )
-
         null -> Unit
     }
+}
+
+internal fun composerModelLabel(
+    model: String?,
+    reasoningEffort: String?,
+    models: List<ModelOption>,
+): String {
+    val selectedModel = models.firstOrNull { it.model == model }
+    val effortLabel = reasoningEffort?.let { effort ->
+        selectedModel?.reasoningEfforts?.firstOrNull { it.value == effort }?.label ?: effort
+    }
+    return listOfNotNull(
+        selectedModel?.displayName ?: model ?: "默认模型",
+        effortLabel,
+    ).joinToString(" · ")
 }
 
 @Composable
@@ -2390,7 +2431,6 @@ private sealed interface ChatDialog {
 
 private enum class ComposerDialog {
     ImageAddress,
-    Options,
 }
 
 private enum class ManualAttachment {

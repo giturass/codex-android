@@ -7,17 +7,23 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.lifecycle.viewModelScope
 import com.hebo.codex.domain.CodexRepository
 import com.hebo.codex.domain.ConversationDraft
+import com.hebo.codex.domain.DraftAttachment
 import com.hebo.codex.domain.DraftKey
 import com.hebo.codex.domain.DraftRepository
 import com.hebo.codex.domain.DraftTarget
+import com.hebo.codex.domain.FeatureArea
+import com.hebo.codex.domain.FeatureEntry
 import com.hebo.codex.domain.ModelOption
 import com.hebo.codex.domain.ThreadOptions
 import com.hebo.codex.domain.TurnOptions
+import com.hebo.codex.domain.UserInputPart
 import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.domain.newDraftRevision
+import com.hebo.codex.ui.screens.chat.availableInputResources
 import com.hebo.codex.util.runSuspendCatching
 import com.hebo.codex.util.toUserFacingError
 import java.util.UUID
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,7 +38,10 @@ data class NewTaskUiState(
     val message: String = "",
     val cwd: String = "",
     val options: ThreadOptions = ThreadOptions(),
+    val attachments: List<DraftAttachment> = emptyList(),
+    val inputResources: List<FeatureEntry> = emptyList(),
     val isLoadingDraft: Boolean = true,
+    val isLoadingResources: Boolean = false,
     val isCreatingConversation: Boolean = false,
     val errorMessage: UserFacingError? = null,
 )
@@ -69,6 +78,7 @@ class NewTaskViewModel(
                                 message = restored.message,
                                 cwd = restored.cwd,
                                 options = restored.options,
+                                attachments = restored.attachments,
                                 isLoadingDraft = false,
                             )
                         } else {
@@ -102,11 +112,75 @@ class NewTaskViewModel(
     }
 
     fun updateCwd(cwd: String) {
-        updateEditor { it.copy(cwd = cwd) }
+        updateEditor { it.copy(cwd = cwd, inputResources = emptyList()) }
     }
 
     fun updateOptions(options: ThreadOptions) {
         updateEditor { it.copy(options = options) }
+    }
+
+    fun addAttachment(input: UserInputPart, previewUri: String? = null) {
+        updateEditor { state ->
+            state.copy(
+                attachments = state.attachments + DraftAttachment(
+                    id = UUID.randomUUID().toString(),
+                    input = input,
+                    previewUri = previewUri,
+                ),
+            )
+        }
+    }
+
+    fun removeAttachment(id: String) {
+        updateEditor { state ->
+            state.copy(attachments = state.attachments.filterNot { it.id == id })
+        }
+    }
+
+    fun reportInputError(error: Throwable) {
+        mutableState.update { it.copy(errorMessage = error.toUserFacingError("无法添加输入")) }
+    }
+
+    fun loadInputResources(forceRefresh: Boolean = false) {
+        val current = mutableState.value
+        val serverId = current.serverId ?: return
+        if (current.isLoadingResources) return
+        viewModelScope.launch {
+            mutableState.update { it.copy(isLoadingResources = true) }
+            val cwd = current.cwd.takeIf(String::isNotBlank)
+            val skillsDeferred = async {
+                runSuspendCatching {
+                    repository.featureCatalog(serverId, FeatureArea.SKILLS, cwd, forceRefresh = forceRefresh)
+                }
+            }
+            val appsDeferred = async {
+                runSuspendCatching {
+                    repository.featureCatalog(serverId, FeatureArea.APPS, cwd, forceRefresh = forceRefresh)
+                }
+            }
+            val pluginsDeferred = async {
+                runSuspendCatching {
+                    repository.featureCatalog(serverId, FeatureArea.PLUGINS, cwd, forceRefresh = forceRefresh)
+                }
+            }
+            val skills = skillsDeferred.await()
+            val apps = appsDeferred.await()
+            val plugins = pluginsDeferred.await()
+            val failure = skills.exceptionOrNull()
+                ?: apps.exceptionOrNull()
+                ?: plugins.exceptionOrNull()
+            mutableState.update {
+                it.copy(
+                    inputResources = availableInputResources(
+                        skills = skills.getOrNull()?.entries.orEmpty(),
+                        apps = apps.getOrNull()?.entries.orEmpty(),
+                        plugins = plugins.getOrNull()?.entries.orEmpty(),
+                    ),
+                    isLoadingResources = false,
+                    errorMessage = failure?.toUserFacingError("无法加载输入资源"),
+                )
+            }
+        }
     }
 
     fun applyDefaultModel(model: ModelOption) {
@@ -124,7 +198,7 @@ class NewTaskViewModel(
         val current = mutableState.value
         if (current.isCreatingConversation || current.isLoadingDraft) return
         val serverId = current.serverId ?: return
-        if (current.message.isBlank()) {
+        if (current.message.isBlank() && current.attachments.isEmpty()) {
             showError(IllegalArgumentException("请输入任务内容"))
             return
         }
@@ -144,7 +218,13 @@ class NewTaskViewModel(
             }
             createdThreadId = threadId
 
-            runSuspendCatching { repository.sendMessage(serverId, threadId, current.message) }
+            val input = buildList {
+                current.message.takeIf(String::isNotBlank)?.let { add(UserInputPart.Text(it)) }
+                addAll(current.attachments.map(DraftAttachment::input))
+            }
+            runSuspendCatching {
+                repository.sendMessage(serverId, threadId, input, current.options.toTurnOptions())
+            }
                 .onSuccess {
                     runSuspendCatching { draftRepository.delete(currentDraft(current).key) }
                         .onFailure { error ->
@@ -153,22 +233,20 @@ class NewTaskViewModel(
                             }
                         }
                     createdThreadId = null
-                    mutableState.update { it.copy(message = "", isCreatingConversation = false) }
+                    mutableState.update {
+                        it.copy(message = "", attachments = emptyList(), isCreatingConversation = false)
+                    }
                     mutableEvents.send(NewTaskEvent.OpenConversation(serverId, threadId))
                 }
                 .onFailure { sendError ->
                     val threadDraft = ConversationDraft.Thread(
                         serverId = serverId,
                         threadId = threadId,
-                        threadTitle = current.message.lineSequence()
-                            .map(String::trim)
-                            .firstOrNull(String::isNotEmpty)
-                            ?.take(72)
-                            ?: "新会话",
+                        threadTitle = current.conversationTitle(),
                         message = current.message,
                         cwd = current.cwd,
                         options = current.options.toTurnOptions(),
-                        attachments = emptyList(),
+                        attachments = current.attachments,
                         updatedAtMillis = System.currentTimeMillis(),
                         revision = newDraftRevision(),
                     )
@@ -177,7 +255,9 @@ class NewTaskViewModel(
                         draftRepository.delete(currentDraft(current).key)
                     }.onSuccess {
                         createdThreadId = null
-                        mutableState.update { it.copy(message = "", isCreatingConversation = false) }
+                        mutableState.update {
+                            it.copy(message = "", attachments = emptyList(), isCreatingConversation = false)
+                        }
                         mutableEvents.send(NewTaskEvent.OpenConversation(serverId, threadId))
                     }.onFailure { draftError ->
                         showError(
@@ -218,6 +298,7 @@ class NewTaskViewModel(
         message = state.message,
         cwd = state.cwd,
         options = state.options,
+        attachments = state.attachments,
         updatedAtMillis = System.currentTimeMillis(),
         revision = newDraftRevision(),
     )
@@ -246,6 +327,12 @@ class NewTaskViewModel(
         }
     }
 }
+
+private fun NewTaskUiState.conversationTitle(): String = message.lineSequence()
+    .map(String::trim)
+    .firstOrNull(String::isNotEmpty)
+    ?.take(72)
+    ?: "附件任务"
 
 private fun ThreadOptions.toTurnOptions(): TurnOptions = TurnOptions(
     model = model,

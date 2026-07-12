@@ -211,19 +211,22 @@ internal class RoomDraftRepository(
 
     private suspend fun ConversationDraft.toEntity(): DraftEntity = withContext(Dispatchers.IO) {
         when (this@toEntity) {
-            is ConversationDraft.NewTask -> DraftEntity(
-                serverId = serverId,
-                targetType = TARGET_NEW_TASK,
-                targetId = draftId,
-                contextTitle = "新建任务",
-                cwd = cwd,
-                message = message,
-                optionsJson = json.encodeToString(StoredThreadOptions.from(options)),
-                attachmentsJson = json.encodeToString(emptyList<StoredAttachment>()),
-                attachmentCount = 0,
-                updatedAtMillis = updatedAtMillis,
-                revision = revision,
-            )
+            is ConversationDraft.NewTask -> {
+                val storedAttachments = attachments.map { it.toStored(key) }
+                DraftEntity(
+                    serverId = serverId,
+                    targetType = TARGET_NEW_TASK,
+                    targetId = draftId,
+                    contextTitle = "新建任务",
+                    cwd = cwd,
+                    message = message,
+                    optionsJson = json.encodeToString(StoredThreadOptions.from(options)),
+                    attachmentsJson = json.encodeToString(storedAttachments),
+                    attachmentCount = storedAttachments.size,
+                    updatedAtMillis = updatedAtMillis,
+                    revision = revision,
+                )
+            }
 
             is ConversationDraft.Thread -> {
                 val storedAttachments = attachments.map { it.toStored(key) }
@@ -252,6 +255,8 @@ internal class RoomDraftRepository(
                 message = message,
                 cwd = cwd,
                 options = json.decodeFromString<StoredThreadOptions>(optionsJson).toDomain(),
+                attachments = json.decodeFromString<List<StoredAttachment>>(attachmentsJson)
+                    .map { it.toDomain(key) },
                 updatedAtMillis = updatedAtMillis,
                 revision = revision,
             )

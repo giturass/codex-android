@@ -144,6 +144,13 @@ fun CodexApp(
         }
     }
 
+    fun replaceNewTaskWithConversation(serverId: String, threadId: String) {
+        navController.navigate(ChatRoute(serverId, threadId)) {
+            popUpTo<NewTaskRoute> { inclusive = true }
+            launchSingleTop = true
+        }
+    }
+
     LaunchedEffect(drawerState.targetValue) {
         if (drawerState.targetValue == DrawerValue.Open) {
             focusManager.clearFocus()
@@ -294,7 +301,7 @@ fun CodexApp(
                         newTaskViewModel.events.collect { event ->
                             when (event) {
                                 is NewTaskEvent.OpenConversation -> {
-                                    openConversation(event.serverId, event.threadId)
+                                    replaceNewTaskWithConversation(event.serverId, event.threadId)
                                 }
                             }
                         }

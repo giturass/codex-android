@@ -14,6 +14,7 @@ class DraftModelsTest {
             message = message,
             cwd = "/workspace/app",
             options = ThreadOptions(),
+            attachments = emptyList(),
             updatedAtMillis = 1000,
             revision = "revision-1",
         )
@@ -31,6 +32,25 @@ class DraftModelsTest {
             message = "",
             cwd = "/workspace/app",
             options = TurnOptions(),
+            attachments = listOf(
+                DraftAttachment("attachment-1", UserInputPart.LocalImage("/tmp/screenshot.png")),
+            ),
+            updatedAtMillis = 1000,
+            revision = "revision-1",
+        )
+
+        assertEquals(true, draft.hasContent())
+        assertEquals("1 个附件", draft.toSummary().preview)
+    }
+
+    @Test
+    fun attachmentOnlyNewTaskIsStillADraft() {
+        val draft = ConversationDraft.NewTask(
+            serverId = "server-1",
+            draftId = "draft-1",
+            message = "",
+            cwd = "/workspace/app",
+            options = ThreadOptions(),
             attachments = listOf(
                 DraftAttachment("attachment-1", UserInputPart.LocalImage("/tmp/screenshot.png")),
             ),

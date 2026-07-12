@@ -36,6 +36,7 @@ sealed interface ConversationDraft {
         override val message: String,
         override val cwd: String,
         val options: ThreadOptions,
+        val attachments: List<DraftAttachment>,
         override val updatedAtMillis: Long,
         override val revision: String,
     ) : ConversationDraft {
@@ -68,13 +69,13 @@ data class DraftSummary(
 )
 
 fun ConversationDraft.hasContent(): Boolean = when (this) {
-    is ConversationDraft.NewTask -> message.isNotBlank()
+    is ConversationDraft.NewTask -> message.isNotBlank() || attachments.isNotEmpty()
     is ConversationDraft.Thread -> message.isNotBlank() || attachments.isNotEmpty()
 }
 
 fun ConversationDraft.toSummary(): DraftSummary {
     val attachmentCount = when (this) {
-        is ConversationDraft.NewTask -> 0
+        is ConversationDraft.NewTask -> attachments.size
         is ConversationDraft.Thread -> attachments.size
     }
     return DraftSummary(

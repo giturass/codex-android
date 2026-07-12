@@ -126,11 +126,12 @@ internal fun insertComposerTrigger(value: TextFieldValue, trigger: Char): TextFi
 internal fun composerPaletteEntries(
     token: ComposerToken?,
     resources: List<FeatureEntry>,
+    commands: List<ComposerCommand> = ComposerCommand.entries,
 ): List<ComposerPaletteEntry> {
     token ?: return emptyList()
     val query = token.query.trim()
     return when (token.trigger) {
-        '/' -> ComposerCommand.entries
+        '/' -> commands
             .filter { query.isEmpty() || it.label.removePrefix("/").contains(query, ignoreCase = true) }
             .map(ComposerPaletteEntry::Command)
 

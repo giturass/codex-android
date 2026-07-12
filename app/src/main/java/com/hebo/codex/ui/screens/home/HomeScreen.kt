@@ -23,7 +23,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Dns
-import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Menu
@@ -53,11 +52,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -66,26 +63,32 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hebo.codex.R
 import com.hebo.codex.domain.ApprovalPolicy
 import com.hebo.codex.domain.ApprovalReviewer
+import com.hebo.codex.domain.ConnectionStatus
+import com.hebo.codex.domain.DraftAttachment
+import com.hebo.codex.domain.FeatureEntry
 import com.hebo.codex.domain.ModelOption
 import com.hebo.codex.domain.Personality
 import com.hebo.codex.domain.RecentProject
 import com.hebo.codex.domain.QuickPhrase
 import com.hebo.codex.domain.SandboxMode
 import com.hebo.codex.domain.ThreadOptions
+import com.hebo.codex.domain.UserInputPart
 import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.domain.projectName
-import com.hebo.codex.ui.components.MessageComposer
-import com.hebo.codex.ui.components.MessageComposerAction
-import com.hebo.codex.ui.components.MessageComposerActionButton
-import com.hebo.codex.ui.components.MessageComposerAddButton
-import com.hebo.codex.ui.components.QuickPhraseManagerDialog
-import com.hebo.codex.ui.components.QuickPhraseMenuContent
-import com.hebo.codex.ui.components.insertQuickPhrase
 import com.hebo.codex.ui.displayDescriptionRes
 import com.hebo.codex.ui.displayLabelRes
-import com.hebo.codex.ui.ratelimits.RateLimitIndicator
 import com.hebo.codex.ui.ratelimits.RateLimitsUiState
 import com.hebo.codex.ui.quickphrases.QuickPhraseViewModel
+import com.hebo.codex.ui.screens.chat.ComposerCommand
+import com.hebo.codex.ui.screens.chat.ConversationComposer
+import com.hebo.codex.ui.screens.chat.ConversationFloatingHeader
+import com.hebo.codex.ui.screens.chat.composerModelLabel
+
+private val NewTaskComposerCommands = listOf(
+    ComposerCommand.PHRASE,
+    ComposerCommand.SETTINGS,
+    ComposerCommand.ATTACH,
+)
 
 @Composable
 fun HomeScreen(
@@ -102,6 +105,7 @@ fun HomeScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val newTaskState by newTaskViewModel.state.collectAsStateWithLifecycle()
     val quickPhraseState by quickPhraseViewModel.state.collectAsStateWithLifecycle()
+    val activeServer = state.activeServer
     var showProjectMenu by remember { mutableStateOf(false) }
     var showCustomPathDialog by remember { mutableStateOf(false) }
     var showOptions by remember { mutableStateOf(false) }
@@ -146,33 +150,18 @@ fun HomeScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("新建任务")
-                        state.activeServer?.let { server ->
-                            Text(
-                                server.name,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+            if (activeServer == null) {
+                TopAppBar(
+                    title = { Text("新建任务") },
+                    navigationIcon = {
+                        if (showNavigationIcon) {
+                            IconButton(onClick = onOpenNavigation) {
+                                Icon(Icons.Rounded.Menu, contentDescription = "打开导航")
+                            }
                         }
-                    }
-                },
-                navigationIcon = {
-                    if (showNavigationIcon) {
-                        IconButton(onClick = onOpenNavigation) {
-                            Icon(Icons.Rounded.Menu, contentDescription = "打开导航")
-                        }
-                    }
-                },
-                actions = {
-                    RateLimitIndicator(
-                        state = rateLimitsState,
-                        onRefresh = onRefreshRateLimits,
-                    )
-                },
-            )
+                    },
+                )
+            }
         },
     ) { padding ->
         when {
@@ -181,7 +170,7 @@ fun HomeScreen(
                 onAddServer = onAddServer,
             )
 
-            state.activeServer == null -> Box(
+            activeServer == null -> Box(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center,
             ) {
@@ -190,17 +179,27 @@ fun HomeScreen(
 
             else -> NewTaskContent(
                 message = newTaskState.message,
-                modelLabel = state.models
-                    .firstOrNull { it.model == newTaskState.options.model }
-                    ?.displayName
-                    ?: newTaskState.options.model
-                    ?: "默认模型",
+                attachments = newTaskState.attachments,
+                modelLabel = composerModelLabel(newTaskState.options.model, null, state.models),
                 cwd = newTaskState.cwd,
+                serverName = activeServer.name,
                 projects = state.recentProjects,
+                resources = newTaskState.inputResources,
                 quickPhrases = quickPhraseState.phrases,
+                connectionStatus = state.connectionStatuses[state.activeServerId]
+                    ?: ConnectionStatus.Disconnected,
+                isLoadingResources = newTaskState.isLoadingResources,
                 isCreating = newTaskState.isCreatingConversation || newTaskState.isLoadingDraft,
+                rateLimitsState = rateLimitsState,
+                showNavigationIcon = showNavigationIcon,
                 projectMenuExpanded = showProjectMenu,
+                onOpenNavigation = onOpenNavigation,
+                onRefreshRateLimits = onRefreshRateLimits,
+                onLoadResources = newTaskViewModel::loadInputResources,
                 onMessageChange = newTaskViewModel::updateMessage,
+                onAddAttachment = newTaskViewModel::addAttachment,
+                onRemoveAttachment = newTaskViewModel::removeAttachment,
+                onInputError = newTaskViewModel::reportInputError,
                 onToggleProjectMenu = { showProjectMenu = !showProjectMenu },
                 onDismissProjectMenu = { showProjectMenu = false },
                 onSelectProject = {
@@ -249,13 +248,26 @@ fun HomeScreen(
 @Composable
 private fun NewTaskContent(
     message: String,
+    attachments: List<DraftAttachment>,
     modelLabel: String,
     cwd: String,
+    serverName: String,
     projects: List<RecentProject>,
+    resources: List<FeatureEntry>,
     quickPhrases: List<QuickPhrase>,
+    connectionStatus: ConnectionStatus,
+    isLoadingResources: Boolean,
     isCreating: Boolean,
+    rateLimitsState: RateLimitsUiState,
+    showNavigationIcon: Boolean,
     projectMenuExpanded: Boolean,
+    onOpenNavigation: () -> Unit,
+    onRefreshRateLimits: () -> Unit,
+    onLoadResources: (Boolean) -> Unit,
     onMessageChange: (String) -> Unit,
+    onAddAttachment: (UserInputPart, String?) -> Unit,
+    onRemoveAttachment: (String) -> Unit,
+    onInputError: (Throwable) -> Unit,
     onToggleProjectMenu: () -> Unit,
     onDismissProjectMenu: () -> Unit,
     onSelectProject: (String) -> Unit,
@@ -269,33 +281,14 @@ private fun NewTaskContent(
     onSend: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var addMenuExpanded by remember { mutableStateOf(false) }
-    var showQuickPhrases by remember { mutableStateOf(false) }
-    var showQuickPhraseManager by remember { mutableStateOf(false) }
-    var composerValue by remember {
-        mutableStateOf(
-            TextFieldValue(
-                text = message,
-                selection = TextRange(message.length),
-            ),
-        )
-    }
-    LaunchedEffect(message) {
-        if (message != composerValue.text) {
-            composerValue = TextFieldValue(
-                text = message,
-                selection = TextRange(message.length),
-            )
-        }
-    }
-    val focusRequester = remember { FocusRequester() }
-    val keyboardController = LocalSoftwareKeyboardController.current
-    Column(
-        modifier = modifier.imePadding(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
+    var composerHeightPx by remember { mutableStateOf(0) }
+    val density = LocalDensity.current
+    val contentBottomPadding = with(density) { composerHeightPx.toDp() } + 16.dp
+    Box(modifier) {
         Box(
-            modifier = Modifier.fillMaxWidth().weight(1f),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = 24.dp, top = 96.dp, end = 24.dp, bottom = contentBottomPadding),
             contentAlignment = Alignment.Center,
         ) {
             Column(
@@ -326,96 +319,63 @@ private fun NewTaskContent(
                 )
             }
         }
-        MessageComposer(
-            value = composerValue,
-            onValueChange = {
-                composerValue = it
-                onMessageChange(it.text)
-            },
-            placeholder = "描述要完成的任务……",
-            enabled = !isCreating,
+
+        ConversationFloatingHeader(
+            conversation = null,
+            newConversationTitle = "新建任务",
+            newConversationSubtitle = "${if (cwd.isBlank()) "选择项目" else projectName(cwd)} · $serverName",
+            connectionStatus = connectionStatus,
+            rateLimitsState = rateLimitsState,
+            showNavigationIcon = showNavigationIcon,
+            onOpenNavigation = onOpenNavigation,
+            actions = null,
+            onRefreshRateLimits = onRefreshRateLimits,
+            modifier = Modifier.align(Alignment.TopCenter),
+        )
+
+        Column(
             modifier = Modifier
+                .align(Alignment.BottomCenter)
                 .widthIn(max = 760.dp)
                 .fillMaxWidth()
-                .padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 10.dp),
-            leadingContent = {
-                Box {
-                    MessageComposerAddButton(
-                        onClick = {
-                            showQuickPhrases = false
-                            addMenuExpanded = true
-                        },
-                        enabled = !isCreating,
-                        contentDescription = "添加内容",
-                    )
-                    DropdownMenu(
-                        expanded = addMenuExpanded,
-                        onDismissRequest = {
-                            addMenuExpanded = false
-                            showQuickPhrases = false
-                        },
-                        modifier = Modifier.widthIn(min = 280.dp, max = 400.dp),
-                    ) {
-                        if (showQuickPhrases) {
-                            QuickPhraseMenuContent(
-                                phrases = quickPhrases,
-                                onBack = { showQuickPhrases = false },
-                                onManage = {
-                                    addMenuExpanded = false
-                                    showQuickPhrases = false
-                                    showQuickPhraseManager = true
-                                },
-                                onSelect = { phrase ->
-                                    val nextValue = insertQuickPhrase(composerValue, phrase.content)
-                                    composerValue = nextValue
-                                    onMessageChange(nextValue.text)
-                                    addMenuExpanded = false
-                                    showQuickPhrases = false
-                                    focusRequester.requestFocus()
-                                    keyboardController?.show()
-                                },
-                            )
-                        } else {
-                            DropdownMenuItem(
-                                text = { Text("快捷短语") },
-                                leadingIcon = { Icon(Icons.Rounded.Description, contentDescription = null) },
-                                onClick = { showQuickPhrases = true },
-                            )
-                        }
-                    }
-                }
-            },
-            expandedContent = {
-                TextButton(
-                    onClick = onOpenOptions,
-                    enabled = !isCreating,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(modelLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            },
-            trailingContent = {
-                MessageComposerActionButton(
-                    onClick = onSend,
-                    enabled = cwd.isNotBlank() && message.isNotBlank() && !isCreating,
-                    action = MessageComposerAction.SEND,
-                    isLoading = isCreating,
-                    contentDescription = "开始任务",
-                )
-            },
-            focusRequester = focusRequester,
-        )
-    }
-    if (showQuickPhraseManager) {
-        QuickPhraseManagerDialog(
-            phrases = quickPhrases,
-            onDismiss = { showQuickPhraseManager = false },
-            onAdd = onAddQuickPhrase,
-            onUpdate = onUpdateQuickPhrase,
-            onDelete = onDeleteQuickPhrase,
-            onMoveUp = onMoveQuickPhraseUp,
-            onMoveDown = onMoveQuickPhraseDown,
-        )
+                .onSizeChanged { composerHeightPx = it.height }
+                .navigationBarsPadding()
+                .imePadding(),
+        ) {
+            ConversationComposer(
+                isRunning = false,
+                plan = null,
+                activeTurnId = null,
+                message = message,
+                attachments = attachments,
+                modelLabel = modelLabel,
+                resources = resources,
+                quickPhrases = quickPhrases,
+                isLoadingResources = isLoadingResources,
+                isSending = isCreating,
+                sendEnabled = cwd.isNotBlank() && connectionStatus is ConnectionStatus.Connected,
+                placeholder = if (connectionStatus is ConnectionStatus.Connected) {
+                    "描述要完成的任务……"
+                } else {
+                    "服务器已断开"
+                },
+                commands = NewTaskComposerCommands,
+                onLoadResources = onLoadResources,
+                onAddQuickPhrase = onAddQuickPhrase,
+                onUpdateQuickPhrase = onUpdateQuickPhrase,
+                onDeleteQuickPhrase = onDeleteQuickPhrase,
+                onMoveQuickPhraseUp = onMoveQuickPhraseUp,
+                onMoveQuickPhraseDown = onMoveQuickPhraseDown,
+                onMessageChange = onMessageChange,
+                onAddAttachment = onAddAttachment,
+                onRemoveAttachment = onRemoveAttachment,
+                onInputError = onInputError,
+                onOpenOptions = onOpenOptions,
+                onCommand = {},
+                onSend = onSend,
+                onStop = null,
+            )
+        }
     }
 }
 
