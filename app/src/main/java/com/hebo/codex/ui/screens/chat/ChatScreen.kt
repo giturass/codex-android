@@ -195,6 +195,7 @@ fun ChatScreen(
     var showScrollToBottomButton by remember(conversation?.threadId) { mutableStateOf(false) }
     var dialog by remember { mutableStateOf<ChatDialog?>(null) }
     var activeRequestKey by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
+    var shownNoticeId by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
     var technicalError by remember { mutableStateOf<UserFacingError?>(null) }
     val detailsLabel = stringResource(R.string.common_details)
     val activeRequest = conversation?.pendingRequests?.firstOrNull { it.requestKey == activeRequestKey }
@@ -234,6 +235,18 @@ fun ChatScreen(
             )
             if (result == SnackbarResult.ActionPerformed) technicalError = error
             viewModel.clearError()
+        }
+    }
+    LaunchedEffect(conversation?.notices?.lastOrNull()?.id) {
+        val notice = conversation?.notices?.lastOrNull() ?: return@LaunchedEffect
+        if (notice.id == shownNoticeId) return@LaunchedEffect
+        shownNoticeId = notice.id
+        val result = snackbarHostState.showSnackbar(
+            message = notice.message,
+            actionLabel = notice.technicalDetails?.let { detailsLabel },
+        )
+        if (result == SnackbarResult.ActionPerformed) {
+            technicalError = UserFacingError(notice.message, notice.technicalDetails.orEmpty())
         }
     }
     LaunchedEffect(conversation?.pendingRequests?.map { it.requestKey }) {
@@ -315,41 +328,11 @@ fun ChatScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
-                conversation.notices.forEach { notice ->
-                    item("notice:${notice.id}") {
-                        Surface(
-                            shape = MaterialTheme.shapes.medium,
-                            color = MaterialTheme.colorScheme.surfaceContainerLow,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                        ) {
-                            if (notice.technicalDetails == null) {
-                                Text(notice.message, modifier = Modifier.fillMaxWidth().padding(12.dp))
-                            } else {
-                                ExpandableErrorDetails(
-                                    error = UserFacingError(notice.message, notice.technicalDetails),
-                                    modifier = Modifier.fillMaxWidth().padding(12.dp),
-                                )
-                            }
-                        }
-                    }
-                }
                 items(conversationRows, key = ConversationRow::key) { row ->
                     when (row) {
                         is ConversationRow.Item -> ConversationItemView(row.item)
                         is ConversationRow.ActivityGroup -> ActivityGroupCard(row.items)
                     }
-                }
-                if (conversation.turnDiff.isNotBlank()) {
-                    item("turn-diff") {
-                        TurnDiffSummaryCard(
-                            diff = conversation.turnDiff,
-                            isRunning = conversation.isRunning,
-                            onOpen = { dialog = ChatDialog.Changes },
-                        )
-                    }
-                }
-                if (conversation.isRunning && !conversationRows.hasInProgressActivity()) {
-                    item("running") { RunningIndicator() }
                 }
                 item(CHAT_LIST_END_KEY) {
                     Spacer(Modifier.height(1.dp))
@@ -405,18 +388,6 @@ fun ChatScreen(
                         )
                         .padding(top = ChatComposerFadeHeight),
                 ) {
-                    TaskProgressBar(
-                        goal = state.goal,
-                        plan = conversation.plan?.takeIf { plan ->
-                            conversation.isRunning || plan.steps.any { it.status != PlanStepStatus.COMPLETED }
-                        },
-                        onOpenGoal = { dialog = ChatDialog.Goal },
-                        onSetGoalStatus = { status ->
-                            state.goal?.let { goal ->
-                                viewModel.setGoal(goal.objective, status, goal.tokenBudget)
-                            }
-                        },
-                    )
                     conversation.pendingRequests.firstOrNull()?.let { request ->
                         PendingRequestBanner(
                             request = request,
@@ -537,12 +508,6 @@ fun ChatScreen(
                 viewModel.clearGoal()
                 dialog = null
             },
-        )
-
-        ChatDialog.Changes -> ReviewChangesDialog(
-            diff = conversation?.turnDiff.orEmpty(),
-            onDismiss = { dialog = null },
-            onAddComment = viewModel::appendToDraft,
         )
 
         null -> Unit
@@ -706,7 +671,41 @@ private fun ConversationItemView(item: ConversationItem) {
     when (item) {
         is ConversationItem.UserMessage -> UserMessage(item)
         is ConversationItem.AgentMessage -> AgentMessage(item)
+        is ConversationItem.Plan -> PlanSnapshot(item)
         else -> ActivityGroupCard(listOf(item))
+    }
+}
+
+@Composable
+private fun PlanSnapshot(item: ConversationItem.Plan) {
+    val markdownState = rememberMarkdownState(
+        content = item.text.ifEmpty { "正在制定计划…" },
+        retainState = true,
+    )
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("执行计划", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                if (item.isStreaming) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                }
+            }
+            SelectionContainer {
+                Markdown(
+                    markdownState = markdownState,
+                    components = highlightedMarkdownComponents,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
     }
 }
 
@@ -1113,19 +1112,6 @@ private fun PermissionsCard(
 }
 
 @Composable
-private fun RunningIndicator() {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 2.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.Start,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-        Spacer(Modifier.width(8.dp))
-        Text("正在处理", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-}
-
-@Composable
 private fun ChatComposer(
     conversation: ConversationState,
     draft: ChatDraft,
@@ -1188,6 +1174,26 @@ private fun ChatComposer(
     Column(
         Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 10.dp),
     ) {
+        if (conversation.isRunning) {
+            val activeStep = conversation.plan?.steps?.firstOrNull {
+                it.status == PlanStepStatus.IN_PROGRESS
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = activeStep?.text ?: "正在处理",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
         if (activeToken != null && (paletteEntries.isNotEmpty() || isLoadingResources)) {
             ComposerPalette(
                 entries = paletteEntries,
@@ -1989,7 +1995,6 @@ private sealed interface ChatDialog {
     data object Actions : ChatDialog
     data object Review : ChatDialog
     data object Goal : ChatDialog
-    data object Changes : ChatDialog
     data object Statistics : ChatDialog
 }
 

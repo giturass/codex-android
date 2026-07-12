@@ -11,6 +11,7 @@ import com.hebo.codex.domain.UserMessagePart
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -103,6 +104,20 @@ class ProtocolMapperTest {
         assertEquals(6L, usage.last.inputTokens)
         assertEquals(1L, usage.last.reasoningOutputTokens)
         assertEquals(200000L, usage.modelContextWindow)
+    }
+
+    @Test
+    fun mapsPlanToPersistentConversationItem() {
+        val item = json.parseToJsonElement(
+            """{"type":"plan","id":"plan-1","text":"1. 定位问题\n2. 修改实现"}""",
+        ).jsonObject
+
+        val mapped = ProtocolMapper.conversationItem(item, "turn-1", isCompleted = true)
+            as ConversationItem.Plan
+
+        assertEquals("plan-1", mapped.id)
+        assertEquals("1. 定位问题\n2. 修改实现", mapped.text)
+        assertFalse(mapped.isStreaming)
     }
 
     @Test

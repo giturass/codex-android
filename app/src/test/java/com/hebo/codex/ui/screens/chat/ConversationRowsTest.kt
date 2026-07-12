@@ -90,11 +90,26 @@ class ConversationRowsTest {
             listOf(command("command", "turn-1", ActivityStatus.IN_PROGRESS)),
         )
 
-        assertTrue(rows.hasInProgressActivity())
         assertEquals(
             "正在执行 pwd",
             activityGroupLabel((rows.single() as ConversationRow.ActivityGroup).items),
         )
+    }
+
+    @Test
+    fun `计划作为独立的持久化记录展示`() {
+        val plan = ConversationItem.Plan(
+            id = "plan-1",
+            turnId = "turn-1",
+            text = "1. 检查实现",
+            isStreaming = false,
+        )
+
+        val rows = buildConversationRows(listOf(command("command", "turn-1"), plan))
+
+        assertEquals(2, rows.size)
+        assertTrue(rows[0] is ConversationRow.ActivityGroup)
+        assertEquals(plan, (rows[1] as ConversationRow.Item).item)
     }
 
     private fun command(

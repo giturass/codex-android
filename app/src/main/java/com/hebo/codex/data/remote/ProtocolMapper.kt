@@ -221,12 +221,11 @@ object ProtocolMapper {
                 status = activityStatus(item.optionalString("status"), isCompleted),
             )
 
-            "plan" -> ConversationItem.Activity(
+            "plan" -> ConversationItem.Plan(
                 id = id,
                 turnId = turnId,
-                title = "计划",
-                details = item.requiredString("text"),
-                status = if (isCompleted) ActivityStatus.COMPLETED else ActivityStatus.IN_PROGRESS,
+                text = item.requiredString("text"),
+                isStreaming = !isCompleted,
             )
 
             "mcpToolCall" -> genericActivity(

@@ -1073,9 +1073,9 @@ class CodexRepository(
             }
 
             "item/plan/delta" -> updateNotifiedItem { item ->
-                val activity = item as? ConversationItem.Activity
+                val plan = item as? ConversationItem.Plan
                     ?: throw ProtocolException("plan delta 的目标类型不正确")
-                activity.copy(details = activity.details + params.requiredString("delta"))
+                plan.copy(text = plan.text + params.requiredString("delta"))
             }
 
             "item/mcpToolCall/progress" -> updateNotifiedItem { item ->

@@ -106,6 +106,7 @@ internal fun activityGroupLabel(items: List<ConversationItem>): String {
     if (activeItem != null) {
         return when (activeItem) {
             is ConversationItem.Reasoning -> "正在思考"
+            is ConversationItem.Plan -> "正在制定计划"
             is ConversationItem.CommandExecution -> "正在执行 ${activeItem.command.commandPreview()}"
             is ConversationItem.FileChange -> "正在修改 ${activeItem.changes.size} 个文件"
             is ConversationItem.Activity -> activeItem.title
@@ -138,6 +139,7 @@ private fun activityGroupStatus(items: List<ConversationItem>): ActivityStatus {
 
 internal fun ConversationItem.activityStatus(): ActivityStatus = when (this) {
     is ConversationItem.Reasoning -> if (isStreaming) ActivityStatus.IN_PROGRESS else ActivityStatus.COMPLETED
+    is ConversationItem.Plan -> if (isStreaming) ActivityStatus.IN_PROGRESS else ActivityStatus.COMPLETED
     is ConversationItem.CommandExecution -> status
     is ConversationItem.FileChange -> status
     is ConversationItem.Activity -> status
@@ -248,6 +250,8 @@ private fun activityItemTitle(item: ConversationItem): String = when (item) {
         else -> "分析与推理"
     }
 
+    is ConversationItem.Plan -> if (item.isStreaming) "正在制定计划" else "执行计划"
+
     is ConversationItem.CommandExecution -> when (item.status) {
         ActivityStatus.IN_PROGRESS -> "正在执行 ${item.command.commandPreview()}"
         ActivityStatus.COMPLETED -> "执行 ${item.command.commandPreview()}"
@@ -275,6 +279,18 @@ private fun ActivityItemDetails(item: ConversationItem) {
                 SelectionContainer {
                     Text(
                         item.details,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
+        is ConversationItem.Plan -> {
+            if (item.text.isNotBlank()) {
+                SelectionContainer {
+                    Text(
+                        item.text,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

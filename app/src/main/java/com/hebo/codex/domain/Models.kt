@@ -155,6 +155,13 @@ sealed interface ConversationItem {
         val isStreaming: Boolean,
     ) : ConversationItem
 
+    data class Plan(
+        override val id: String,
+        override val turnId: String,
+        val text: String,
+        val isStreaming: Boolean,
+    ) : ConversationItem
+
     data class CommandExecution(
         override val id: String,
         override val turnId: String,
