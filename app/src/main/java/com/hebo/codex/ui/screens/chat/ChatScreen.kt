@@ -54,18 +54,21 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.BarChart
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.Flag
+import androidx.compose.material.icons.rounded.HourglassTop
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -151,6 +154,7 @@ import com.hebo.codex.domain.ThreadGoal
 import com.hebo.codex.domain.ThreadGoalStatus
 import com.hebo.codex.domain.TokenUsage
 import com.hebo.codex.domain.TokenUsageBreakdown
+import com.hebo.codex.domain.TurnPlan
 import com.hebo.codex.domain.TurnOptions
 import com.hebo.codex.domain.UserInputPart
 import com.hebo.codex.domain.UserFacingError
@@ -908,44 +912,10 @@ private fun ConversationItemView(item: ConversationItem) {
 
 @Composable
 private fun PlanSnapshot(item: ConversationItem.Plan) {
-    var expanded by rememberSaveable(item.turnId, item.id) { mutableStateOf(false) }
-    var expansionPhase by remember(item.turnId, item.id) {
-        mutableStateOf(PlanExpansionPhase.COLLAPSED)
-    }
     val markdownState = rememberMarkdownState(
         content = item.text.ifEmpty { "正在制定计划…" },
         retainState = true,
     )
-    val bodyAlpha by animateFloatAsState(
-        targetValue = if (expansionPhase.bodyVisible) 1f else 0f,
-        animationSpec = tween(PLAN_CONTENT_FADE_DURATION_MILLIS),
-        label = "计划内容透明度",
-    )
-    val arrowRotation by animateFloatAsState(
-        targetValue = if (expanded) 180f else 0f,
-        animationSpec = tween(PLAN_CONTENT_FADE_DURATION_MILLIS),
-        label = "计划展开箭头",
-    )
-
-    LaunchedEffect(expanded) {
-        expansionPhase = expansionPhase.startTransition(expanded)
-        when (expansionPhase) {
-            PlanExpansionPhase.EXPANDING -> {
-                delay(PLAN_SIZE_ANIMATION_DURATION_MILLIS.toLong())
-                expansionPhase = expansionPhase.settle()
-            }
-
-            PlanExpansionPhase.COLLAPSING -> {
-                delay(PLAN_CONTENT_FADE_DURATION_MILLIS.toLong())
-                expansionPhase = expansionPhase.settle()
-            }
-
-            PlanExpansionPhase.COLLAPSED,
-            PlanExpansionPhase.EXPANDED,
-            -> Unit
-        }
-    }
-
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
@@ -953,59 +923,25 @@ private fun PlanSnapshot(item: ConversationItem.Plan) {
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Column(
-            Modifier
-                .fillMaxWidth()
-                .animateContentSize(
-                    animationSpec = tween(PLAN_SIZE_ANIMATION_DURATION_MILLIS),
-                ),
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(role = Role.Button) { expanded = !expanded }
-                    .semantics {
-                        stateDescription = if (expanded) "已展开" else "已收起"
-                    }
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = if (item.isStreaming) "正在制定计划" else "执行计划",
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleSmall,
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("执行计划", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
                 if (item.isStreaming) {
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(8.dp))
                 }
-                Icon(
-                    imageVector = Icons.Rounded.KeyboardArrowDown,
-                    contentDescription = null,
-                    modifier = Modifier.size(22.dp).rotate(arrowRotation),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
-
-            if (expansionPhase.bodyIncluded) {
-                SelectionContainer(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 16.dp, end = 16.dp, bottom = 14.dp)
-                        .graphicsLayer { alpha = bodyAlpha },
-                ) {
-                    Markdown(
-                        markdownState = markdownState,
-                        components = highlightedMarkdownComponents,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
+            SelectionContainer {
+                Markdown(
+                    markdownState = markdownState,
+                    components = highlightedMarkdownComponents,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
     }
 }
-
-private const val PLAN_SIZE_ANIMATION_DURATION_MILLIS = 220
-private const val PLAN_CONTENT_FADE_DURATION_MILLIS = 100
 
 @Composable
 private fun AgentMessage(item: ConversationItem.AgentMessage) {
@@ -1496,31 +1432,10 @@ private fun ChatComposer(
         Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 12.dp),
     ) {
         if (conversation.isRunning) {
-            val activeStep = conversation.plan?.steps?.firstOrNull {
-                it.status == PlanStepStatus.IN_PROGRESS
-            }
-            Surface(
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                shadowElevation = 2.dp,
-            ) {
-                Row(
-                    Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = activeStep?.text ?: "正在处理",
-                        modifier = Modifier.widthIn(max = 400.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
+            ActivePlanCard(
+                plan = conversation.plan,
+                activeTurnId = conversation.activeTurnId,
+            )
         }
         if (activeToken != null && (paletteEntries.isNotEmpty() || isLoadingResources)) {
             ComposerPalette(
@@ -1686,6 +1601,136 @@ private fun ChatComposer(
         null -> Unit
     }
 }
+
+@Composable
+private fun ActivePlanCard(plan: TurnPlan?, activeTurnId: String?) {
+    val canExpand = plan?.steps?.isNotEmpty() == true
+    val activeStep = plan?.steps?.firstOrNull { it.status == PlanStepStatus.IN_PROGRESS }
+    var expanded by rememberSaveable(activeTurnId) { mutableStateOf(false) }
+    var expansionPhase by remember(activeTurnId) {
+        mutableStateOf(PlanExpansionPhase.COLLAPSED)
+    }
+    val bodyAlpha by animateFloatAsState(
+        targetValue = if (expansionPhase.bodyVisible) 1f else 0f,
+        animationSpec = tween(ACTIVE_PLAN_CONTENT_FADE_DURATION_MILLIS),
+        label = "工作计划内容透明度",
+    )
+    val arrowRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = tween(ACTIVE_PLAN_CONTENT_FADE_DURATION_MILLIS),
+        label = "工作计划展开箭头",
+    )
+
+    LaunchedEffect(expanded) {
+        expansionPhase = expansionPhase.startTransition(expanded)
+        when (expansionPhase) {
+            PlanExpansionPhase.EXPANDING -> {
+                delay(ACTIVE_PLAN_SIZE_ANIMATION_DURATION_MILLIS.toLong())
+                expansionPhase = expansionPhase.settle()
+            }
+
+            PlanExpansionPhase.COLLAPSING -> {
+                delay(ACTIVE_PLAN_CONTENT_FADE_DURATION_MILLIS.toLong())
+                expansionPhase = expansionPhase.settle()
+            }
+
+            PlanExpansionPhase.COLLAPSED,
+            PlanExpansionPhase.EXPANDED,
+            -> Unit
+        }
+    }
+
+    Surface(
+        modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shadowElevation = 2.dp,
+    ) {
+        Column(
+            modifier = Modifier.animateContentSize(
+                animationSpec = tween(ACTIVE_PLAN_SIZE_ANIMATION_DURATION_MILLIS),
+            ),
+        ) {
+            Row(
+                modifier = Modifier
+                    .then(if (expansionPhase.bodyIncluded) Modifier.fillMaxWidth() else Modifier)
+                    .clickable(enabled = canExpand, role = Role.Button) { expanded = !expanded }
+                    .semantics {
+                        if (canExpand) stateDescription = if (expanded) "已展开" else "已收起"
+                    }
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = activeStep?.text ?: "正在处理",
+                    modifier = Modifier.widthIn(max = 400.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (canExpand) {
+                    Spacer(Modifier.width(6.dp))
+                    Icon(
+                        imageVector = Icons.Rounded.KeyboardArrowDown,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp).rotate(arrowRotation),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            if (expansionPhase.bodyIncluded && plan != null) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 12.dp, end = 12.dp, bottom = 12.dp)
+                        .graphicsLayer { alpha = bodyAlpha },
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    plan.explanation?.takeIf(String::isNotBlank)?.let { explanation ->
+                        Text(
+                            text = explanation,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    plan.steps.forEach { step ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            val (icon, description) = when (step.status) {
+                                PlanStepStatus.COMPLETED -> Icons.Rounded.Check to "已完成"
+                                PlanStepStatus.IN_PROGRESS -> Icons.Rounded.HourglassTop to "进行中"
+                                PlanStepStatus.PENDING -> Icons.Rounded.RadioButtonUnchecked to "待处理"
+                            }
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = description,
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = step.text,
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private const val ACTIVE_PLAN_SIZE_ANIMATION_DURATION_MILLIS = 220
+private const val ACTIVE_PLAN_CONTENT_FADE_DURATION_MILLIS = 100
 
 @Composable
 private fun ComposerAddMenu(
