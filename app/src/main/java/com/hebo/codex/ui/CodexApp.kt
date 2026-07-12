@@ -247,9 +247,9 @@ fun CodexApp(
                     closeDrawer()
                     navController.navigate(ServerEditorRoute())
                 },
-                onOpenSettings = {
+                onOpenSettings = { serverId ->
                     closeDrawer()
-                    homeState.activeServerId?.let { navController.navigate(ServerHubRoute(it)) }
+                    navController.navigate(ServerHubRoute(serverId))
                 },
             )
         }

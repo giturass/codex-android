@@ -38,12 +38,10 @@ import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.PriorityHigh
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconToggleButton
@@ -125,7 +123,7 @@ fun CodexNavigationDrawer(
     onEditServer: (String) -> Unit,
     onRemoveServer: (String) -> Unit,
     onAddServer: () -> Unit,
-    onOpenSettings: () -> Unit,
+    onOpenSettings: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val sheetModifier = modifier.fillMaxHeight().widthIn(max = 360.dp)
@@ -225,7 +223,7 @@ private fun ColumnScope.DrawerContent(
     onEditServer: (String) -> Unit,
     onRemoveServer: (String) -> Unit,
     onAddServer: () -> Unit,
-    onOpenSettings: () -> Unit,
+    onOpenSettings: (String) -> Unit,
 ) {
     var drawerPage by rememberSaveable(activeServer?.id) { mutableStateOf(DrawerPage.RECENT) }
     var groupByProject by rememberSaveable { mutableStateOf(false) }
@@ -304,6 +302,10 @@ private fun ColumnScope.DrawerContent(
                 onReconnect = onReconnectServer,
                 onEdit = onEditServer,
                 onDelete = onRemoveServer,
+                onOpenSettings = { serverId ->
+                    leaveTransientPage()
+                    onOpenSettings(serverId)
+                },
                 onAdd = onAddServer,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -486,19 +488,6 @@ private fun ColumnScope.DrawerContent(
             }
         }
 
-        if (activeServer != null) {
-            HorizontalDivider()
-            NavigationDrawerItem(
-                label = { Text("服务器设置") },
-                selected = false,
-                onClick = {
-                    leaveTransientPage()
-                    onOpenSettings()
-                },
-                icon = { Icon(Icons.Rounded.Settings, contentDescription = null) },
-                modifier = Modifier.padding(vertical = 8.dp),
-            )
-        }
     }
 
     selectedThread?.let { thread ->

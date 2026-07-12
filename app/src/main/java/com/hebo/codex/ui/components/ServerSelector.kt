@@ -17,9 +17,12 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
@@ -51,16 +54,21 @@ fun ServerSelector(
     onReconnect: (String) -> Unit,
     onEdit: (String) -> Unit,
     onDelete: (String) -> Unit,
+    onOpenSettings: (String) -> Unit,
     onAdd: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    var actionsServer by remember { mutableStateOf<ServerProfile?>(null) }
     var deletingServer by remember { mutableStateOf<ServerProfile?>(null) }
     val activeStatus = activeServer?.id?.let(statuses::get) ?: ConnectionStatus.Disconnected
 
     ExposedDropdownMenuBox(
         expanded = expanded,
-        onExpandedChange = { expanded = it },
+        onExpandedChange = {
+            expanded = it
+            if (!it) actionsServer = null
+        },
         modifier = modifier,
     ) {
         Surface(
@@ -90,7 +98,13 @@ fun ServerSelector(
                 Icon(Icons.Rounded.ExpandMore, contentDescription = "切换服务器")
             }
         }
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = {
+                expanded = false
+                actionsServer = null
+            },
+        ) {
             servers.forEach { server ->
                 val status = statuses[server.id] ?: ConnectionStatus.Disconnected
                 DropdownMenuItem(
@@ -129,34 +143,36 @@ fun ServerSelector(
                     },
                     leadingIcon = { ConnectionIndicator(status) },
                     trailingIcon = {
-                        Row {
-                            IconButton(
-                                onClick = {
+                        IconButton(
+                            onClick = { actionsServer = server },
+                            modifier = Modifier.size(40.dp),
+                        ) {
+                            Icon(Icons.Rounded.MoreVert, contentDescription = "管理 ${server.name}")
+                            ServerActionsMenu(
+                                expanded = actionsServer?.id == server.id,
+                                status = status,
+                                onDismiss = { actionsServer = null },
+                                onOpenSettings = {
+                                    actionsServer = null
+                                    expanded = false
+                                    onOpenSettings(server.id)
+                                },
+                                onReconnect = {
+                                    actionsServer = null
                                     expanded = false
                                     onReconnect(server.id)
                                 },
-                                modifier = Modifier.size(40.dp),
-                            ) {
-                                Icon(Icons.Rounded.Refresh, contentDescription = "重新连接 ${server.name}")
-                            }
-                            IconButton(
-                                onClick = {
+                                onEdit = {
+                                    actionsServer = null
                                     expanded = false
                                     onEdit(server.id)
                                 },
-                                modifier = Modifier.size(40.dp),
-                            ) {
-                                Icon(Icons.Rounded.Edit, contentDescription = "编辑 ${server.name}")
-                            }
-                            IconButton(
-                                onClick = {
+                                onDelete = {
+                                    actionsServer = null
                                     expanded = false
                                     deletingServer = server
                                 },
-                                modifier = Modifier.size(40.dp),
-                            ) {
-                                Icon(Icons.Rounded.Delete, contentDescription = "删除 ${server.name}")
-                            }
+                            )
                         }
                     },
                     onClick = {
@@ -196,3 +212,60 @@ fun ServerSelector(
         )
     }
 }
+
+@Composable
+private fun ServerActionsMenu(
+    expanded: Boolean,
+    status: ConnectionStatus,
+    onDismiss: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onReconnect: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val settingsEnabled = isServerSettingsEnabled(status)
+
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        DropdownMenuItem(
+            text = {
+                Column {
+                    Text("服务器设置")
+                    if (!settingsEnabled) {
+                        Text(
+                            text = "连接后可用",
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                }
+            },
+            leadingIcon = { Icon(Icons.Rounded.Settings, contentDescription = null) },
+            enabled = settingsEnabled,
+            onClick = onOpenSettings,
+        )
+        DropdownMenuItem(
+            text = { Text("重新连接") },
+            leadingIcon = { Icon(Icons.Rounded.Refresh, contentDescription = null) },
+            onClick = onReconnect,
+        )
+        DropdownMenuItem(
+            text = { Text("编辑连接") },
+            leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
+            onClick = onEdit,
+        )
+        HorizontalDivider()
+        DropdownMenuItem(
+            text = { Text("删除服务器", color = MaterialTheme.colorScheme.error) },
+            leadingIcon = {
+                Icon(
+                    Icons.Rounded.Delete,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                )
+            },
+            onClick = onDelete,
+        )
+    }
+}
+
+internal fun isServerSettingsEnabled(status: ConnectionStatus): Boolean =
+    status is ConnectionStatus.Connected
