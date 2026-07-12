@@ -357,22 +357,32 @@ private fun ActivityItemDetails(item: ConversationItem) {
 @Composable
 private fun ChangedFileView(change: ChangedFile) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            changedFileTitle(change),
-            style = MaterialTheme.typography.labelMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        val label = changedFileLabel(change)
+        Row(Modifier.fillMaxWidth()) {
+            Text(
+                "${label.action} · ",
+                style = MaterialTheme.typography.labelMedium,
+            )
+            Text(
+                label.path,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.StartEllipsis,
+            )
+        }
         if (change.diff.isNotBlank()) FileDiffBlock(change)
     }
 }
 
-private fun changedFileTitle(change: ChangedFile): String = when (val kind = change.kind) {
-    FileChangeKind.Add -> "新增 · ${change.path}"
-    FileChangeKind.Delete -> "删除 · ${change.path}"
+private data class ChangedFileLabel(val action: String, val path: String)
+
+private fun changedFileLabel(change: ChangedFile): ChangedFileLabel = when (val kind = change.kind) {
+    FileChangeKind.Add -> ChangedFileLabel(action = "新增", path = change.path)
+    FileChangeKind.Delete -> ChangedFileLabel(action = "删除", path = change.path)
     is FileChangeKind.Update -> kind.movePath
-        ?.let { destination -> "移动 · ${change.path} → $destination" }
-        ?: "修改 · ${change.path}"
+        ?.let { destination -> ChangedFileLabel(action = "移动", path = "${change.path} → $destination") }
+        ?: ChangedFileLabel(action = "修改", path = change.path)
 }
 
 private fun String.commandPreview(): String =
