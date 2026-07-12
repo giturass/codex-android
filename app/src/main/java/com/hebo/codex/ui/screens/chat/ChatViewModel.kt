@@ -28,6 +28,7 @@ import com.hebo.codex.domain.newDraftRevision
 import com.hebo.codex.util.runSuspendCatching
 import com.hebo.codex.util.toUserFacingError
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -75,13 +76,45 @@ class ChatViewModel(
     val state: StateFlow<ChatUiState> = mutableState
     val events = mutableEvents.receiveAsFlow()
     private var draftInitialized = false
+    private var conversationJob: Job? = null
     private val draftKey = DraftKey(serverId, DraftTarget.Thread(threadId))
 
     init {
         viewModelScope.launch {
-            val restoredResult = runSuspendCatching { draftRepository.load(draftKey) }
+            draftRepository.failures.collectLatest { failure ->
+                if (failure.key == draftKey) {
+                    mutableState.update {
+                        it.copy(screenError = failure.error.toUserFacingError("保存草稿失败"))
+                    }
+                }
+            }
+        }
+        viewModelScope.launch {
+            runSuspendCatching { repository.getGoal(serverId, threadId) }
+                .onSuccess { goal -> mutableState.update { it.copy(goal = goal) } }
+        }
+        viewModelScope.launch {
+            repository.connectionStatuses.collectLatest { statuses ->
+                mutableState.update {
+                    it.copy(connectionStatus = statuses[serverId] ?: ConnectionStatus.Disconnected)
+                }
+            }
+        }
+    }
+
+    fun resumeConversation() {
+        if (conversationJob != null) return
+        conversationJob = viewModelScope.launch {
+            val restoredResult = if (draftInitialized) {
+                Result.success<ConversationDraft?>(null)
+            } else {
+                runSuspendCatching { draftRepository.load(draftKey) }
+            }
+            var conversationOpened = false
             try {
-                repository.openConversation(serverId, threadId).collectLatest { value ->
+                val conversation = repository.openConversation(serverId, threadId)
+                conversationOpened = true
+                conversation.collectLatest { value ->
                     val initialDraft = if (draftInitialized) {
                         null
                     } else {
@@ -108,28 +141,15 @@ class ChatViewModel(
                     isLoading = false,
                     screenError = error.toUserFacingError("无法打开会话"),
                 )
+            } finally {
+                if (conversationOpened) repository.releaseConversation(serverId, threadId)
             }
         }
-        viewModelScope.launch {
-            draftRepository.failures.collectLatest { failure ->
-                if (failure.key == draftKey) {
-                    mutableState.update {
-                        it.copy(screenError = failure.error.toUserFacingError("保存草稿失败"))
-                    }
-                }
-            }
-        }
-        viewModelScope.launch {
-            runSuspendCatching { repository.getGoal(serverId, threadId) }
-                .onSuccess { goal -> mutableState.update { it.copy(goal = goal) } }
-        }
-        viewModelScope.launch {
-            repository.connectionStatuses.collectLatest { statuses ->
-                mutableState.update {
-                    it.copy(connectionStatus = statuses[serverId] ?: ConnectionStatus.Disconnected)
-                }
-            }
-        }
+    }
+
+    fun pauseConversation() {
+        conversationJob?.cancel()
+        conversationJob = null
     }
 
     fun updateDraftMessage(message: String) {
@@ -381,8 +401,8 @@ class ChatViewModel(
     }
 
     override fun onCleared() {
+        pauseConversation()
         flushDraft()
-        repository.closeConversation(serverId, threadId)
     }
 
     private fun showError(error: Throwable) {

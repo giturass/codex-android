@@ -57,6 +57,7 @@ class CodexRepository(
     private val connections = ConcurrentHashMap<String, AppServerConnection>()
     private val connectionObservers = mutableMapOf<String, List<Job>>()
     private val conversations = ConcurrentHashMap<ConversationKey, MutableStateFlow<ConversationState>>()
+    private val conversationLeases = ConversationLeaseRegistry<ConversationKey>()
     private val pendingResumeGoalSnapshots = ConcurrentHashMap.newKeySet<ConversationKey>()
     private val pendingRequestRoutes = ConcurrentHashMap<String, PendingRequestRoute>()
     private val mutableConnectionStatuses = MutableStateFlow<Map<String, ConnectionStatus>>(emptyMap())
@@ -204,17 +205,22 @@ class CodexRepository(
 
     suspend fun openConversation(serverId: String, threadId: String): StateFlow<ConversationState> {
         val key = ConversationKey(serverId, threadId)
-        conversations[key]?.let {
+        conversationLeases.acquire(key)
+        return try {
+            val conversation = conversations[key] ?: conversationMutex.withLock {
+                conversations[key] ?: run {
+                    val snapshot = resumeConversation(key)
+                    MutableStateFlow(snapshot.toConversationState(awaitServer(serverId))).also {
+                        conversations[key] = it
+                    }
+                }
+            }
             markThreadViewed(serverId, threadId)
-            return it
+            conversation
+        } catch (error: Throwable) {
+            conversationLeases.release(key)
+            throw error
         }
-        return conversationMutex.withLock {
-            conversations[key]?.let { return@withLock it }
-            val snapshot = resumeConversation(key)
-            val state = MutableStateFlow(snapshot.toConversationState(awaitServer(serverId)))
-            conversations[key] = state
-            state
-        }.also { markThreadViewed(serverId, threadId) }
     }
 
     suspend fun sendMessage(
@@ -389,18 +395,28 @@ class CodexRepository(
         }
     }
 
-    fun closeConversation(serverId: String, threadId: String) {
+    fun releaseConversation(serverId: String, threadId: String) {
         val key = ConversationKey(serverId, threadId)
-        pendingResumeGoalSnapshots.remove(key)
+        conversationLeases.release(key)
+        releaseConversationIfUnused(key)
+    }
+
+    private fun releaseConversationIfUnused(key: ConversationKey) {
         applicationScope.launch {
-            runSuspendCatching {
-                api(serverId).request(
-                    StableRpcMethod.THREAD_UNSUBSCRIBE,
-                    buildJsonObject { put("threadId", threadId) },
-                )
+            conversationMutex.withLock {
+                if (conversationLeases.isHeld(key)) return@withLock
+                val conversation = conversations[key] ?: return@withLock
+                if (conversation.value.requiresRuntimeRetention) return@withLock
+                runSuspendCatching {
+                    api(key.serverId).request(
+                        StableRpcMethod.THREAD_UNSUBSCRIBE,
+                        buildJsonObject { put("threadId", key.threadId) },
+                    )
+                }
+                conversations.remove(key, conversation)
+                pendingResumeGoalSnapshots.remove(key)
+                removePendingRequests(key.serverId, key.threadId)
             }
-            conversations.remove(key)
-            removePendingRequests(serverId, threadId)
         }
     }
 
@@ -919,6 +935,7 @@ class CodexRepository(
                         activeTurnId = null,
                         isRunning = false,
                         pendingRequests = emptyList(),
+                        plan = null,
                         errorMessage = errorMessage,
                     )
                 }
@@ -935,9 +952,12 @@ class CodexRepository(
                 )
                 removePendingRequests(serverId, threadId)
                 bumpThreadRevision(serverId)
+                releaseConversationIfUnused(key)
             }
 
-            "turn/plan/updated" -> state?.updateState { it.copy(plan = ProtocolMapper.turnPlan(params)) }
+            "turn/plan/updated" -> state?.updateState { current ->
+                current.withActiveTurnPlan(ProtocolMapper.activeTurnPlan(params))
+            }
 
             "error" -> {
                 val error = params.requiredObject("error")

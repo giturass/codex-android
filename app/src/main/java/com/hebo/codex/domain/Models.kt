@@ -113,7 +113,7 @@ data class ConversationState(
     val activeTurnId: String? = null,
     val isRunning: Boolean = false,
     val pendingRequests: List<PendingServerRequest> = emptyList(),
-    val plan: TurnPlan? = null,
+    val plan: ActiveTurnPlan? = null,
     val tokenUsage: TokenUsage? = null,
     val goal: ThreadGoal? = null,
     val goalLoaded: Boolean = false,
@@ -375,7 +375,8 @@ enum class ApprovalDecision(val wireValue: String) {
     CANCEL("cancel"),
 }
 
-data class TurnPlan(
+data class ActiveTurnPlan(
+    val turnId: String,
     val explanation: String?,
     val steps: List<TurnPlanStep>,
 )

@@ -159,7 +159,7 @@ import com.hebo.codex.domain.ThreadGoal
 import com.hebo.codex.domain.ThreadGoalStatus
 import com.hebo.codex.domain.TokenUsage
 import com.hebo.codex.domain.TokenUsageBreakdown
-import com.hebo.codex.domain.TurnPlan
+import com.hebo.codex.domain.ActiveTurnPlan
 import com.hebo.codex.domain.TurnOptions
 import com.hebo.codex.domain.UserInputPart
 import com.hebo.codex.domain.UserFacingError
@@ -309,8 +309,12 @@ fun ChatScreen(
     }
 
     LifecycleResumeEffect(viewModel) {
+        viewModel.resumeConversation()
         onRefreshRateLimits()
-        onPauseOrDispose { viewModel.flushDraft() }
+        onPauseOrDispose {
+            viewModel.pauseConversation()
+            viewModel.flushDraft()
+        }
     }
 
     LaunchedEffect(viewModel) {
@@ -1367,7 +1371,7 @@ private fun PermissionsCard(
 @Composable
 internal fun ConversationComposer(
     isRunning: Boolean,
-    plan: TurnPlan?,
+    plan: ActiveTurnPlan?,
     activeTurnId: String?,
     message: String,
     attachments: List<DraftAttachment>,
@@ -1637,7 +1641,7 @@ internal fun composerModelLabel(
 }
 
 @Composable
-private fun ActivePlanCard(plan: TurnPlan?, activeTurnId: String?) {
+private fun ActivePlanCard(plan: ActiveTurnPlan?, activeTurnId: String?) {
     val canExpand = plan?.steps?.isNotEmpty() == true
     val activeStep = plan?.steps?.firstOrNull { it.status == PlanStepStatus.IN_PROGRESS }
     var expanded by rememberSaveable(activeTurnId) { mutableStateOf(false) }

@@ -84,9 +84,9 @@ class ProtocolMapperTest {
 
     @Test
     fun mapsPlanAndTokenUsageNotifications() {
-        val plan = ProtocolMapper.turnPlan(
+        val plan = ProtocolMapper.activeTurnPlan(
             json.parseToJsonElement(
-                """{"explanation":"先检查","plan":[{"step":"定位问题","status":"inProgress"}]}""",
+                """{"turnId":"turn-1","explanation":"先检查","plan":[{"step":"定位问题","status":"inProgress"}]}""",
             ).jsonObject,
         )
         val usage = ProtocolMapper.tokenUsage(
@@ -95,6 +95,7 @@ class ProtocolMapperTest {
             ).jsonObject,
         )
 
+        assertEquals("turn-1", plan.turnId)
         assertEquals("先检查", plan.explanation)
         assertEquals("定位问题", plan.steps.single().text)
         assertEquals(30L, usage.total.totalTokens)

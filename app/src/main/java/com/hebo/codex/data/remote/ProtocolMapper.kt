@@ -15,7 +15,7 @@ import com.hebo.codex.domain.ThreadRuntimeStatus
 import com.hebo.codex.domain.ThreadSummary
 import com.hebo.codex.domain.TokenUsage
 import com.hebo.codex.domain.TokenUsageBreakdown
-import com.hebo.codex.domain.TurnPlan
+import com.hebo.codex.domain.ActiveTurnPlan
 import com.hebo.codex.domain.TurnPlanStep
 import com.hebo.codex.domain.PlanStepStatus
 import com.hebo.codex.domain.RequestedFileSystemPermissions
@@ -99,7 +99,8 @@ object ProtocolMapper {
         )
     }
 
-    fun turnPlan(params: JsonObject): TurnPlan = TurnPlan(
+    fun activeTurnPlan(params: JsonObject): ActiveTurnPlan = ActiveTurnPlan(
+        turnId = params.requiredString("turnId"),
         explanation = params.optionalString("explanation"),
         steps = params.requiredArray("plan").map { element ->
             val step = element.jsonObject
