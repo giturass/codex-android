@@ -163,6 +163,7 @@ private val highlightedMarkdownComponents = markdownComponents(
 )
 
 private const val CHAT_LIST_END_KEY = "chat-list-end"
+private const val SCROLL_TO_BOTTOM_BUTTON_DELAY_MILLIS = 1_500L
 private val ChatHeaderControlsHeight = 64.dp
 private val ChatHeaderFadeHeight = 24.dp
 private val ChatComposerOverlayMinHeight = 116.dp
@@ -187,6 +188,7 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     val scrollScope = rememberCoroutineScope()
     var autoFollow by rememberSaveable(conversation?.threadId) { mutableStateOf(true) }
+    var showScrollToBottomButton by remember(conversation?.threadId) { mutableStateOf(false) }
     var dialog by remember { mutableStateOf<ChatDialog?>(null) }
     var activeRequestKey by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
     var technicalError by remember { mutableStateOf<UserFacingError?>(null) }
@@ -248,6 +250,16 @@ fun ChatScreen(
                 !listState.isScrollInProgress && !listState.canScrollForward
             }.first { it }
             autoFollow = true
+        }
+    }
+    LaunchedEffect(listState, autoFollow) {
+        snapshotFlow {
+            !autoFollow && !listState.isScrollInProgress && listState.canScrollForward
+        }.collectLatest { shouldShow ->
+            if (shouldShow) {
+                delay(SCROLL_TO_BOTTOM_BUTTON_DELAY_MILLIS)
+            }
+            showScrollToBottomButton = shouldShow
         }
     }
 
@@ -452,7 +464,7 @@ fun ChatScreen(
             }
         }
 
-        if (conversation != null && !autoFollow) {
+        if (conversation != null && showScrollToBottomButton) {
             SmallFloatingActionButton(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -460,6 +472,7 @@ fun ChatScreen(
                     .size(46.dp),
                 shape = CircleShape,
                 onClick = {
+                    showScrollToBottomButton = false
                     scrollScope.launch {
                         val lastIndex = listState.layoutInfo.totalItemsCount - 1
                         if (lastIndex >= 0) {
