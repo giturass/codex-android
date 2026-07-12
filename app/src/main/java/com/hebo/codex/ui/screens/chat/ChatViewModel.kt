@@ -25,6 +25,7 @@ import com.hebo.codex.domain.TurnOptions
 import com.hebo.codex.domain.UserInputPart
 import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.domain.newDraftRevision
+import com.hebo.codex.domain.quickPhraseInput
 import com.hebo.codex.util.runSuspendCatching
 import com.hebo.codex.util.toUserFacingError
 import kotlinx.coroutines.CancellationException
@@ -182,11 +183,9 @@ class ChatViewModel(
         scheduleDraft()
     }
 
-    fun sendDraft(message: String) {
-        if (mutableState.value.isSendingDraft) return
-        updateDraft { it.copy(message = message) }
+    fun sendDraft() {
         val current = mutableState.value
-        if (current.connectionStatus !is ConnectionStatus.Connected) return
+        if (current.isSendingDraft || current.connectionStatus !is ConnectionStatus.Connected) return
         val draft = current.draft
         val input = buildList {
             draft.message.takeIf(String::isNotBlank)?.let { add(UserInputPart.Text(it)) }
@@ -217,6 +216,19 @@ class ChatViewModel(
                 mutableState.update { it.copy(isSendingDraft = false) }
                 result.exceptionOrNull()?.let(::showError)
             }
+        }
+    }
+
+    fun sendQuickPhrase(content: String) {
+        val current = mutableState.value
+        if (current.isSendingDraft || current.connectionStatus !is ConnectionStatus.Connected) return
+        val input = quickPhraseInput(content)
+        mutableState.update { it.copy(isSendingDraft = true, screenError = null) }
+        viewModelScope.launch {
+            runSuspendCatching {
+                repository.sendMessage(serverId, threadId, input, current.draft.options)
+            }.onFailure(::showError)
+            mutableState.update { it.copy(isSendingDraft = false) }
         }
     }
 

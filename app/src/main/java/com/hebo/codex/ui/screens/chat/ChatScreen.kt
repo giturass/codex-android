@@ -177,7 +177,6 @@ import com.hebo.codex.ui.components.QuickPhraseMenuContent
 import com.hebo.codex.ui.components.ScrollChromeState
 import com.hebo.codex.ui.components.UserFacingErrorDialog
 import com.hebo.codex.ui.components.afterUserScroll
-import com.hebo.codex.ui.components.replaceWithQuickPhrase
 import com.hebo.codex.ui.components.settleTarget
 import com.hebo.codex.ui.quickphrases.QuickPhraseViewModel
 import com.hebo.codex.ui.ratelimits.RateLimitIndicator
@@ -557,12 +556,19 @@ fun ChatScreen(
                                 else -> Unit
                             }
                         },
-                        onSend = { message ->
+                        onSend = {
                             chromeSettleJob?.cancel()
                             chromeSettleJob = null
                             chromeScrollState = ScrollChromeState()
                             autoFollow = true
-                            viewModel.sendDraft(message)
+                            viewModel.sendDraft()
+                        },
+                        onSendQuickPhrase = { content ->
+                            chromeSettleJob?.cancel()
+                            chromeSettleJob = null
+                            chromeScrollState = ScrollChromeState()
+                            autoFollow = true
+                            viewModel.sendQuickPhrase(content)
                         },
                         onStop = viewModel::interrupt,
                     )
@@ -1395,7 +1401,8 @@ internal fun ConversationComposer(
     onInputError: (Throwable) -> Unit,
     onOpenOptions: () -> Unit,
     onCommand: (ComposerCommand) -> Unit,
-    onSend: (String) -> Unit,
+    onSend: () -> Unit,
+    onSendQuickPhrase: (String) -> Unit,
     onStop: (() -> Unit)?,
 ) {
     var dialog by remember { mutableStateOf<ComposerDialog?>(null) }
@@ -1534,11 +1541,9 @@ internal fun ConversationComposer(
                         showQuickPhraseManager = true
                     },
                     onSelectQuickPhrase = { phrase ->
-                        val nextValue = replaceWithQuickPhrase(composerValue, phrase.content)
-                        composerValue = nextValue
                         addMenuExpanded = false
                         showQuickPhrases = false
-                        onSend(nextValue.text)
+                        onSendQuickPhrase(phrase.content)
                     },
                     onInsertTrigger = { trigger ->
                         val nextValue = insertComposerTrigger(composerValue, trigger)
@@ -1577,7 +1582,7 @@ internal fun ConversationComposer(
                 val action = if (stopsActiveTurn) {
                     requireNotNull(onStop)
                 } else {
-                    { onSend(composerValue.text) }
+                    onSend
                 }
                 MessageComposerActionButton(
                     onClick = action,

@@ -19,6 +19,7 @@ import com.hebo.codex.domain.TurnOptions
 import com.hebo.codex.domain.UserInputPart
 import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.domain.newDraftRevision
+import com.hebo.codex.domain.quickPhraseInput
 import com.hebo.codex.ui.screens.chat.availableInputResources
 import com.hebo.codex.util.runSuspendCatching
 import com.hebo.codex.util.toUserFacingError
@@ -194,16 +195,32 @@ class NewTaskViewModel(
         )
     }
 
-    fun startConversation(message: String) {
+    fun startConversation() {
         val current = mutableState.value
         if (current.isCreatingConversation || current.isLoadingDraft) return
-        updateMessage(message)
-        val submission = mutableState.value
-        val serverId = submission.serverId ?: return
-        if (submission.message.isBlank() && submission.attachments.isEmpty()) {
+        val input = buildList {
+            current.message.takeIf(String::isNotBlank)?.let { add(UserInputPart.Text(it)) }
+            addAll(current.attachments.map(DraftAttachment::input))
+        }
+        if (input.isEmpty()) {
             showError(IllegalArgumentException("请输入任务内容"))
             return
         }
+        submitConversation(current, input, consumesDraft = true)
+    }
+
+    fun sendQuickPhrase(content: String) {
+        val current = mutableState.value
+        if (current.isCreatingConversation || current.isLoadingDraft) return
+        submitConversation(current, quickPhraseInput(content), consumesDraft = false)
+    }
+
+    private fun submitConversation(
+        submission: NewTaskUiState,
+        input: List<UserInputPart>,
+        consumesDraft: Boolean,
+    ) {
+        val serverId = submission.serverId ?: return
         if (submission.cwd.isBlank()) {
             showError(IllegalArgumentException("请选择项目"))
             return
@@ -220,57 +237,74 @@ class NewTaskViewModel(
             }
             createdThreadId = threadId
 
-            val input = buildList {
-                submission.message.takeIf(String::isNotBlank)?.let { add(UserInputPart.Text(it)) }
-                addAll(submission.attachments.map(DraftAttachment::input))
-            }
             runSuspendCatching {
                 repository.sendMessage(serverId, threadId, input, submission.options.toTurnOptions())
             }
                 .onSuccess {
-                    runSuspendCatching { draftRepository.delete(currentDraft(submission).key) }
-                        .onFailure { error ->
-                            mutableState.update {
-                                it.copy(errorMessage = error.toUserFacingError("清理草稿失败"))
+                    if (consumesDraft) {
+                        runSuspendCatching { draftRepository.delete(currentDraft(submission).key) }
+                            .onFailure { error ->
+                                mutableState.update {
+                                    it.copy(errorMessage = error.toUserFacingError("清理草稿失败"))
+                                }
                             }
-                        }
+                    }
                     createdThreadId = null
-                    mutableState.update {
-                        it.copy(message = "", attachments = emptyList(), isCreatingConversation = false)
+                    if (consumesDraft) {
+                        mutableState.update {
+                            it.copy(message = "", attachments = emptyList(), isCreatingConversation = false)
+                        }
                     }
                     mutableEvents.send(NewTaskEvent.OpenConversation(serverId, threadId))
                 }
                 .onFailure { sendError ->
-                    val threadDraft = ConversationDraft.Thread(
-                        serverId = serverId,
-                        threadId = threadId,
-                        threadTitle = submission.conversationTitle(),
-                        message = submission.message,
-                        cwd = submission.cwd,
-                        options = submission.options.toTurnOptions(),
-                        attachments = submission.attachments,
-                        updatedAtMillis = System.currentTimeMillis(),
-                        revision = newDraftRevision(),
-                    )
-                    runSuspendCatching {
-                        draftRepository.save(threadDraft)
-                        draftRepository.delete(currentDraft(submission).key)
-                    }.onSuccess {
-                        createdThreadId = null
-                        mutableState.update {
-                            it.copy(message = "", attachments = emptyList(), isCreatingConversation = false)
-                        }
-                        mutableEvents.send(NewTaskEvent.OpenConversation(serverId, threadId))
-                    }.onFailure { draftError ->
-                        showError(
-                            IllegalStateException(
-                                "首条消息发送失败，且无法迁移草稿：${sendError.message.orEmpty()}",
-                                draftError,
-                            ),
+                    if (consumesDraft) {
+                        migrateDraftToConversation(
+                            submission = submission,
+                            threadId = threadId,
+                            sendError = sendError,
                         )
+                    } else {
+                        showError(sendError)
                     }
                 }
             mutableState.update { it.copy(isCreatingConversation = false) }
+        }
+    }
+
+    private suspend fun migrateDraftToConversation(
+        submission: NewTaskUiState,
+        threadId: String,
+        sendError: Throwable,
+    ) {
+        val serverId = requireNotNull(submission.serverId)
+        val threadDraft = ConversationDraft.Thread(
+            serverId = serverId,
+            threadId = threadId,
+            threadTitle = submission.conversationTitle(),
+            message = submission.message,
+            cwd = submission.cwd,
+            options = submission.options.toTurnOptions(),
+            attachments = submission.attachments,
+            updatedAtMillis = System.currentTimeMillis(),
+            revision = newDraftRevision(),
+        )
+        runSuspendCatching {
+            draftRepository.save(threadDraft)
+            draftRepository.delete(currentDraft(submission).key)
+        }.onSuccess {
+            createdThreadId = null
+            mutableState.update {
+                it.copy(message = "", attachments = emptyList(), isCreatingConversation = false)
+            }
+            mutableEvents.send(NewTaskEvent.OpenConversation(serverId, threadId))
+        }.onFailure { draftError ->
+            showError(
+                IllegalStateException(
+                    "首条消息发送失败，且无法迁移草稿：${sendError.message.orEmpty()}",
+                    draftError,
+                ),
+            )
         }
     }
 

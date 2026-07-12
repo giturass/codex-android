@@ -218,6 +218,7 @@ fun HomeScreen(
                 onMoveQuickPhraseUp = quickPhraseViewModel::moveUp,
                 onMoveQuickPhraseDown = quickPhraseViewModel::moveDown,
                 onSend = newTaskViewModel::startConversation,
+                onSendQuickPhrase = newTaskViewModel::sendQuickPhrase,
                 modifier = Modifier.fillMaxSize(),
             )
         }
@@ -279,7 +280,8 @@ private fun NewTaskContent(
     onDeleteQuickPhrase: (String) -> Unit,
     onMoveQuickPhraseUp: (String) -> Unit,
     onMoveQuickPhraseDown: (String) -> Unit,
-    onSend: (String) -> Unit,
+    onSend: () -> Unit,
+    onSendQuickPhrase: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var composerHeightPx by remember { mutableStateOf(0) }
@@ -374,6 +376,7 @@ private fun NewTaskContent(
                 onOpenOptions = onOpenOptions,
                 onCommand = {},
                 onSend = onSend,
+                onSendQuickPhrase = onSendQuickPhrase,
                 onStop = null,
             )
         }
