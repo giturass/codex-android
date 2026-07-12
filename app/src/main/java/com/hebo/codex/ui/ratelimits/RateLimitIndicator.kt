@@ -300,10 +300,12 @@ private class RateLimitPopupPositionProvider(
         layoutDirection: LayoutDirection,
         popupContentSize: IntSize,
     ): IntOffset {
-        val maxX = (windowSize.width - popupContentSize.width - windowMarginPx)
-            .coerceAtLeast(windowMarginPx)
-        val x = (anchorBounds.right - popupContentSize.width)
-            .coerceIn(windowMarginPx, maxX)
+        val x = rateLimitPopupHorizontalPosition(
+            windowWidth = windowSize.width,
+            popupWidth = popupContentSize.width,
+            layoutDirection = layoutDirection,
+            windowMarginPx = windowMarginPx,
+        )
         val belowY = anchorBounds.bottom + gapPx
         val maxY = windowSize.height - popupContentSize.height - windowMarginPx
         val y = if (belowY <= maxY) {
@@ -313,6 +315,17 @@ private class RateLimitPopupPositionProvider(
         }
         return IntOffset(x, y)
     }
+}
+
+internal fun rateLimitPopupHorizontalPosition(
+    windowWidth: Int,
+    popupWidth: Int,
+    layoutDirection: LayoutDirection,
+    windowMarginPx: Int,
+): Int = when (layoutDirection) {
+    LayoutDirection.Ltr ->
+        (windowWidth - popupWidth - windowMarginPx).coerceAtLeast(windowMarginPx)
+    LayoutDirection.Rtl -> windowMarginPx
 }
 
 @Composable
