@@ -28,8 +28,9 @@ import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -58,7 +59,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hebo.codex.R
@@ -201,7 +201,7 @@ fun HomeScreen(
                 onAddAttachment = newTaskViewModel::addAttachment,
                 onRemoveAttachment = newTaskViewModel::removeAttachment,
                 onInputError = newTaskViewModel::reportInputError,
-                onToggleProjectMenu = { showProjectMenu = !showProjectMenu },
+                onProjectMenuExpandedChange = { showProjectMenu = it },
                 onDismissProjectMenu = { showProjectMenu = false },
                 onSelectProject = {
                     newTaskViewModel.updateCwd(it)
@@ -269,7 +269,7 @@ private fun NewTaskContent(
     onAddAttachment: (UserInputPart, String?) -> Unit,
     onRemoveAttachment: (String) -> Unit,
     onInputError: (Throwable) -> Unit,
-    onToggleProjectMenu: () -> Unit,
+    onProjectMenuExpandedChange: (Boolean) -> Unit,
     onDismissProjectMenu: () -> Unit,
     onSelectProject: (String) -> Unit,
     onSelectCustomPath: () -> Unit,
@@ -313,7 +313,7 @@ private fun NewTaskContent(
                     projects = projects,
                     expanded = projectMenuExpanded,
                     enabled = !isCreating,
-                    onToggle = onToggleProjectMenu,
+                    onExpandedChange = onProjectMenuExpandedChange,
                     onDismiss = onDismissProjectMenu,
                     onSelect = onSelectProject,
                     onSelectCustomPath = onSelectCustomPath,
@@ -386,16 +386,23 @@ private fun ProjectSelector(
     projects: List<RecentProject>,
     expanded: Boolean,
     enabled: Boolean,
-    onToggle: () -> Unit,
+    onExpandedChange: (Boolean) -> Unit,
     onDismiss: () -> Unit,
     onSelect: (String) -> Unit,
     onSelectCustomPath: () -> Unit,
 ) {
-    Box(Modifier.fillMaxWidth()) {
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = onExpandedChange,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
         Surface(
-            onClick = onToggle,
-            enabled = enabled,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .menuAnchor(
+                    type = ExposedDropdownMenuAnchorType.PrimaryNotEditable,
+                    enabled = enabled,
+                )
+                .fillMaxWidth(),
             shape = MaterialTheme.shapes.large,
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -423,11 +430,11 @@ private fun ProjectSelector(
                 Icon(Icons.Rounded.ExpandMore, contentDescription = "选择项目")
             }
         }
-        DropdownMenu(
+        ExposedDropdownMenu(
             expanded = expanded,
             onDismissRequest = onDismiss,
             modifier = Modifier.widthIn(min = 280.dp, max = 600.dp),
-            properties = PopupProperties(focusable = false),
+            matchAnchorWidth = false,
         ) {
             projects.take(8).forEach { project ->
                 DropdownMenuItem(
