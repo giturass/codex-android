@@ -38,16 +38,19 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.CallSplit
 import androidx.compose.material.icons.automirrored.rounded.HelpOutline
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Extension
+import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Lock
@@ -61,6 +64,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -358,7 +363,10 @@ fun ChatScreen(
             showNavigationIcon = showNavigationIcon,
             onOpenNavigation = onOpenNavigation,
             onNewTask = { conversation?.let { onNewTask(it.cwd) } },
-            onOpenActions = { dialog = ChatDialog.Actions },
+            onRename = { dialog = ChatDialog.Rename },
+            onFork = { dialog = ChatDialog.Fork },
+            onOpenGoal = { dialog = ChatDialog.Goal },
+            onOpenStatistics = { dialog = ChatDialog.Statistics },
             onRefreshRateLimits = onRefreshRateLimits,
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -457,29 +465,26 @@ fun ChatScreen(
     }
 
     when (dialog) {
-        ChatDialog.Actions -> ChatActionsSheet(
+        ChatDialog.Rename -> RenameConversationDialog(
             title = conversation?.title.orEmpty(),
+            onDismiss = { dialog = null },
+            onRename = {
+                viewModel.rename(it)
+                dialog = null
+            },
+        )
+
+        ChatDialog.Fork -> ForkConversationSheet(
             turns = conversation?.items.orEmpty()
                 .filter { it.turnId != conversation?.activeTurnId && it.turnId != "pending" }
                 .distinctBy(ConversationItem::turnId)
                 .map { it.turnId },
             canForkLatest = conversation?.isRunning != true,
             onDismiss = { dialog = null },
-            onRename = {
-                viewModel.rename(it)
-                dialog = null
-            },
             onFork = { lastTurnId ->
                 viewModel.fork(lastTurnId)
                 dialog = null
             },
-            onCompact = {
-                viewModel.compact()
-                dialog = null
-            },
-            onReview = { dialog = ChatDialog.Review },
-            onGoal = { dialog = ChatDialog.Goal },
-            onStatistics = { dialog = ChatDialog.Statistics },
         )
 
         ChatDialog.Statistics -> ConversationStatisticsSheet(
@@ -580,10 +585,14 @@ private fun ChatFloatingHeader(
     showNavigationIcon: Boolean,
     onOpenNavigation: () -> Unit,
     onNewTask: () -> Unit,
-    onOpenActions: () -> Unit,
+    onRename: () -> Unit,
+    onFork: () -> Unit,
+    onOpenGoal: () -> Unit,
+    onOpenStatistics: () -> Unit,
     onRefreshRateLimits: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var actionsExpanded by remember { mutableStateOf(false) }
     Box(
         modifier
             .fillMaxWidth()
@@ -654,14 +663,66 @@ private fun ChatFloatingHeader(
                                 Icon(Icons.Rounded.Edit, contentDescription = "新建任务")
                             }
                         }
-                        IconButton(onClick = onOpenActions) {
-                            Icon(Icons.Rounded.MoreVert, contentDescription = "会话操作")
+                        Box {
+                            IconButton(onClick = { actionsExpanded = true }) {
+                                Icon(Icons.Rounded.MoreVert, contentDescription = "会话操作")
+                            }
+                            DropdownMenu(
+                                expanded = actionsExpanded,
+                                onDismissRequest = { actionsExpanded = false },
+                            ) {
+                                ChatActionMenuItem(
+                                    text = "重命名",
+                                    icon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
+                                    onClick = {
+                                        actionsExpanded = false
+                                        onRename()
+                                    },
+                                )
+                                ChatActionMenuItem(
+                                    text = "分叉会话",
+                                    icon = { Icon(Icons.AutoMirrored.Rounded.CallSplit, contentDescription = null) },
+                                    onClick = {
+                                        actionsExpanded = false
+                                        onFork()
+                                    },
+                                )
+                                ChatActionMenuItem(
+                                    text = "目标管理",
+                                    icon = { Icon(Icons.Rounded.Flag, contentDescription = null) },
+                                    onClick = {
+                                        actionsExpanded = false
+                                        onOpenGoal()
+                                    },
+                                )
+                                ChatActionMenuItem(
+                                    text = "对话统计",
+                                    icon = { Icon(Icons.Rounded.BarChart, contentDescription = null) },
+                                    onClick = {
+                                        actionsExpanded = false
+                                        onOpenStatistics()
+                                    },
+                                )
+                            }
                         }
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun ChatActionMenuItem(
+    text: String,
+    icon: @Composable () -> Unit,
+    onClick: () -> Unit,
+) {
+    DropdownMenuItem(
+        text = { Text(text) },
+        onClick = onClick,
+        leadingIcon = icon,
+    )
 }
 
 @Composable
@@ -1728,20 +1789,43 @@ private fun SettingDescription(text: String, critical: Boolean = false) {
 }
 
 @Composable
-private fun ChatActionsSheet(
+private fun RenameConversationDialog(
     title: String,
+    onDismiss: () -> Unit,
+    onRename: (String) -> Unit,
+) {
+    var name by rememberSaveable(title) { mutableStateOf(title) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("重命名会话") },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("会话名称") },
+                singleLine = true,
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = { onRename(name.trim()) },
+                enabled = name.isNotBlank() && name.trim() != title,
+            ) {
+                Text("保存")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
+@Composable
+private fun ForkConversationSheet(
     turns: List<String>,
     canForkLatest: Boolean,
     onDismiss: () -> Unit,
-    onRename: (String) -> Unit,
     onFork: (String?) -> Unit,
-    onCompact: () -> Unit,
-    onReview: () -> Unit,
-    onGoal: () -> Unit,
-    onStatistics: () -> Unit,
 ) {
-    var name by rememberSaveable(title) { mutableStateOf(title) }
-    var lastTurnId by rememberSaveable(turns) { mutableStateOf<String?>(null) }
+    var lastTurnId by rememberSaveable(turns, canForkLatest) { mutableStateOf<String?>(null) }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surface,
@@ -1749,48 +1833,37 @@ private fun ChatActionsSheet(
         Column(
             Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.85f)
                 .verticalScroll(rememberScrollState())
                 .navigationBarsPadding()
-                .imePadding()
                 .padding(horizontal = 20.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-                Text("会话操作", style = MaterialTheme.typography.titleLarge)
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("会话名称") },
-                    singleLine = true,
+            Text("分叉会话", style = MaterialTheme.typography.titleLarge)
+            if (turns.isNotEmpty()) {
+                Text("选择新会话包含的最后一个回合", style = MaterialTheme.typography.bodyMedium)
+                OptionRow(
+                    values = if (canForkLatest) listOf<String?>(null) + turns else turns,
+                    selected = lastTurnId,
+                    label = { turnId ->
+                        turnId?.let { "第 ${turns.indexOf(it) + 1} 轮" } ?: "最新回合"
+                    },
+                    onSelect = { lastTurnId = it },
                 )
-                Button(onClick = { onRename(name) }, enabled = name.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
-                    Text("保存名称")
-                }
-                if (turns.isNotEmpty()) {
-                    Text("分叉截止回合", style = MaterialTheme.typography.labelLarge)
-                    OptionRow(
-                        values = listOf<String?>(null) + turns,
-                        selected = lastTurnId,
-                        label = { turnId ->
-                            turnId?.let { "第 ${turns.indexOf(it) + 1} 轮" } ?: "最新回合"
-                        },
-                        onSelect = { lastTurnId = it },
-                    )
-                }
-                OutlinedButton(
-                    onClick = { onFork(lastTurnId) },
-                    enabled = lastTurnId != null || canForkLatest,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("分叉会话")
-                }
-                OutlinedButton(onClick = onCompact, modifier = Modifier.fillMaxWidth()) { Text("压缩上下文") }
-                OutlinedButton(onClick = onReview, modifier = Modifier.fillMaxWidth()) { Text("代码审查") }
-                OutlinedButton(onClick = onGoal, modifier = Modifier.fillMaxWidth()) { Text("目标管理") }
-                OutlinedButton(onClick = onStatistics, modifier = Modifier.fillMaxWidth()) { Text("对话统计") }
-                TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("关闭") }
-                Spacer(Modifier.height(12.dp))
+            } else {
+                Text(
+                    if (canForkLatest) "从当前会话的最新状态创建分叉" else "当前没有可分叉的已完成回合",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Button(
+                onClick = { onFork(lastTurnId) },
+                enabled = lastTurnId != null || canForkLatest,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("创建分叉会话")
+            }
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("取消") }
+            Spacer(Modifier.height(12.dp))
         }
     }
 }
@@ -1990,7 +2063,8 @@ private fun GoalDialog(
 }
 
 private sealed interface ChatDialog {
-    data object Actions : ChatDialog
+    data object Rename : ChatDialog
+    data object Fork : ChatDialog
     data object Review : ChatDialog
     data object Goal : ChatDialog
     data object Statistics : ChatDialog
