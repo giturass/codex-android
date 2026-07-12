@@ -1,49 +1,65 @@
 package com.hebo.codex.ui.screens.chat
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ChatChromeScrollStateTest {
     @Test
-    fun `向历史消息滚动达到阈值后隐藏控件`() {
+    fun `控件位移与向历史消息拖动距离一致`() {
         val state = ChatChromeScrollState()
             .scroll(deltaY = 20f)
-            .scroll(deltaY = 28f)
+            .scroll(deltaY = 30f)
 
-        assertFalse(state.controlsVisible)
+        assertEquals(50f, state.offset, 0.0001f)
+        assertFalse(state.controlsHidden)
     }
 
     @Test
-    fun `向历史消息轻微滚动时保持控件显示`() {
-        val state = ChatChromeScrollState().scroll(deltaY = 47f)
+    fun `达到完整高度后标记为隐藏`() {
+        val state = ChatChromeScrollState().scroll(deltaY = 120f)
 
-        assertTrue(state.controlsVisible)
+        assertEquals(100f, state.offset, 0.0001f)
+        assertTrue(state.controlsHidden)
     }
 
     @Test
-    fun `隐藏后向最新消息滚动达到阈值时恢复控件`() {
+    fun `隐藏后向最新消息拖动时逐像素恢复`() {
         val state = ChatChromeScrollState()
-            .scroll(deltaY = 48f)
-            .scroll(deltaY = -12f)
-            .scroll(deltaY = -12f)
+            .scroll(deltaY = 100f)
+            .scroll(deltaY = -24f)
 
-        assertTrue(state.controlsVisible)
+        assertEquals(76f, state.offset, 0.0001f)
+        assertFalse(state.controlsHidden)
     }
 
     @Test
-    fun `切换滚动方向时重新累计距离`() {
+    fun `拖动方向反转时直接反向移动`() {
         val state = ChatChromeScrollState()
             .scroll(deltaY = 30f)
-            .scroll(deltaY = -1f)
-            .scroll(deltaY = 20f)
+            .scroll(deltaY = -10f)
 
-        assertTrue(state.controlsVisible)
+        assertEquals(20f, state.offset, 0.0001f)
+        assertFalse(state.controlsHidden)
+    }
+
+    @Test
+    fun `未完全隐藏时松手目标为完整展示`() {
+        val state = ChatChromeScrollState().scroll(deltaY = 99f)
+
+        assertEquals(0f, state.settleTarget(hideDistance = 100f), 0.0001f)
+    }
+
+    @Test
+    fun `完全隐藏后松手保持隐藏`() {
+        val state = ChatChromeScrollState().scroll(deltaY = 100f)
+
+        assertEquals(100f, state.settleTarget(hideDistance = 100f), 0.0001f)
     }
 
     private fun ChatChromeScrollState.scroll(deltaY: Float) = afterUserScroll(
         deltaY = deltaY,
-        hideThreshold = 48f,
-        showThreshold = 24f,
+        hideDistance = 100f,
     )
 }

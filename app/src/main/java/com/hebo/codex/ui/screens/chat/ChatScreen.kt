@@ -6,13 +6,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -108,9 +106,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
@@ -170,6 +170,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.math.max
 
@@ -184,40 +185,39 @@ private val ChatHeaderControlsHeight = 64.dp
 private val ChatHeaderContentSpacing = 24.dp
 private val ChatComposerOverlayMinHeight = 116.dp
 private val ChatComposerFadeHeight = 44.dp
-private val ChatChromeHideThreshold = 48.dp
-private val ChatChromeShowThreshold = 24.dp
+private const val CHAT_CHROME_SETTLE_DURATION_MILLIS = 160
 
 internal data class ChatChromeScrollState(
-    val controlsVisible: Boolean = true,
-    val historyDistance: Float = 0f,
-    val latestDistance: Float = 0f,
+    val controlsHidden: Boolean = false,
+    val offset: Float = 0f,
 )
 
 internal fun ChatChromeScrollState.afterUserScroll(
     deltaY: Float,
-    hideThreshold: Float,
-    showThreshold: Float,
+    hideDistance: Float,
 ): ChatChromeScrollState = when {
-    deltaY > 0f -> {
-        val distance = (historyDistance + deltaY).coerceAtMost(hideThreshold)
+    hideDistance <= 0f -> this
+
+    deltaY > 0f && !controlsHidden -> {
+        val nextOffset = (offset + deltaY).coerceAtMost(hideDistance)
         copy(
-            controlsVisible = controlsVisible && distance < hideThreshold,
-            historyDistance = distance,
-            latestDistance = 0f,
+            controlsHidden = nextOffset >= hideDistance,
+            offset = nextOffset,
         )
     }
 
     deltaY < 0f -> {
-        val distance = (latestDistance - deltaY).coerceAtMost(showThreshold)
         copy(
-            controlsVisible = controlsVisible || distance >= showThreshold,
-            historyDistance = 0f,
-            latestDistance = distance,
+            controlsHidden = false,
+            offset = (offset + deltaY).coerceAtLeast(0f),
         )
     }
 
     else -> this
 }
+
+internal fun ChatChromeScrollState.settleTarget(hideDistance: Float): Float =
+    if (controlsHidden) hideDistance else 0f
 
 @Composable
 fun ChatScreen(
@@ -240,6 +240,10 @@ fun ChatScreen(
     var autoFollow by rememberSaveable(conversation?.threadId) { mutableStateOf(true) }
     var showScrollToBottomButton by remember(conversation?.threadId) { mutableStateOf(false) }
     var chromeScrollState by remember(conversation?.threadId) { mutableStateOf(ChatChromeScrollState()) }
+    var chromeSettleJob by remember(conversation?.threadId) { mutableStateOf<Job?>(null) }
+    var topControlsHeightPx by remember { mutableStateOf(0) }
+    var bottomControlsHeightPx by remember { mutableStateOf(0) }
+    var bottomControlsTranslationHeightPx by remember { mutableStateOf(0) }
     var dialog by remember { mutableStateOf<ChatDialog?>(null) }
     var activeRequestKey by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
     var shownNoticeId by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
@@ -247,12 +251,19 @@ fun ChatScreen(
     val detailsLabel = stringResource(R.string.common_details)
     val activeRequest = conversation?.pendingRequests?.firstOrNull { it.requestKey == activeRequestKey }
     val density = LocalDensity.current
-    val chromeHideThresholdPx = with(density) { ChatChromeHideThreshold.toPx() }
-    val chromeShowThresholdPx = with(density) { ChatChromeShowThreshold.toPx() }
+    val draftHasInput = state.draft.message.isNotBlank() || state.draft.attachments.isNotEmpty()
+    val imeVisible = WindowInsets.ime.getBottom(density) > 0
+    val bottomControlsCanHide = !draftHasInput &&
+        !imeVisible &&
+        !state.isSendingDraft &&
+        conversation?.pendingRequests.isNullOrEmpty()
+    val chromeHideDistancePx = maxOf(
+        topControlsHeightPx,
+        bottomControlsTranslationHeightPx.takeIf { bottomControlsCanHide } ?: 0,
+    ).toFloat()
     val userScrollConnection = remember(
         conversation?.threadId,
-        chromeHideThresholdPx,
-        chromeShowThresholdPx,
+        chromeHideDistancePx,
     ) {
         object : NestedScrollConnection {
             override fun onPostScroll(
@@ -261,14 +272,38 @@ fun ChatScreen(
                 source: NestedScrollSource,
             ): Offset {
                 if (source == NestedScrollSource.UserInput && consumed.y != 0f) {
+                    chromeSettleJob?.cancel()
+                    chromeSettleJob = null
                     autoFollow = false
                     chromeScrollState = chromeScrollState.afterUserScroll(
                         deltaY = consumed.y,
-                        hideThreshold = chromeHideThresholdPx,
-                        showThreshold = chromeShowThresholdPx,
+                        hideDistance = chromeHideDistancePx,
                     )
                 }
                 return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                val targetOffset = chromeScrollState.settleTarget(chromeHideDistancePx)
+                if (targetOffset != chromeScrollState.offset) {
+                    val initialOffset = chromeScrollState.offset
+                    chromeSettleJob?.cancel()
+                    chromeSettleJob = scrollScope.launch {
+                        animate(
+                            initialValue = initialOffset,
+                            targetValue = targetOffset,
+                            animationSpec = tween(CHAT_CHROME_SETTLE_DURATION_MILLIS),
+                        ) { value, _ ->
+                            chromeScrollState = chromeScrollState.copy(offset = value)
+                        }
+                        chromeScrollState = if (targetOffset == 0f) {
+                            ChatChromeScrollState()
+                        } else {
+                            ChatChromeScrollState(controlsHidden = true, offset = targetOffset)
+                        }
+                    }
+                }
+                return Velocity.Zero
             }
         }
     }
@@ -329,7 +364,18 @@ fun ChatScreen(
         }
     }
     LaunchedEffect(autoFollow) {
-        if (autoFollow) chromeScrollState = ChatChromeScrollState()
+        if (autoFollow) {
+            chromeSettleJob?.cancel()
+            chromeSettleJob = null
+            chromeScrollState = ChatChromeScrollState()
+        }
+    }
+    LaunchedEffect(chromeHideDistancePx) {
+        chromeScrollState = if (chromeScrollState.controlsHidden) {
+            chromeScrollState.copy(offset = chromeHideDistancePx)
+        } else {
+            chromeScrollState.copy(offset = chromeScrollState.offset.coerceAtMost(chromeHideDistancePx))
+        }
     }
     LaunchedEffect(listState, autoFollow) {
         snapshotFlow {
@@ -342,8 +388,6 @@ fun ChatScreen(
         }
     }
 
-    var topControlsHeightPx by remember { mutableStateOf(0) }
-    var bottomControlsHeightPx by remember { mutableStateOf(0) }
     val statusBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val bottomSystemPadding = maxOf(
         WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
@@ -351,35 +395,33 @@ fun ChatScreen(
     )
     val topControlsHeight = with(density) { topControlsHeightPx.toDp() }
     val bottomControlsHeight = with(density) { bottomControlsHeightPx.toDp() }
-    val draftHasInput = state.draft.message.isNotBlank() || state.draft.attachments.isNotEmpty()
-    val imeVisible = WindowInsets.ime.getBottom(density) > 0
-    val showComposer = chromeScrollState.controlsVisible ||
-        draftHasInput ||
-        imeVisible ||
-        state.isSendingDraft
-    val showBottomControls = conversation != null && (
-        showComposer ||
-            conversation.pendingRequests.isNotEmpty() ||
-            conversation.isRunning
-        )
+    val showFullBottomControls = !bottomControlsCanHide || !chromeScrollState.controlsHidden
+    val showCompactStop = bottomControlsCanHide &&
+        chromeScrollState.controlsHidden &&
+        conversation?.isRunning == true
     val topContentPadding = maxOf(
         topControlsHeight,
         statusBarPadding + ChatHeaderControlsHeight,
     ) + ChatHeaderContentSpacing
     val bottomOverlayMinHeight = when {
-        showComposer -> ChatComposerOverlayMinHeight
-        showBottomControls -> 64.dp
+        showFullBottomControls -> ChatComposerOverlayMinHeight
+        showCompactStop -> 64.dp
         else -> 0.dp
     }
     val bottomContentPadding = if (conversation == null) {
         bottomSystemPadding + 16.dp
     } else {
-        maxOf(bottomControlsHeight, bottomOverlayMinHeight) + bottomSystemPadding
+        maxOf(
+            bottomControlsHeight.takeIf { showFullBottomControls } ?: 0.dp,
+            bottomOverlayMinHeight,
+        ) + bottomSystemPadding
     }
     val backgroundColor = MaterialTheme.colorScheme.background
-
-    LaunchedEffect(showBottomControls) {
-        if (!showBottomControls) bottomControlsHeightPx = 0
+    val topControlsTranslationY = -chromeScrollState.offset.coerceAtMost(topControlsHeightPx.toFloat())
+    val bottomControlsTranslationY = if (bottomControlsCanHide) {
+        chromeScrollState.offset.coerceAtMost(bottomControlsTranslationHeightPx.toFloat())
+    } else {
+        0f
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -421,13 +463,11 @@ fun ChatScreen(
             }
         }
 
-        AnimatedVisibility(
-            visible = conversation == null || chromeScrollState.controlsVisible,
+        Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .fillMaxWidth(),
-            enter = slideInVertically(tween(200)) { -it } + fadeIn(tween(180)),
-            exit = slideOutVertically(tween(180)) { -it } + fadeOut(tween(140)),
+                .fillMaxWidth()
+                .graphicsLayer { translationY = topControlsTranslationY },
         ) {
             ChatFloatingHeader(
                 conversation = conversation,
@@ -446,84 +486,81 @@ fun ChatScreen(
         }
 
         if (conversation != null) {
-            AnimatedVisibility(
-                visible = showBottomControls,
+            Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .fillMaxWidth(),
-                enter = slideInVertically(tween(200)) { it } + fadeIn(tween(180)),
-                exit = slideOutVertically(tween(180)) { it } + fadeOut(tween(140)),
+                    .fillMaxWidth()
+                    .onSizeChanged { bottomControlsTranslationHeightPx = it.height }
+                    .graphicsLayer { translationY = bottomControlsTranslationY }
+                    .navigationBarsPadding()
+                    .imePadding(),
             ) {
                 Column(
                     Modifier
                         .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .imePadding(),
+                        .onSizeChanged { bottomControlsHeightPx = it.height }
+                        .background(
+                            Brush.verticalGradient(
+                                0f to Color.Transparent,
+                                0.32f to backgroundColor.copy(alpha = 0.88f),
+                                1f to backgroundColor,
+                            ),
+                        )
+                        .padding(top = ChatComposerFadeHeight),
                 ) {
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .onSizeChanged { bottomControlsHeightPx = it.height }
-                            .animateContentSize(tween(200))
-                            .background(
-                                Brush.verticalGradient(
-                                    0f to Color.Transparent,
-                                    0.32f to backgroundColor.copy(alpha = 0.88f),
-                                    1f to backgroundColor,
-                                ),
-                            )
-                            .padding(top = if (showComposer) ChatComposerFadeHeight else 12.dp),
-                    ) {
-                        conversation.pendingRequests.firstOrNull()?.let { request ->
-                            PendingRequestBanner(
-                                request = request,
-                                requestCount = conversation.pendingRequests.size,
-                                onClick = { activeRequestKey = request.requestKey },
-                            )
-                        }
-                        if (showComposer) {
-                            ChatComposer(
-                                conversation = conversation,
-                                draft = state.draft,
-                                models = state.models,
-                                resources = state.inputResources,
-                                connectionStatus = state.connectionStatus,
-                                isLoadingResources = state.isLoadingResources,
-                                isSending = state.isSendingDraft,
-                                onLoadResources = viewModel::loadInputResources,
-                                onMessageChange = viewModel::updateDraftMessage,
-                                onAddAttachment = viewModel::addDraftAttachment,
-                                onRemoveAttachment = viewModel::removeDraftAttachment,
-                                onOptionsChange = viewModel::updateDraftOptions,
-                                onInputError = viewModel::reportInputError,
-                                onOpenGoal = { dialog = ChatDialog.Goal },
-                                onOpenReview = { dialog = ChatDialog.Review },
-                                onCompact = viewModel::compact,
-                                onSend = {
-                                    chromeScrollState = ChatChromeScrollState()
-                                    autoFollow = true
-                                    viewModel.sendDraft()
-                                },
-                                onStop = viewModel::interrupt,
-                            )
-                        } else if (conversation.isRunning) {
-                            Box(
-                                Modifier.fillMaxWidth()
-                                    .padding(start = 16.dp, end = 16.dp, bottom = 10.dp),
-                                contentAlignment = Alignment.CenterEnd,
-                            ) {
-                                SmallFloatingActionButton(
-                                    modifier = Modifier.size(48.dp),
-                                    shape = CircleShape,
-                                    onClick = viewModel::interrupt,
-                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    contentColor = MaterialTheme.colorScheme.onSurface,
-                                ) {
-                                    Icon(Icons.Rounded.Stop, contentDescription = "停止")
-                                }
-                            }
-                        }
+                    conversation.pendingRequests.firstOrNull()?.let { request ->
+                        PendingRequestBanner(
+                            request = request,
+                            requestCount = conversation.pendingRequests.size,
+                            onClick = { activeRequestKey = request.requestKey },
+                        )
                     }
+                    ChatComposer(
+                        conversation = conversation,
+                        draft = state.draft,
+                        models = state.models,
+                        resources = state.inputResources,
+                        connectionStatus = state.connectionStatus,
+                        isLoadingResources = state.isLoadingResources,
+                        isSending = state.isSendingDraft,
+                        onLoadResources = viewModel::loadInputResources,
+                        onMessageChange = viewModel::updateDraftMessage,
+                        onAddAttachment = viewModel::addDraftAttachment,
+                        onRemoveAttachment = viewModel::removeDraftAttachment,
+                        onOptionsChange = viewModel::updateDraftOptions,
+                        onInputError = viewModel::reportInputError,
+                        onOpenGoal = { dialog = ChatDialog.Goal },
+                        onOpenReview = { dialog = ChatDialog.Review },
+                        onCompact = viewModel::compact,
+                        onSend = {
+                            chromeSettleJob?.cancel()
+                            chromeSettleJob = null
+                            chromeScrollState = ChatChromeScrollState()
+                            autoFollow = true
+                            viewModel.sendDraft()
+                        },
+                        onStop = viewModel::interrupt,
+                    )
+                }
+            }
+
+            AnimatedVisibility(
+                visible = showCompactStop,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .navigationBarsPadding()
+                    .padding(end = 16.dp, bottom = 10.dp),
+                enter = fadeIn(tween(120)) + scaleIn(tween(120), initialScale = 0.85f),
+                exit = fadeOut(tween(100)) + scaleOut(tween(100), targetScale = 0.9f),
+            ) {
+                SmallFloatingActionButton(
+                    modifier = Modifier.size(48.dp),
+                    shape = CircleShape,
+                    onClick = viewModel::interrupt,
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                ) {
+                    Icon(Icons.Rounded.Stop, contentDescription = "停止")
                 }
             }
         }
@@ -543,6 +580,8 @@ fun ChatScreen(
                 shape = CircleShape,
                 onClick = {
                     showScrollToBottomButton = false
+                    chromeSettleJob?.cancel()
+                    chromeSettleJob = null
                     chromeScrollState = ChatChromeScrollState()
                     scrollScope.launch {
                         val lastIndex = listState.layoutInfo.totalItemsCount - 1
