@@ -5,6 +5,12 @@ package com.hebo.codex.ui.screens.chat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -415,12 +421,18 @@ fun ChatScreen(
             }
         }
 
-        if (conversation != null && showScrollToBottomButton) {
+        AnimatedVisibility(
+            visible = conversation != null && showScrollToBottomButton,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = bottomContentPadding + 8.dp),
+            enter = fadeIn(tween(160)) +
+                scaleIn(tween(160), initialScale = 0.85f),
+            exit = fadeOut(tween(100)) +
+                scaleOut(tween(100), targetScale = 0.9f),
+        ) {
             SmallFloatingActionButton(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = bottomContentPadding + 8.dp)
-                    .size(46.dp),
+                modifier = Modifier.size(46.dp),
                 shape = CircleShape,
                 onClick = {
                     showScrollToBottomButton = false
