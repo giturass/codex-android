@@ -28,6 +28,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Circle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ErrorOutline
@@ -35,16 +36,18 @@ import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PriorityHigh
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
@@ -566,6 +569,8 @@ private fun DrawerRecentHeader(
     onGroupByProjectChange: (Boolean) -> Unit,
     onRefresh: () -> Unit,
 ) {
+    var menuExpanded by remember { mutableStateOf(false) }
+
     Row(
         modifier = Modifier.fillMaxWidth().padding(start = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -579,20 +584,45 @@ private fun DrawerRecentHeader(
         IconButton(onClick = onNewConversation) {
             Icon(Icons.Rounded.Add, contentDescription = "新建任务")
         }
-        IconButton(onClick = onSearch) {
-            Icon(Icons.Rounded.Search, contentDescription = "搜索会话")
-        }
-        IconToggleButton(
-            checked = groupByProject,
-            onCheckedChange = onGroupByProjectChange,
-        ) {
-            Icon(
-                Icons.Rounded.Folder,
-                contentDescription = "按项目分组",
-            )
-        }
-        IconButton(onClick = onRefresh, enabled = refreshEnabled) {
-            Icon(Icons.Rounded.Refresh, contentDescription = "刷新会话列表")
+        Box {
+            IconButton(onClick = { menuExpanded = true }) {
+                Icon(Icons.Rounded.MoreVert, contentDescription = "更多会话操作")
+            }
+            DropdownMenu(
+                expanded = menuExpanded,
+                onDismissRequest = { menuExpanded = false },
+            ) {
+                DropdownMenuItem(
+                    text = { Text("搜索会话") },
+                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                    onClick = {
+                        menuExpanded = false
+                        onSearch()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("按项目分组") },
+                    leadingIcon = { Icon(Icons.Rounded.Folder, contentDescription = null) },
+                    trailingIcon = {
+                        if (groupByProject) {
+                            Icon(Icons.Rounded.Check, contentDescription = "已启用")
+                        }
+                    },
+                    onClick = {
+                        menuExpanded = false
+                        onGroupByProjectChange(!groupByProject)
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("刷新会话列表") },
+                    leadingIcon = { Icon(Icons.Rounded.Refresh, contentDescription = null) },
+                    enabled = refreshEnabled,
+                    onClick = {
+                        menuExpanded = false
+                        onRefresh()
+                    },
+                )
+            }
         }
     }
 }
