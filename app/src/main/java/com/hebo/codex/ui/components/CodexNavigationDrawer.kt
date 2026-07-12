@@ -5,6 +5,8 @@
 
 package com.hebo.codex.ui.components
 
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -17,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -69,13 +72,22 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import com.hebo.codex.domain.ConnectionStatus
 import com.hebo.codex.domain.DraftKey
@@ -88,6 +100,7 @@ import com.hebo.codex.domain.ThreadAttention
 import com.hebo.codex.domain.ThreadSummary
 import com.hebo.codex.domain.projectName
 import com.hebo.codex.ui.theme.statusColors
+import kotlin.math.roundToInt
 
 @Composable
 fun CodexNavigationDrawer(
@@ -282,46 +295,15 @@ private fun ColumnScope.DrawerContent(
         }
     }
 
-    Column(Modifier.fillMaxHeight().padding(horizontal = 12.dp)) {
-        Spacer(Modifier.height(12.dp))
-        if (servers.isEmpty()) {
-            Text(
-                text = "Codex",
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                style = MaterialTheme.typography.titleLarge,
+    val drawerBody: @Composable ColumnScope.() -> Unit = {
+        if (servers.isNotEmpty() && drawerPage == DrawerPage.SEARCH) {
+            DrawerSearchHeader(
+                searchTerm = searchTerm,
+                showArchived = showArchived,
+                onSearch = onSearch,
+                onShowArchived = onShowArchived,
+                onBack = ::showRecent,
             )
-            NavigationDrawerItem(
-                label = { Text("添加服务器") },
-                selected = false,
-                onClick = onAddServer,
-                icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
-            )
-        } else {
-            ServerSelector(
-                servers = servers,
-                activeServer = activeServer,
-                statuses = connectionStatuses,
-                onSelect = onSelectServer,
-                onReconnect = onReconnectServer,
-                onEdit = onEditServer,
-                onDelete = onRemoveServer,
-                onOpenSettings = { serverId ->
-                    leaveTransientPage()
-                    onOpenSettings(serverId)
-                },
-                onAdd = onAddServer,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(8.dp))
-            if (drawerPage == DrawerPage.SEARCH) {
-                DrawerSearchHeader(
-                    searchTerm = searchTerm,
-                    showArchived = showArchived,
-                    onSearch = onSearch,
-                    onShowArchived = onShowArchived,
-                    onBack = ::showRecent,
-                )
-            }
         }
         if (isLoading && !isRefreshing) LinearProgressIndicator(Modifier.fillMaxWidth())
 
@@ -490,7 +472,49 @@ private fun ColumnScope.DrawerContent(
                 }
             }
         }
+    }
 
+    Column(Modifier.fillMaxHeight().padding(horizontal = 12.dp)) {
+        Spacer(Modifier.height(12.dp))
+        if (servers.isEmpty()) {
+            Text(
+                text = "Codex",
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                style = MaterialTheme.typography.titleLarge,
+            )
+            NavigationDrawerItem(
+                label = { Text("添加服务器") },
+                selected = false,
+                onClick = onAddServer,
+                icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
+            )
+            drawerBody()
+        } else {
+            CollapsibleDrawerServerHeader(
+                modifier = Modifier.weight(1f),
+                header = { headerModifier ->
+                    Column(headerModifier) {
+                        ServerSelector(
+                            servers = servers,
+                            activeServer = activeServer,
+                            statuses = connectionStatuses,
+                            onSelect = onSelectServer,
+                            onReconnect = onReconnectServer,
+                            onEdit = onEditServer,
+                            onDelete = onRemoveServer,
+                            onOpenSettings = { serverId ->
+                                leaveTransientPage()
+                                onOpenSettings(serverId)
+                            },
+                            onAdd = onAddServer,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
+                },
+                content = drawerBody,
+            )
+        }
     }
 
     selectedThread?.let { thread ->
@@ -535,6 +559,133 @@ private fun ColumnScope.DrawerContent(
                 TextButton(onClick = { selectedDraft = null }) { Text("取消") }
             },
         )
+    }
+}
+
+private const val DRAWER_SERVER_HEADER_SETTLE_DURATION_MILLIS = 160
+
+internal data class DrawerServerHeaderScrollState(
+    val hidden: Boolean = false,
+    val offset: Float = 0f,
+)
+
+internal data class DrawerServerHeaderScrollResult(
+    val state: DrawerServerHeaderScrollState,
+    val consumedY: Float,
+)
+
+internal fun DrawerServerHeaderScrollState.consumeUserScroll(
+    deltaY: Float,
+    hideDistance: Float,
+): DrawerServerHeaderScrollResult {
+    if (hideDistance <= 0f) return DrawerServerHeaderScrollResult(this, 0f)
+
+    val nextOffset = (offset - deltaY).coerceIn(0f, hideDistance)
+    val nextState = copy(
+        hidden = when (nextOffset) {
+            0f -> false
+            hideDistance -> true
+            else -> hidden
+        },
+        offset = nextOffset,
+    )
+    return DrawerServerHeaderScrollResult(
+        state = nextState,
+        consumedY = offset - nextOffset,
+    )
+}
+
+internal fun DrawerServerHeaderScrollState.settleTarget(hideDistance: Float): Float =
+    if (hidden) hideDistance else 0f
+
+@Composable
+private fun CollapsibleDrawerServerHeader(
+    header: @Composable (Modifier) -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    var headerHeightPx by remember { mutableStateOf(0) }
+    var scrollState by remember { mutableStateOf(DrawerServerHeaderScrollState()) }
+
+    LaunchedEffect(headerHeightPx) {
+        val hideDistance = headerHeightPx.toFloat()
+        scrollState = if (scrollState.hidden) {
+            scrollState.copy(offset = hideDistance)
+        } else {
+            scrollState.copy(offset = scrollState.offset.coerceAtMost(hideDistance))
+        }
+    }
+
+    val scrollConnection = remember(headerHeightPx) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (source != NestedScrollSource.UserInput) return Offset.Zero
+
+                val result = scrollState.consumeUserScroll(
+                    deltaY = available.y,
+                    hideDistance = headerHeightPx.toFloat(),
+                )
+                scrollState = result.state
+                return Offset(x = 0f, y = result.consumedY)
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                val hideDistance = headerHeightPx.toFloat()
+                val targetOffset = scrollState.settleTarget(hideDistance)
+                if (targetOffset == scrollState.offset) return Velocity.Zero
+
+                animate(
+                    initialValue = scrollState.offset,
+                    targetValue = targetOffset,
+                    animationSpec = tween(DRAWER_SERVER_HEADER_SETTLE_DURATION_MILLIS),
+                ) { value, _ ->
+                    scrollState = scrollState.copy(offset = value)
+                }
+                scrollState = DrawerServerHeaderScrollState(
+                    hidden = targetOffset == hideDistance,
+                    offset = targetOffset,
+                )
+                return Velocity(x = 0f, y = available.y)
+            }
+        }
+    }
+
+    Box(modifier.clipToBounds().nestedScroll(scrollConnection)) {
+        Column(
+            modifier = Modifier
+                .placeBelowDrawerHeader(
+                    headerHeight = { headerHeightPx },
+                    headerOffset = { scrollState.offset },
+                )
+                .fillMaxSize(),
+            content = content,
+        )
+        header(
+            Modifier
+                .fillMaxWidth()
+                .onSizeChanged { headerHeightPx = it.height }
+                .offset { IntOffset(x = 0, y = -scrollState.offset.roundToInt()) },
+        )
+    }
+}
+
+private fun Modifier.placeBelowDrawerHeader(
+    headerHeight: () -> Int,
+    headerOffset: () -> Float,
+): Modifier = layout { measurable, constraints ->
+    val visibleHeaderHeight = (headerHeight() - headerOffset().roundToInt())
+        .coerceIn(0, constraints.maxHeight)
+    val bodyMaxHeight = (constraints.maxHeight - visibleHeaderHeight).coerceAtLeast(0)
+    val bodyMinHeight = (constraints.minHeight - visibleHeaderHeight).coerceIn(0, bodyMaxHeight)
+    val placeable = measurable.measure(
+        constraints.copy(
+            minHeight = bodyMinHeight,
+            maxHeight = bodyMaxHeight,
+        ),
+    )
+
+    layout(constraints.maxWidth, constraints.maxHeight) {
+        placeable.placeRelative(x = 0, y = visibleHeaderHeight)
     }
 }
 
