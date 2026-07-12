@@ -230,21 +230,11 @@ class CodexRepository(
         val state = requireConversation(serverId, threadId)
         val activeTurnId = state.value.activeTurnId
         val clientId = UUID.randomUUID().toString()
-        val localItemId = "local:$clientId"
-        val localTurnId = activeTurnId ?: "pending"
-        val messageContent = input.map { it.toMessagePart() }
         val messageTitle = input.conversationTitle()
         state.updateState { current ->
             current.copy(
                 title = if (current.title == "新会话") messageTitle.take(72) else current.title,
                 isRunning = true,
-                items = current.items + ConversationItem.UserMessage(
-                    id = localItemId,
-                    turnId = localTurnId,
-                    clientId = clientId,
-                    content = messageContent,
-                    isPending = true,
-                ),
                 errorMessage = null,
             )
         }
@@ -263,16 +253,6 @@ class CodexRepository(
             }
             state.updateState { current ->
                 current.copy(
-                    items = current.items.map { item ->
-                        if (item is ConversationItem.UserMessage &&
-                            item.turnId == localTurnId &&
-                            item.id == localItemId
-                        ) {
-                            item.copy(turnId = turnId)
-                        } else {
-                            item
-                        }
-                    },
                     activeTurnId = turnId,
                     isRunning = true,
                 )
@@ -280,7 +260,6 @@ class CodexRepository(
         } catch (error: Throwable) {
             state.updateState { current ->
                 current.copy(
-                    items = current.items.filterNot { it.turnId == localTurnId && it.id == localItemId },
                     isRunning = false,
                     errorMessage = error.toUserFacingError("发送消息失败"),
                 )
@@ -1218,14 +1197,6 @@ class CodexRepository(
             if (current.pendingRequests.isNotEmpty()) ThreadAttention.NEEDS_INPUT
             else if (current.isRunning) ThreadAttention.RUNNING else null,
         )
-    }
-
-    private fun UserInputPart.toMessagePart(): UserMessagePart = when (this) {
-        is UserInputPart.Text -> UserMessagePart.Text(text)
-        is UserInputPart.Image -> UserMessagePart.Image(url)
-        is UserInputPart.LocalImage -> UserMessagePart.LocalImage(path)
-        is UserInputPart.Skill -> UserMessagePart.Skill(name, path)
-        is UserInputPart.Mention -> UserMessagePart.Mention(name, path)
     }
 
     private fun List<UserInputPart>.conversationTitle(): String =

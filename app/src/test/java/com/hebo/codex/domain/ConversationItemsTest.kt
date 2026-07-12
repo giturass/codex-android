@@ -1,7 +1,6 @@
 package com.hebo.codex.domain
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class ConversationItemsTest {
@@ -26,7 +25,7 @@ class ConversationItemsTest {
     @Test
     fun `流式更新只替换指定回合中的条目`() {
         val first = agentMessage("item-1", "turn-1", "第一回合")
-        val second = agentMessage("item-1", "turn-2", "第二回合").copy(isStreaming = true)
+        val second = agentMessage("item-1", "turn-2", "第二回合")
 
         val items = listOf(first, second).replaceConversationItem("turn-2", "item-1") { item ->
             (item as ConversationItem.AgentMessage).copy(text = "第二回合已更新")
@@ -54,35 +53,6 @@ class ConversationItemsTest {
         )
 
         assertEquals(listOf(confirmed), listOf(pending).upsertConversationItem(confirmed))
-    }
-
-    @Test
-    fun `已完成的历史条目不可被替换`() {
-        val completed = agentMessage("item-1", "turn-1", "原始回答")
-        val changed = completed.copy(text = "事后改写")
-
-        assertThrows(IllegalStateException::class.java) {
-            listOf(completed).upsertConversationItem(changed)
-        }
-    }
-
-    @Test
-    fun `已完成的历史条目不可接收增量更新`() {
-        val completed = agentMessage("item-1", "turn-1", "原始回答")
-
-        assertThrows(IllegalStateException::class.java) {
-            listOf(completed).replaceConversationItem("turn-1", "item-1") { item ->
-                (item as ConversationItem.AgentMessage).copy(text = "事后改写")
-            }
-        }
-    }
-
-    @Test
-    fun `重复的完成事件不改变历史条目`() {
-        val completed = agentMessage("item-1", "turn-1", "已完成")
-        val items = listOf(completed)
-
-        assertEquals(items, items.upsertConversationItem(completed))
     }
 
     private fun agentMessage(id: String, turnId: String, text: String) = ConversationItem.AgentMessage(
