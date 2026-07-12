@@ -6,11 +6,13 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -101,6 +103,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
@@ -114,6 +117,9 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
@@ -902,10 +908,44 @@ private fun ConversationItemView(item: ConversationItem) {
 
 @Composable
 private fun PlanSnapshot(item: ConversationItem.Plan) {
+    var expanded by rememberSaveable(item.turnId, item.id) { mutableStateOf(false) }
+    var expansionPhase by remember(item.turnId, item.id) {
+        mutableStateOf(PlanExpansionPhase.COLLAPSED)
+    }
     val markdownState = rememberMarkdownState(
         content = item.text.ifEmpty { "正在制定计划…" },
         retainState = true,
     )
+    val bodyAlpha by animateFloatAsState(
+        targetValue = if (expansionPhase.bodyVisible) 1f else 0f,
+        animationSpec = tween(PLAN_CONTENT_FADE_DURATION_MILLIS),
+        label = "计划内容透明度",
+    )
+    val arrowRotation by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        animationSpec = tween(PLAN_CONTENT_FADE_DURATION_MILLIS),
+        label = "计划展开箭头",
+    )
+
+    LaunchedEffect(expanded) {
+        expansionPhase = expansionPhase.startTransition(expanded)
+        when (expansionPhase) {
+            PlanExpansionPhase.EXPANDING -> {
+                delay(PLAN_SIZE_ANIMATION_DURATION_MILLIS.toLong())
+                expansionPhase = expansionPhase.settle()
+            }
+
+            PlanExpansionPhase.COLLAPSING -> {
+                delay(PLAN_CONTENT_FADE_DURATION_MILLIS.toLong())
+                expansionPhase = expansionPhase.settle()
+            }
+
+            PlanExpansionPhase.COLLAPSED,
+            PlanExpansionPhase.EXPANDED,
+            -> Unit
+        }
+    }
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
@@ -913,25 +953,59 @@ private fun PlanSnapshot(item: ConversationItem.Plan) {
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            Modifier
+                .fillMaxWidth()
+                .animateContentSize(
+                    animationSpec = tween(PLAN_SIZE_ANIMATION_DURATION_MILLIS),
+                ),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("执行计划", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(role = Role.Button) { expanded = !expanded }
+                    .semantics {
+                        stateDescription = if (expanded) "已展开" else "已收起"
+                    }
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = if (item.isStreaming) "正在制定计划" else "执行计划",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleSmall,
+                )
                 if (item.isStreaming) {
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
                 }
-            }
-            SelectionContainer {
-                Markdown(
-                    markdownState = markdownState,
-                    components = highlightedMarkdownComponents,
-                    modifier = Modifier.fillMaxWidth(),
+                Icon(
+                    imageVector = Icons.Rounded.KeyboardArrowDown,
+                    contentDescription = null,
+                    modifier = Modifier.size(22.dp).rotate(arrowRotation),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+
+            if (expansionPhase.bodyIncluded) {
+                SelectionContainer(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, bottom = 14.dp)
+                        .graphicsLayer { alpha = bodyAlpha },
+                ) {
+                    Markdown(
+                        markdownState = markdownState,
+                        components = highlightedMarkdownComponents,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         }
     }
 }
+
+private const val PLAN_SIZE_ANIMATION_DURATION_MILLIS = 220
+private const val PLAN_CONTENT_FADE_DURATION_MILLIS = 100
 
 @Composable
 private fun AgentMessage(item: ConversationItem.AgentMessage) {
