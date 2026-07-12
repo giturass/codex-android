@@ -170,7 +170,7 @@ private val highlightedMarkdownComponents = markdownComponents(
 )
 
 private const val CHAT_LIST_END_KEY = "chat-list-end"
-private const val SCROLL_TO_BOTTOM_BUTTON_DELAY_MILLIS = 1_500L
+private const val SCROLL_TO_BOTTOM_BUTTON_DELAY_MILLIS = 500L
 private val ChatHeaderControlsHeight = 64.dp
 private val ChatHeaderFadeHeight = 24.dp
 private val ChatComposerOverlayMinHeight = 116.dp
