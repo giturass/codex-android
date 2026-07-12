@@ -43,7 +43,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -106,7 +105,6 @@ fun CodexNavigationDrawer(
     isLoadingMore: Boolean,
     hasMore: Boolean,
     activeThreadId: String?,
-    newTaskSelected: Boolean,
     isPermanent: Boolean,
     onNewConversation: () -> Unit,
     onOpenConversation: (String) -> Unit,
@@ -148,7 +146,6 @@ fun CodexNavigationDrawer(
             isLoadingMore = isLoadingMore,
             hasMore = hasMore,
             activeThreadId = activeThreadId,
-            newTaskSelected = newTaskSelected,
             onNewConversation = onNewConversation,
             onOpenConversation = onOpenConversation,
             onOpenDraft = onOpenDraft,
@@ -209,7 +206,6 @@ private fun ColumnScope.DrawerContent(
     isLoadingMore: Boolean,
     hasMore: Boolean,
     activeThreadId: String?,
-    newTaskSelected: Boolean,
     onNewConversation: () -> Unit,
     onOpenConversation: (String) -> Unit,
     onOpenDraft: (DraftSummary) -> Unit,
@@ -356,7 +352,6 @@ private fun ColumnScope.DrawerContent(
                 }
                 item("recent-title") {
                     DrawerRecentHeader(
-                        newTaskSelected = newTaskSelected,
                         groupByProject = groupByProject,
                         refreshEnabled = !isLoading && !isLoadingMore,
                         onNewConversation = onNewConversation,
@@ -575,7 +570,6 @@ private fun RefreshableDrawerList(
 
 @Composable
 private fun DrawerRecentHeader(
-    newTaskSelected: Boolean,
     groupByProject: Boolean,
     refreshEnabled: Boolean,
     onNewConversation: () -> Unit,
@@ -593,14 +587,8 @@ private fun DrawerRecentHeader(
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        if (newTaskSelected) {
-            FilledTonalIconButton(onClick = onNewConversation) {
-                Icon(Icons.Rounded.Add, contentDescription = "新建任务")
-            }
-        } else {
-            IconButton(onClick = onNewConversation) {
-                Icon(Icons.Rounded.Add, contentDescription = "新建任务")
-            }
+        IconButton(onClick = onNewConversation) {
+            Icon(Icons.Rounded.Add, contentDescription = "新建任务")
         }
         IconButton(onClick = onSearch) {
             Icon(Icons.Rounded.Search, contentDescription = "搜索会话")

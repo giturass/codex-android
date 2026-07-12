@@ -66,12 +66,6 @@ internal data class NewTaskRoute(
     val cwd: String? = null,
 )
 
-internal fun isNewTaskDestination(route: String?): Boolean {
-    val routeBase = route?.substringBefore('?') ?: return false
-    val routeName = NewTaskRoute::class.qualifiedName ?: return false
-    return routeBase == routeName || routeBase.startsWith("$routeName/")
-}
-
 @Serializable
 private data class ServerEditorRoute(val serverId: String? = null)
 
@@ -103,7 +97,6 @@ fun CodexApp(
     val scope = rememberCoroutineScope()
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val activeThreadId = currentBackStackEntry?.arguments?.getString("threadId")
-    val newTaskSelected = isNewTaskDestination(currentBackStackEntry?.destination?.route)
 
     suspend fun showUserFacingError(error: UserFacingError) {
         val result = snackbarHostState.showSnackbar(
@@ -201,7 +194,6 @@ fun CodexApp(
                 isLoadingMore = homeState.isLoadingMore,
                 hasMore = homeState.nextCursor != null,
                 activeThreadId = activeThreadId,
-                newTaskSelected = newTaskSelected,
                 isPermanent = isPermanent,
                 onNewConversation = {
                     closeDrawer()
