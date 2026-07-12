@@ -42,18 +42,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hebo.codex.domain.QuickPhrase
 
-internal fun insertQuickPhrase(value: TextFieldValue, content: String): TextFieldValue {
-    val selectionStart = value.selection.min.coerceIn(0, value.text.length)
-    val selectionEnd = value.selection.max.coerceIn(selectionStart, value.text.length)
-    return TextFieldValue(
-        text = value.text.replaceRange(selectionStart, selectionEnd, content),
-        selection = TextRange(selectionStart + content.length),
+internal fun replaceWithQuickPhrase(value: TextFieldValue, content: String): TextFieldValue =
+    value.copy(
+        text = content,
+        selection = TextRange(content.length),
+        composition = null,
     )
-}
 
 @Composable
 fun QuickPhraseMenuContent(
     phrases: List<QuickPhrase>,
+    selectionEnabled: Boolean,
     onBack: () -> Unit,
     onManage: () -> Unit,
     onSelect: (QuickPhrase) -> Unit,
@@ -96,6 +95,7 @@ fun QuickPhraseMenuContent(
                         overflow = TextOverflow.Ellipsis,
                     )
                 },
+                enabled = selectionEnabled,
                 onClick = { onSelect(phrase) },
             )
         }

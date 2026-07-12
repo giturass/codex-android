@@ -162,9 +162,11 @@ class ChatViewModel(
         scheduleDraft()
     }
 
-    fun sendDraft() {
+    fun sendDraft(message: String) {
+        if (mutableState.value.isSendingDraft) return
+        updateDraft { it.copy(message = message) }
         val current = mutableState.value
-        if (current.isSendingDraft || current.connectionStatus !is ConnectionStatus.Connected) return
+        if (current.connectionStatus !is ConnectionStatus.Connected) return
         val draft = current.draft
         val input = buildList {
             draft.message.takeIf(String::isNotBlank)?.let { add(UserInputPart.Text(it)) }

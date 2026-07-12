@@ -279,7 +279,7 @@ private fun NewTaskContent(
     onDeleteQuickPhrase: (String) -> Unit,
     onMoveQuickPhraseUp: (String) -> Unit,
     onMoveQuickPhraseDown: (String) -> Unit,
-    onSend: () -> Unit,
+    onSend: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var composerHeightPx by remember { mutableStateOf(0) }

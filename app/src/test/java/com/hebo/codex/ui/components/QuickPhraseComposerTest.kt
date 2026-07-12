@@ -7,40 +7,31 @@ import org.junit.Test
 
 class QuickPhraseComposerTest {
     @Test
-    fun `在光标处原样插入快捷短语`() {
+    fun `快捷短语替换全部已有内容`() {
         val value = TextFieldValue("前后", selection = TextRange(1))
 
-        val result = insertQuickPhrase(value, "快捷短语")
+        val result = replaceWithQuickPhrase(value, "快捷短语")
 
-        assertEquals("前快捷短语后", result.text)
-        assertEquals(TextRange(5), result.selection)
-    }
-
-    @Test
-    fun `用快捷短语原样替换选区`() {
-        val value = TextFieldValue("替换这段文字", selection = TextRange(2, 4))
-
-        val result = insertQuickPhrase(value, "内容")
-
-        assertEquals("替换内容文字", result.text)
+        assertEquals("快捷短语", result.text)
         assertEquals(TextRange(4), result.selection)
     }
 
     @Test
-    fun `插入时不添加空格或换行`() {
-        val value = TextFieldValue("已有内容", selection = TextRange(4))
+    fun `快捷短语替换选区之外的内容`() {
+        val value = TextFieldValue("替换这段文字", selection = TextRange(2, 4))
 
-        val result = insertQuickPhrase(value, "继续处理")
+        val result = replaceWithQuickPhrase(value, "内容")
 
-        assertEquals("已有内容继续处理", result.text)
+        assertEquals("内容", result.text)
+        assertEquals(TextRange(2), result.selection)
     }
 
     @Test
     fun `保留短语本身包含的所有字符`() {
         val value = TextFieldValue("前后", selection = TextRange(1))
 
-        val result = insertQuickPhrase(value, " 短语\n")
+        val result = replaceWithQuickPhrase(value, " 短语\n")
 
-        assertEquals("前 短语\n后", result.text)
+        assertEquals(" 短语\n", result.text)
     }
 }

@@ -194,23 +194,25 @@ class NewTaskViewModel(
         )
     }
 
-    fun startConversation() {
+    fun startConversation(message: String) {
         val current = mutableState.value
         if (current.isCreatingConversation || current.isLoadingDraft) return
-        val serverId = current.serverId ?: return
-        if (current.message.isBlank() && current.attachments.isEmpty()) {
+        updateMessage(message)
+        val submission = mutableState.value
+        val serverId = submission.serverId ?: return
+        if (submission.message.isBlank() && submission.attachments.isEmpty()) {
             showError(IllegalArgumentException("请输入任务内容"))
             return
         }
-        if (current.cwd.isBlank()) {
+        if (submission.cwd.isBlank()) {
             showError(IllegalArgumentException("请选择项目"))
             return
         }
 
+        mutableState.update { it.copy(isCreatingConversation = true, errorMessage = null) }
         viewModelScope.launch {
-            mutableState.update { it.copy(isCreatingConversation = true, errorMessage = null) }
             val threadId = createdThreadId ?: runSuspendCatching {
-                repository.startConversation(serverId, current.cwd, current.options)
+                repository.startConversation(serverId, submission.cwd, submission.options)
             }.onFailure(::showError).getOrNull()
             if (threadId == null) {
                 mutableState.update { it.copy(isCreatingConversation = false) }
@@ -219,14 +221,14 @@ class NewTaskViewModel(
             createdThreadId = threadId
 
             val input = buildList {
-                current.message.takeIf(String::isNotBlank)?.let { add(UserInputPart.Text(it)) }
-                addAll(current.attachments.map(DraftAttachment::input))
+                submission.message.takeIf(String::isNotBlank)?.let { add(UserInputPart.Text(it)) }
+                addAll(submission.attachments.map(DraftAttachment::input))
             }
             runSuspendCatching {
-                repository.sendMessage(serverId, threadId, input, current.options.toTurnOptions())
+                repository.sendMessage(serverId, threadId, input, submission.options.toTurnOptions())
             }
                 .onSuccess {
-                    runSuspendCatching { draftRepository.delete(currentDraft(current).key) }
+                    runSuspendCatching { draftRepository.delete(currentDraft(submission).key) }
                         .onFailure { error ->
                             mutableState.update {
                                 it.copy(errorMessage = error.toUserFacingError("清理草稿失败"))
@@ -242,17 +244,17 @@ class NewTaskViewModel(
                     val threadDraft = ConversationDraft.Thread(
                         serverId = serverId,
                         threadId = threadId,
-                        threadTitle = current.conversationTitle(),
-                        message = current.message,
-                        cwd = current.cwd,
-                        options = current.options.toTurnOptions(),
-                        attachments = current.attachments,
+                        threadTitle = submission.conversationTitle(),
+                        message = submission.message,
+                        cwd = submission.cwd,
+                        options = submission.options.toTurnOptions(),
+                        attachments = submission.attachments,
                         updatedAtMillis = System.currentTimeMillis(),
                         revision = newDraftRevision(),
                     )
                     runSuspendCatching {
                         draftRepository.save(threadDraft)
-                        draftRepository.delete(currentDraft(current).key)
+                        draftRepository.delete(currentDraft(submission).key)
                     }.onSuccess {
                         createdThreadId = null
                         mutableState.update {

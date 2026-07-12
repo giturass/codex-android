@@ -177,7 +177,7 @@ import com.hebo.codex.ui.components.QuickPhraseMenuContent
 import com.hebo.codex.ui.components.ScrollChromeState
 import com.hebo.codex.ui.components.UserFacingErrorDialog
 import com.hebo.codex.ui.components.afterUserScroll
-import com.hebo.codex.ui.components.insertQuickPhrase
+import com.hebo.codex.ui.components.replaceWithQuickPhrase
 import com.hebo.codex.ui.components.settleTarget
 import com.hebo.codex.ui.quickphrases.QuickPhraseViewModel
 import com.hebo.codex.ui.ratelimits.RateLimitIndicator
@@ -553,12 +553,12 @@ fun ChatScreen(
                                 else -> Unit
                             }
                         },
-                        onSend = {
+                        onSend = { message ->
                             chromeSettleJob?.cancel()
                             chromeSettleJob = null
                             chromeScrollState = ScrollChromeState()
                             autoFollow = true
-                            viewModel.sendDraft()
+                            viewModel.sendDraft(message)
                         },
                         onStop = viewModel::interrupt,
                     )
@@ -1391,7 +1391,7 @@ internal fun ConversationComposer(
     onInputError: (Throwable) -> Unit,
     onOpenOptions: () -> Unit,
     onCommand: (ComposerCommand) -> Unit,
-    onSend: () -> Unit,
+    onSend: (String) -> Unit,
     onStop: (() -> Unit)?,
 ) {
     var dialog by remember { mutableStateOf<ComposerDialog?>(null) }
@@ -1516,6 +1516,7 @@ internal fun ConversationComposer(
                     showQuickPhrases = showQuickPhrases,
                     onShowQuickPhrases = { showQuickPhrases = it },
                     quickPhrases = quickPhrases,
+                    quickPhraseSendEnabled = sendEnabled && !isSending,
                     enabled = !isSending,
                     onPickImage = {
                         imagePicker.launch(
@@ -1529,13 +1530,11 @@ internal fun ConversationComposer(
                         showQuickPhraseManager = true
                     },
                     onSelectQuickPhrase = { phrase ->
-                        val nextValue = insertQuickPhrase(composerValue, phrase.content)
+                        val nextValue = replaceWithQuickPhrase(composerValue, phrase.content)
                         composerValue = nextValue
-                        onMessageChange(nextValue.text)
                         addMenuExpanded = false
                         showQuickPhrases = false
-                        focusRequester.requestFocus()
-                        keyboardController?.show()
+                        onSend(nextValue.text)
                     },
                     onInsertTrigger = { trigger ->
                         val nextValue = insertComposerTrigger(composerValue, trigger)
@@ -1571,7 +1570,11 @@ internal fun ConversationComposer(
                     }
                 }
                 val stopsActiveTurn = isRunning && !hasInput
-                val action = if (stopsActiveTurn) requireNotNull(onStop) else onSend
+                val action = if (stopsActiveTurn) {
+                    requireNotNull(onStop)
+                } else {
+                    { onSend(composerValue.text) }
+                }
                 MessageComposerActionButton(
                     onClick = action,
                     enabled = if (stopsActiveTurn) {
@@ -1770,6 +1773,7 @@ private fun ComposerAddMenu(
     showQuickPhrases: Boolean,
     onShowQuickPhrases: (Boolean) -> Unit,
     quickPhrases: List<QuickPhrase>,
+    quickPhraseSendEnabled: Boolean,
     enabled: Boolean,
     onPickImage: () -> Unit,
     onAddImageAddress: () -> Unit,
@@ -1806,6 +1810,7 @@ private fun ComposerAddMenu(
             if (showQuickPhrases) {
                 QuickPhraseMenuContent(
                     phrases = quickPhrases,
+                    selectionEnabled = quickPhraseSendEnabled,
                     onBack = { onShowQuickPhrases(false) },
                     onManage = onManageQuickPhrases,
                     onSelect = onSelectQuickPhrase,
