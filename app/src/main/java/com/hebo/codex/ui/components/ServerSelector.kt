@@ -3,7 +3,6 @@
 package com.hebo.codex.ui.components
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
@@ -80,21 +80,28 @@ fun ServerSelector(
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 ConnectionIndicator(activeStatus)
                 Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(activeServer?.name ?: "请选择服务器", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        activeServer?.webSocketUrl ?: "打开列表选择服务器",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                Text(
+                    text = activeServer?.name ?: "请选择服务器",
+                    modifier = Modifier.widthIn(max = ServerNameMaxWidth),
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = activeServer?.webSocketUrl ?: "打开列表选择服务器",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.width(8.dp))
                 Icon(Icons.Rounded.ExpandMore, contentDescription = "切换服务器")
             }
         }
@@ -109,36 +116,32 @@ fun ServerSelector(
                 val status = statuses[server.id] ?: ConnectionStatus.Disconnected
                 DropdownMenuItem(
                     text = {
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    server.name,
-                                    modifier = Modifier.weight(1f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                if (server.id == activeServer?.id) {
-                                    Spacer(Modifier.width(4.dp))
-                                    Icon(
-                                        Icons.Rounded.Check,
-                                        contentDescription = "当前服务器",
-                                        modifier = Modifier.size(18.dp),
-                                        tint = MaterialTheme.colorScheme.primary,
-                                    )
-                                }
-                            }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                server.webSocketUrl,
+                                text = server.name,
+                                modifier = Modifier.widthIn(max = ServerNameMaxWidth),
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = server.webSocketUrl,
+                                modifier = Modifier.weight(1f),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
-                            Text(
-                                status.label(),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            if (server.id == activeServer?.id) {
+                                Spacer(Modifier.width(4.dp))
+                                Icon(
+                                    Icons.Rounded.Check,
+                                    contentDescription = "当前服务器",
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            }
                         }
                     },
                     leadingIcon = { ConnectionIndicator(status) },
@@ -269,3 +272,5 @@ private fun ServerActionsMenu(
 
 internal fun isServerSettingsEnabled(status: ConnectionStatus): Boolean =
     status is ConnectionStatus.Connected
+
+private val ServerNameMaxWidth = 112.dp
