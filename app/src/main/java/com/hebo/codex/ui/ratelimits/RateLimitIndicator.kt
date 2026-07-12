@@ -233,8 +233,6 @@ private fun RateLimitDetailsPopup(
                     window = windows.fiveHour,
                     color = fiveHourColor,
                     nowEpochSeconds = nowEpochSeconds,
-                    onRefresh = onRefresh,
-                    isRefreshing = state.isRefreshing,
                 )
                 windows.weekly?.let { weekly ->
                     HorizontalDivider()
@@ -256,16 +254,29 @@ private fun RateLimitDetailsPopup(
                 }
                 state.updatedAt?.let { updatedAt ->
                     val isStale = nowEpochSeconds - updatedAt >= StaleAfterSeconds
-                    Text(
-                        text = if (isStale) {
-                            "数据可能已过期 · 更新于 ${relativeTime(updatedAt, Instant.ofEpochSecond(nowEpochSeconds))}"
-                        } else {
-                            "更新于 ${relativeTime(updatedAt, Instant.ofEpochSecond(nowEpochSeconds))}"
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (isStale) MaterialTheme.statusColors.warning
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = if (isStale) {
+                                "数据可能已过期 · 更新于 ${relativeTime(updatedAt, Instant.ofEpochSecond(nowEpochSeconds))}"
+                            } else {
+                                "更新于 ${relativeTime(updatedAt, Instant.ofEpochSecond(nowEpochSeconds))}"
+                            },
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isStale) MaterialTheme.statusColors.warning
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        IconButton(onClick = onRefresh, enabled = !state.isRefreshing) {
+                            if (state.isRefreshing) {
+                                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Rounded.Refresh, contentDescription = "刷新额度与 Token 用量")
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -316,8 +327,6 @@ private fun RateLimitWindowDetails(
     window: RateLimitWindow,
     color: Color,
     nowEpochSeconds: Long,
-    onRefresh: (() -> Unit)? = null,
-    isRefreshing: Boolean = false,
 ) {
     val remaining = window.remainingPercent()
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -326,15 +335,6 @@ private fun RateLimitWindowDetails(
             Text(label, modifier = Modifier.padding(start = 8.dp), style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.weight(1f))
             Text("${formatPercent(remaining)} 剩余", style = MaterialTheme.typography.labelLarge)
-            onRefresh?.let {
-                IconButton(onClick = it, enabled = !isRefreshing) {
-                    if (isRefreshing) {
-                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "刷新额度与 Token 用量")
-                    }
-                }
-            }
         }
         LinearProgressIndicator(
             progress = { (remaining / 100.0).toFloat() },
