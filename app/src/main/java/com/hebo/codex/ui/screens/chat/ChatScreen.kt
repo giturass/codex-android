@@ -172,7 +172,7 @@ private val highlightedMarkdownComponents = markdownComponents(
 private const val CHAT_LIST_END_KEY = "chat-list-end"
 private const val SCROLL_TO_BOTTOM_BUTTON_DELAY_MILLIS = 500L
 private val ChatHeaderControlsHeight = 64.dp
-private val ChatHeaderFadeHeight = 24.dp
+private val ChatHeaderContentSpacing = 24.dp
 private val ChatComposerOverlayMinHeight = 116.dp
 private val ChatComposerFadeHeight = 44.dp
 
@@ -296,7 +296,7 @@ fun ChatScreen(
     val topContentPadding = maxOf(
         topControlsHeight,
         statusBarPadding + ChatHeaderControlsHeight,
-    ) + ChatHeaderFadeHeight
+    ) + ChatHeaderContentSpacing
     val bottomContentPadding = if (conversation == null) {
         bottomSystemPadding + 16.dp
     } else {
@@ -343,19 +343,6 @@ fun ChatScreen(
             }
         }
 
-        Box(
-            Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .height(topContentPadding)
-                .background(
-                    Brush.verticalGradient(
-                        0f to backgroundColor.copy(alpha = 0.96f),
-                        0.55f to backgroundColor.copy(alpha = 0.9f),
-                        1f to Color.Transparent,
-                    ),
-                ),
-        )
         ChatFloatingHeader(
             conversation = conversation,
             connectionStatus = state.connectionStatus,
@@ -612,32 +599,38 @@ private fun ChatFloatingHeader(
                 }
             }
         } else if (conversation != null) {
-            Column(
-                Modifier
+            Surface(
+                modifier = Modifier
                     .align(Alignment.CenterStart)
                     .fillMaxWidth()
                     .padding(start = 4.dp, end = 116.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.82f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                shadowElevation = 2.dp,
             ) {
-                Text(
-                    conversation.title,
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                val status = when {
-                    connectionStatus !is ConnectionStatus.Connected -> "已断开"
-                    conversation.pendingRequests.isNotEmpty() -> "需要处理"
-                    conversation.isRunning -> "运行中"
-                    conversation.errorMessage != null -> "失败"
-                    else -> "可继续"
+                Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                    Text(
+                        conversation.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    val status = when {
+                        connectionStatus !is ConnectionStatus.Connected -> "已断开"
+                        conversation.pendingRequests.isNotEmpty() -> "需要处理"
+                        conversation.isRunning -> "运行中"
+                        conversation.errorMessage != null -> "失败"
+                        else -> "可继续"
+                    }
+                    Text(
+                        "$status · ${projectName(conversation.cwd)} · ${conversation.serverName}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
-                Text(
-                    "$status · ${projectName(conversation.cwd)} · ${conversation.serverName}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
             }
         }
 
