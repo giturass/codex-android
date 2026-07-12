@@ -388,12 +388,17 @@ enum class PlanStepStatus {
 }
 
 data class TokenUsage(
+    val total: TokenUsageBreakdown,
+    val last: TokenUsageBreakdown,
+    val modelContextWindow: Long?,
+)
+
+data class TokenUsageBreakdown(
     val totalTokens: Long,
     val inputTokens: Long,
     val cachedInputTokens: Long,
     val outputTokens: Long,
     val reasoningOutputTokens: Long,
-    val modelContextWindow: Long?,
 )
 
 data class ConversationNotice(

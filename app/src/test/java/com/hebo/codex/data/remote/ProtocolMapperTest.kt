@@ -96,7 +96,12 @@ class ProtocolMapperTest {
 
         assertEquals("先检查", plan.explanation)
         assertEquals("定位问题", plan.steps.single().text)
-        assertEquals(30L, usage.totalTokens)
+        assertEquals(30L, usage.total.totalTokens)
+        assertEquals(20L, usage.total.inputTokens)
+        assertEquals(5L, usage.total.cachedInputTokens)
+        assertEquals(10L, usage.last.totalTokens)
+        assertEquals(6L, usage.last.inputTokens)
+        assertEquals(1L, usage.last.reasoningOutputTokens)
         assertEquals(200000L, usage.modelContextWindow)
     }
 

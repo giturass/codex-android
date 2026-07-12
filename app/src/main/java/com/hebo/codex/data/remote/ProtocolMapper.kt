@@ -14,6 +14,7 @@ import com.hebo.codex.domain.NetworkPolicyRuleAction
 import com.hebo.codex.domain.ThreadRuntimeStatus
 import com.hebo.codex.domain.ThreadSummary
 import com.hebo.codex.domain.TokenUsage
+import com.hebo.codex.domain.TokenUsageBreakdown
 import com.hebo.codex.domain.TurnPlan
 import com.hebo.codex.domain.TurnPlanStep
 import com.hebo.codex.domain.PlanStepStatus
@@ -116,16 +117,20 @@ object ProtocolMapper {
 
     fun tokenUsage(params: JsonObject): TokenUsage {
         val usage = params.requiredObject("tokenUsage")
-        val total = usage.requiredObject("total")
         return TokenUsage(
-            totalTokens = total.optionalLong("totalTokens") ?: 0L,
-            inputTokens = total.optionalLong("inputTokens") ?: 0L,
-            cachedInputTokens = total.optionalLong("cachedInputTokens") ?: 0L,
-            outputTokens = total.optionalLong("outputTokens") ?: 0L,
-            reasoningOutputTokens = total.optionalLong("reasoningOutputTokens") ?: 0L,
+            total = usage.requiredObject("total").tokenUsageBreakdown(),
+            last = usage.requiredObject("last").tokenUsageBreakdown(),
             modelContextWindow = usage.optionalLong("modelContextWindow"),
         )
     }
+
+    private fun JsonObject.tokenUsageBreakdown() = TokenUsageBreakdown(
+        totalTokens = requiredLong("totalTokens"),
+        inputTokens = requiredLong("inputTokens"),
+        cachedInputTokens = requiredLong("cachedInputTokens"),
+        outputTokens = requiredLong("outputTokens"),
+        reasoningOutputTokens = requiredLong("reasoningOutputTokens"),
+    )
 
     fun commandActions(value: JsonElement?): List<CommandAction> = value
         .optionalArray("commandActions")

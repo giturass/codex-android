@@ -67,6 +67,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -128,6 +129,8 @@ import com.hebo.codex.domain.ReviewTarget
 import com.hebo.codex.domain.SandboxMode
 import com.hebo.codex.domain.ThreadGoal
 import com.hebo.codex.domain.ThreadGoalStatus
+import com.hebo.codex.domain.TokenUsage
+import com.hebo.codex.domain.TokenUsageBreakdown
 import com.hebo.codex.domain.TurnOptions
 import com.hebo.codex.domain.UserInputPart
 import com.hebo.codex.domain.UserFacingError
@@ -135,6 +138,7 @@ import com.hebo.codex.domain.projectName
 import com.hebo.codex.ui.displayDescriptionRes
 import com.hebo.codex.ui.displayLabelRes
 import com.hebo.codex.ui.formatCompactCount
+import com.hebo.codex.ui.formatCount
 import com.hebo.codex.ui.formatPercent
 import com.hebo.codex.ui.featureScopeLabel
 import com.hebo.codex.ui.components.ExpandableErrorDetails
@@ -344,23 +348,6 @@ fun ChatScreen(
                         )
                     }
                 }
-                conversation.tokenUsage?.let { usage ->
-                    item("token-usage") {
-                        val contextUsage = usage.modelContextWindow
-                            ?.takeIf { it > 0 }
-                            ?.let { formatPercent(usage.totalTokens * 100.0 / it) }
-                        Text(
-                            "已用 ${formatCompactCount(usage.totalTokens)} Token" +
-                                " · 输入 ${formatCompactCount(usage.inputTokens)}" +
-                                (usage.cachedInputTokens.takeIf { it > 0 }
-                                    ?.let { "（缓存 ${formatCompactCount(it)}）" } ?: "") +
-                                " · 输出 ${formatCompactCount(usage.outputTokens)}" +
-                                (contextUsage?.let { " · 占上下文 $it" } ?: ""),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
                 if (conversation.isRunning && !conversationRows.hasInProgressActivity()) {
                     item("running") { RunningIndicator() }
                 }
@@ -523,6 +510,12 @@ fun ChatScreen(
             },
             onReview = { dialog = ChatDialog.Review },
             onGoal = { dialog = ChatDialog.Goal },
+            onStatistics = { dialog = ChatDialog.Statistics },
+        )
+
+        ChatDialog.Statistics -> ConversationStatisticsSheet(
+            usage = conversation?.tokenUsage,
+            onDismiss = { dialog = null },
         )
 
         ChatDialog.Review -> ReviewDialog(
@@ -1741,6 +1734,7 @@ private fun ChatActionsSheet(
     onCompact: () -> Unit,
     onReview: () -> Unit,
     onGoal: () -> Unit,
+    onStatistics: () -> Unit,
 ) {
     var name by rememberSaveable(title) { mutableStateOf(title) }
     var lastTurnId by rememberSaveable(turns) { mutableStateOf<String?>(null) }
@@ -1790,9 +1784,104 @@ private fun ChatActionsSheet(
                 OutlinedButton(onClick = onCompact, modifier = Modifier.fillMaxWidth()) { Text("压缩上下文") }
                 OutlinedButton(onClick = onReview, modifier = Modifier.fillMaxWidth()) { Text("代码审查") }
                 OutlinedButton(onClick = onGoal, modifier = Modifier.fillMaxWidth()) { Text("目标管理") }
+                OutlinedButton(onClick = onStatistics, modifier = Modifier.fillMaxWidth()) { Text("对话统计") }
                 TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("关闭") }
                 Spacer(Modifier.height(12.dp))
         }
+    }
+}
+
+@Composable
+private fun ConversationStatisticsSheet(
+    usage: TokenUsage?,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("对话统计", style = MaterialTheme.typography.titleLarge)
+            if (usage == null) {
+                Text(
+                    "暂无统计数据",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                ContextUsageSection(usage)
+                HorizontalDivider()
+                TokenUsageSection(
+                    title = "会话累计",
+                    description = "本对话所有模型调用累计消耗的 Token",
+                    usage = usage.total,
+                )
+                HorizontalDivider()
+                TokenUsageSection(
+                    title = "最近一次模型调用",
+                    description = "最近一次调用返回的 Token 明细",
+                    usage = usage.last,
+                )
+            }
+            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("关闭") }
+            Spacer(Modifier.height(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun ContextUsageSection(usage: TokenUsage) {
+    val contextWindow = usage.modelContextWindow?.takeIf { it > 0 }
+    val contextTokens = usage.last.totalTokens
+    val ratio = contextWindow?.let { (contextTokens.toFloat() / it).coerceIn(0f, 1f) }
+    Text("当前上下文", style = MaterialTheme.typography.titleMedium)
+    Text(
+        if (contextWindow == null) {
+            "已用 ${formatCompactCount(contextTokens)} Token"
+        } else {
+            "已用 ${formatCompactCount(contextTokens)} / ${formatCompactCount(contextWindow)} Token" +
+                " · ${formatPercent(contextTokens.toDouble() / contextWindow * 100.0)}"
+        },
+        style = MaterialTheme.typography.bodyMedium,
+    )
+    if (ratio != null) {
+        LinearProgressIndicator(
+            progress = { ratio },
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
+private fun TokenUsageSection(
+    title: String,
+    description: String,
+    usage: TokenUsageBreakdown,
+) {
+    Text(title, style = MaterialTheme.typography.titleMedium)
+    Text(
+        description,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    TokenUsageMetric("总计", usage.totalTokens)
+    TokenUsageMetric("输入", usage.inputTokens)
+    if (usage.cachedInputTokens > 0) TokenUsageMetric("缓存输入", usage.cachedInputTokens)
+    TokenUsageMetric("输出", usage.outputTokens)
+    if (usage.reasoningOutputTokens > 0) TokenUsageMetric("推理输出", usage.reasoningOutputTokens)
+}
+
+@Composable
+private fun TokenUsageMetric(label: String, value: Long) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("${formatCount(value)} Token", style = MaterialTheme.typography.labelLarge)
     }
 }
 
@@ -1901,6 +1990,7 @@ private sealed interface ChatDialog {
     data object Review : ChatDialog
     data object Goal : ChatDialog
     data object Changes : ChatDialog
+    data object Statistics : ChatDialog
 }
 
 private enum class ComposerDialog {
