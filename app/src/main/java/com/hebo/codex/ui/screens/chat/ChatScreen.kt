@@ -1769,7 +1769,7 @@ private fun ComposerAddMenu(
         MessageComposerAddButton(
             onClick = {
                 onShowQuickPhrases(false)
-                onExpandedChange(true)
+                onExpandedChange(!expanded)
             },
             enabled = enabled,
             contentDescription = "添加内容",
