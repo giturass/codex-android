@@ -647,68 +647,63 @@ private fun ChatFloatingHeader(
         }
 
         if (conversation != null) {
-            Row(
+            Surface(
                 modifier = Modifier.align(Alignment.CenterEnd),
-                verticalAlignment = Alignment.CenterVertically,
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                shadowElevation = 2.dp,
             ) {
-                RateLimitIndicator(
-                    state = rateLimitsState,
-                    onRefresh = onRefreshRateLimits,
-                )
-                Spacer(Modifier.width(4.dp))
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    shadowElevation = 2.dp,
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (showNavigationIcon) {
-                            IconButton(onClick = onNewTask) {
-                                Icon(Icons.Rounded.Edit, contentDescription = "新建任务")
-                            }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RateLimitIndicator(
+                        state = rateLimitsState,
+                        onRefresh = onRefreshRateLimits,
+                    )
+                    if (showNavigationIcon) {
+                        IconButton(onClick = onNewTask) {
+                            Icon(Icons.Rounded.Edit, contentDescription = "新建任务")
                         }
-                        Box {
-                            IconButton(onClick = { actionsExpanded = true }) {
-                                Icon(Icons.Rounded.MoreVert, contentDescription = "会话操作")
-                            }
-                            DropdownMenu(
-                                expanded = actionsExpanded,
-                                onDismissRequest = { actionsExpanded = false },
-                            ) {
-                                ChatActionMenuItem(
-                                    text = "重命名",
-                                    icon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
-                                    onClick = {
-                                        actionsExpanded = false
-                                        onRename()
-                                    },
-                                )
-                                ChatActionMenuItem(
-                                    text = "分叉会话",
-                                    icon = { Icon(Icons.AutoMirrored.Rounded.CallSplit, contentDescription = null) },
-                                    onClick = {
-                                        actionsExpanded = false
-                                        onFork()
-                                    },
-                                )
-                                ChatActionMenuItem(
-                                    text = "目标管理",
-                                    icon = { Icon(Icons.Rounded.Flag, contentDescription = null) },
-                                    onClick = {
-                                        actionsExpanded = false
-                                        onOpenGoal()
-                                    },
-                                )
-                                ChatActionMenuItem(
-                                    text = "对话统计",
-                                    icon = { Icon(Icons.Rounded.BarChart, contentDescription = null) },
-                                    onClick = {
-                                        actionsExpanded = false
-                                        onOpenStatistics()
-                                    },
-                                )
-                            }
+                    }
+                    Box {
+                        IconButton(onClick = { actionsExpanded = true }) {
+                            Icon(Icons.Rounded.MoreVert, contentDescription = "会话操作")
+                        }
+                        DropdownMenu(
+                            expanded = actionsExpanded,
+                            onDismissRequest = { actionsExpanded = false },
+                        ) {
+                            ChatActionMenuItem(
+                                text = "重命名",
+                                icon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
+                                onClick = {
+                                    actionsExpanded = false
+                                    onRename()
+                                },
+                            )
+                            ChatActionMenuItem(
+                                text = "分叉会话",
+                                icon = { Icon(Icons.AutoMirrored.Rounded.CallSplit, contentDescription = null) },
+                                onClick = {
+                                    actionsExpanded = false
+                                    onFork()
+                                },
+                            )
+                            ChatActionMenuItem(
+                                text = "目标管理",
+                                icon = { Icon(Icons.Rounded.Flag, contentDescription = null) },
+                                onClick = {
+                                    actionsExpanded = false
+                                    onOpenGoal()
+                                },
+                            )
+                            ChatActionMenuItem(
+                                text = "对话统计",
+                                icon = { Icon(Icons.Rounded.BarChart, contentDescription = null) },
+                                onClick = {
+                                    actionsExpanded = false
+                                    onOpenStatistics()
+                                },
+                            )
                         }
                     }
                 }
