@@ -37,24 +37,6 @@ class ConversationItemsTest {
         )
     }
 
-    @Test
-    fun `乐观用户消息仍按客户端编号替换`() {
-        val pending = ConversationItem.UserMessage(
-            id = "pending-client-1",
-            turnId = "pending",
-            clientId = "client-1",
-            content = listOf(UserMessagePart.Text("消息")),
-            isPending = true,
-        )
-        val confirmed = pending.copy(
-            id = "item-1",
-            turnId = "turn-1",
-            isPending = false,
-        )
-
-        assertEquals(listOf(confirmed), listOf(pending).upsertConversationItem(confirmed))
-    }
-
     private fun agentMessage(id: String, turnId: String, text: String) = ConversationItem.AgentMessage(
         id = id,
         turnId = turnId,

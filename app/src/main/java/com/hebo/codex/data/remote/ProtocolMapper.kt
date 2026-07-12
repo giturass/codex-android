@@ -185,7 +185,6 @@ object ProtocolMapper {
             "userMessage" -> ConversationItem.UserMessage(
                 id = id,
                 turnId = turnId,
-                clientId = item.optionalString("clientId"),
                 content = item.requiredArray("content").map(::userMessagePart),
             )
 

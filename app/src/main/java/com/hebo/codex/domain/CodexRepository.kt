@@ -186,9 +186,6 @@ class CodexRepository(
         )
     }
 
-    suspend fun recentThreads(serverId: String, cwd: String? = null): List<ThreadSummary> =
-        threadPage(serverId = serverId, cwd = cwd).data
-
     suspend fun startConversation(
         serverId: String,
         cwd: String,
@@ -626,16 +623,7 @@ class CodexRepository(
             .forEach { (key, state) ->
                 runSuspendCatching { ProtocolMapper.threadSnapshot(api.resumeThread(key.threadId)) }
                     .onSuccess { snapshot ->
-                        val current = state.value
-                        val pendingItems = current.items.filter {
-                            it is ConversationItem.UserMessage && it.isPending
-                        }
-                        val restored = snapshot.toConversationState(server)
-                        state.value = restored.copy(
-                            title = if (pendingItems.isEmpty()) restored.title else current.title,
-                            items = restored.items + pendingItems,
-                            isRunning = restored.isRunning || pendingItems.isNotEmpty(),
-                        )
+                        state.value = snapshot.toConversationState(server)
                     }
                     .onFailure { error ->
                         state.updateState {
@@ -809,21 +797,19 @@ class CodexRepository(
 
             "configWarning" -> addServerNotice(
                 serverId,
-                NoticeLevel.WARNING,
                 listOfNotNull(params.optionalString("summary"), params.optionalString("details")).joinToString("\n"),
             )
 
             "deprecationNotice" -> addServerNotice(
                 serverId,
-                NoticeLevel.WARNING,
                 listOfNotNull(params.optionalString("summary"), params.optionalString("details")).joinToString("\n"),
             )
 
             "warning" -> {
                 val message = params.requiredString("message")
                 val targetThreadId = params.optionalString("threadId")
-                if (targetThreadId == null) addServerNotice(serverId, NoticeLevel.WARNING, message)
-                else conversations[ConversationKey(serverId, targetThreadId)]?.addNotice(NoticeLevel.WARNING, message)
+                if (targetThreadId == null) addServerNotice(serverId, message)
+                else conversations[ConversationKey(serverId, targetThreadId)]?.addNotice(message)
             }
         }
 
@@ -871,7 +857,6 @@ class CodexRepository(
                         isRunning = false,
                         notices = (current.notices + ConversationNotice(
                             UUID.randomUUID().toString(),
-                            NoticeLevel.WARNING,
                             message,
                         )).takeLast(MAX_NOTICES),
                     )
@@ -892,7 +877,6 @@ class CodexRepository(
                     goalLoaded = true,
                     notices = (current.notices + ConversationNotice(
                         UUID.randomUUID().toString(),
-                        NoticeLevel.INFO,
                         "目标已更新：${goal.objective}",
                     )).takeLast(MAX_NOTICES),
                 )
@@ -904,7 +888,6 @@ class CodexRepository(
                     goalLoaded = true,
                     notices = (current.notices + ConversationNotice(
                         UUID.randomUUID().toString(),
-                        NoticeLevel.INFO,
                         "目标已清除",
                     )).takeLast(MAX_NOTICES),
                 )
@@ -917,7 +900,6 @@ class CodexRepository(
                     it.copy(
                         activeTurnId = turn.requiredString("id"),
                         isRunning = true,
-                        turnDiff = "",
                         plan = null,
                         errorMessage = null,
                     )
@@ -953,39 +935,34 @@ class CodexRepository(
                 bumpThreadRevision(serverId)
             }
 
-            "turn/diff/updated" -> state?.updateState { it.copy(turnDiff = params.requiredString("diff")) }
-
             "turn/plan/updated" -> state?.updateState { it.copy(plan = ProtocolMapper.turnPlan(params)) }
 
             "error" -> {
                 val error = params.requiredObject("error")
                 val message = error.requiredString("message")
-                state?.addNotice(NoticeLevel.ERROR, "服务器报告错误", message)
+                state?.addNotice("服务器报告错误", message)
                 if (!(params.optionalBoolean("willRetry") ?: false)) {
                     state?.updateState { it.copy(errorMessage = serverError("服务器报告错误", message)) }
                 }
             }
 
-            "guardianWarning" -> state?.addNotice(NoticeLevel.WARNING, params.requiredString("message"))
+            "guardianWarning" -> state?.addNotice(params.requiredString("message"))
 
             "model/rerouted" -> state?.addNotice(
-                NoticeLevel.WARNING,
                 "模型已从 ${params.requiredString("fromModel")} 切换为 ${params.requiredString("toModel")}",
             )
 
-            "model/verification" -> state?.addNotice(NoticeLevel.WARNING, "模型请求需要额外账号验证")
+            "model/verification" -> state?.addNotice("模型请求需要额外账号验证")
 
             "model/safetyBuffering/updated" -> if (params.optionalBoolean("showBufferingUi") == true) {
-                state?.addNotice(NoticeLevel.INFO, "模型正在进行安全检查")
+                state?.addNotice("模型正在进行安全检查")
             }
 
             "hook/started", "hook/completed" -> state?.addNotice(
-                NoticeLevel.INFO,
                 if (method == "hook/started") "Hook 开始执行" else "Hook 执行完成",
             )
 
             "item/autoApprovalReview/started", "item/autoApprovalReview/completed" -> state?.addNotice(
-                NoticeLevel.INFO,
                 if (method.endsWith("started")) "自动审批审查开始" else "自动审批审查完成",
             )
 
@@ -1146,7 +1123,6 @@ class CodexRepository(
     }
 
     private fun MutableStateFlow<ConversationState>.addNotice(
-        level: NoticeLevel,
         message: String,
         technicalDetails: String? = null,
     ) {
@@ -1154,7 +1130,6 @@ class CodexRepository(
             current.copy(
                 notices = (current.notices + ConversationNotice(
                     UUID.randomUUID().toString(),
-                    level,
                     message,
                     technicalDetails,
                 ))
@@ -1241,10 +1216,10 @@ class CodexRepository(
         update { current -> current + (serverId to ((current[serverId] ?: 0L) + 1L)) }
     }
 
-    private fun addServerNotice(serverId: String, level: NoticeLevel, message: String) {
+    private fun addServerNotice(serverId: String, message: String) {
         mutableServerNotices.update { current ->
             val notices = current[serverId].orEmpty() +
-                ConversationNotice(UUID.randomUUID().toString(), level, message)
+                ConversationNotice(UUID.randomUUID().toString(), message)
             current + (serverId to notices.takeLast(MAX_NOTICES))
         }
     }

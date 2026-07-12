@@ -41,7 +41,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.HelpOutline
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
-import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Close
@@ -141,7 +140,6 @@ import com.hebo.codex.ui.formatCompactCount
 import com.hebo.codex.ui.formatCount
 import com.hebo.codex.ui.formatPercent
 import com.hebo.codex.ui.featureScopeLabel
-import com.hebo.codex.ui.components.ExpandableErrorDetails
 import com.hebo.codex.ui.components.MessageComposer
 import com.hebo.codex.ui.components.MessageComposerAction
 import com.hebo.codex.ui.components.MessageComposerActionButton

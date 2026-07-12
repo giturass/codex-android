@@ -162,14 +162,6 @@ class ChatViewModel(
         scheduleDraft()
     }
 
-    fun appendToDraft(value: String) {
-        mutableState.update {
-            val separator = if (it.draft.message.isBlank()) "" else "\n\n"
-            it.copy(draft = it.draft.copy(message = it.draft.message + separator + value))
-        }
-        scheduleDraft()
-    }
-
     fun sendDraft() {
         val current = mutableState.value
         if (current.isSendingDraft || current.connectionStatus !is ConnectionStatus.Connected) return

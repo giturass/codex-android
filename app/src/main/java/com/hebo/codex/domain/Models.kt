@@ -114,7 +114,6 @@ data class ConversationState(
     val isRunning: Boolean = false,
     val pendingRequests: List<PendingServerRequest> = emptyList(),
     val plan: TurnPlan? = null,
-    val turnDiff: String = "",
     val tokenUsage: TokenUsage? = null,
     val goal: ThreadGoal? = null,
     val goalLoaded: Boolean = false,
@@ -135,9 +134,7 @@ sealed interface ConversationItem {
     data class UserMessage(
         override val id: String,
         override val turnId: String,
-        val clientId: String?,
         val content: List<UserMessagePart>,
-        val isPending: Boolean = false,
     ) : ConversationItem
 
     data class AgentMessage(
@@ -410,16 +407,9 @@ data class TokenUsageBreakdown(
 
 data class ConversationNotice(
     val id: String,
-    val level: NoticeLevel,
     val message: String,
     val technicalDetails: String? = null,
 )
-
-enum class NoticeLevel {
-    INFO,
-    WARNING,
-    ERROR,
-}
 
 enum class ApprovalPolicy(val wireValue: String) {
     UNTRUSTED("untrusted"),
