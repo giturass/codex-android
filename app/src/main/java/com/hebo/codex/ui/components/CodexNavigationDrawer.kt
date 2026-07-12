@@ -35,7 +35,6 @@ import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Folder
-import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PriorityHigh
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
@@ -43,8 +42,6 @@ import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
@@ -115,7 +112,6 @@ fun CodexNavigationDrawer(
     onOpenConversation: (String) -> Unit,
     onOpenDraft: (DraftSummary) -> Unit,
     onDeleteDraft: (DraftKey) -> Unit,
-    onOpenProjectSettings: (String) -> Unit,
     onNewProjectTask: (String) -> Unit,
     onSearch: (String) -> Unit,
     onShowArchived: (Boolean) -> Unit,
@@ -157,7 +153,6 @@ fun CodexNavigationDrawer(
             onOpenConversation = onOpenConversation,
             onOpenDraft = onOpenDraft,
             onDeleteDraft = onDeleteDraft,
-            onOpenProjectSettings = onOpenProjectSettings,
             onNewProjectTask = onNewProjectTask,
             onSearch = onSearch,
             onShowArchived = onShowArchived,
@@ -219,7 +214,6 @@ private fun ColumnScope.DrawerContent(
     onOpenConversation: (String) -> Unit,
     onOpenDraft: (DraftSummary) -> Unit,
     onDeleteDraft: (DraftKey) -> Unit,
-    onOpenProjectSettings: (String) -> Unit,
     onNewProjectTask: (String) -> Unit,
     onSearch: (String) -> Unit,
     onShowArchived: (Boolean) -> Unit,
@@ -442,10 +436,6 @@ private fun ColumnScope.DrawerContent(
                                     } else {
                                         expandedProjects + project.path
                                     }
-                                },
-                                onOpenSettings = {
-                                    leaveTransientPage()
-                                    onOpenProjectSettings(project.path)
                                 },
                                 onNewTask = {
                                     leaveTransientPage()
@@ -694,10 +684,8 @@ private fun ProjectHeader(
     expanded: Boolean,
     active: Boolean,
     onToggle: () -> Unit,
-    onOpenSettings: () -> Unit,
     onNewTask: () -> Unit,
 ) {
-    var menuExpanded by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -738,21 +726,6 @@ private fun ProjectHeader(
                 Icons.Rounded.Add,
                 contentDescription = "在「${project.name}」中新建会话",
             )
-        }
-        Box {
-            IconButton(onClick = { menuExpanded = true }) {
-                Icon(Icons.Rounded.MoreVert, contentDescription = "${project.name} 项目操作")
-            }
-            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                DropdownMenuItem(
-                    text = { Text("项目设置") },
-                    leadingIcon = { Icon(Icons.Rounded.Settings, contentDescription = null) },
-                    onClick = {
-                        menuExpanded = false
-                        onOpenSettings()
-                    },
-                )
-            }
         }
     }
 }

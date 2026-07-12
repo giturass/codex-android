@@ -224,10 +224,6 @@ fun CodexApp(
                     }
                 },
                 onDeleteDraft = homeViewModel::deleteDraft,
-                onOpenProjectSettings = { cwd ->
-                    closeDrawer()
-                    homeState.activeServerId?.let { navController.navigate(ServerHubRoute(it, cwd)) }
-                },
                 onNewProjectTask = { cwd ->
                     closeDrawer()
                     openNewTask(homeState.activeServerId, cwd)
