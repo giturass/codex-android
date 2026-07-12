@@ -97,6 +97,9 @@ internal fun MessageComposer(
     val allowsMultipleLines by remember(density, imeAnimation, hasText) {
         derivedStateOf { hasText || imeAnimation.isVisibleOrOpening(density) }
     }
+    val showsExpandedContent by remember(density, imeAnimation, hasText) {
+        derivedStateOf { imeAnimation.showsExpandedContent(density, hasText) }
+    }
     val compactContainerColor = MaterialTheme.colorScheme.surfaceContainerLow
     val expandedContainerColor = MaterialTheme.colorScheme.surfaceContainer
     val compactBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)
@@ -190,7 +193,7 @@ internal fun MessageComposer(
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (allowsMultipleLines) expandedContent()
+                    if (showsExpandedContent) expandedContent()
                 }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -296,6 +299,14 @@ private class ComposerImeAnimation(
 
     fun isVisibleOrOpening(density: Density): Boolean =
         current.getBottom(density) > 0 || target.getBottom(density) > 0
+
+    fun showsExpandedContent(density: Density, hasText: Boolean): Boolean =
+        composerExpandedContentVisible(
+            currentBottom = current.getBottom(density),
+            sourceBottom = source.getBottom(density),
+            targetBottom = target.getBottom(density),
+            hasText = hasText,
+        )
 }
 
 internal fun composerExpansionFraction(
@@ -312,6 +323,17 @@ internal fun composerExpansionFraction(
     } else {
         (currentBottom.toFloat() / expandedBottom).coerceIn(0f, 1f)
     }
+}
+
+internal fun composerExpandedContentVisible(
+    currentBottom: Int,
+    sourceBottom: Int,
+    targetBottom: Int,
+    hasText: Boolean,
+): Boolean {
+    if (hasText) return true
+    if (targetBottom == 0) return false
+    return composerExpansionFraction(currentBottom, sourceBottom, targetBottom, hasText) == 1f
 }
 
 @Composable

@@ -34,6 +34,37 @@ class MessageComposerTest {
         assertFraction(expected = 1f, current = 0, source = 300, target = 0, hasText = true)
     }
 
+    @Test
+    fun `输入框变大过程中隐藏扩展内容`() {
+        assertExpandedContentVisible(expected = false, current = 150, source = 0, target = 300)
+    }
+
+    @Test
+    fun `输入框变大完成后显示扩展内容`() {
+        assertExpandedContentVisible(expected = true, current = 300, source = 0, target = 300)
+    }
+
+    @Test
+    fun `输入框开始变紧凑时隐藏扩展内容`() {
+        assertExpandedContentVisible(expected = false, current = 300, source = 300, target = 0)
+    }
+
+    @Test
+    fun `输入框保持展开时显示扩展内容`() {
+        assertExpandedContentVisible(expected = true, current = 350, source = 300, target = 400)
+    }
+
+    @Test
+    fun `输入框有文字时显示扩展内容`() {
+        assertExpandedContentVisible(
+            expected = true,
+            current = 0,
+            source = 0,
+            target = 0,
+            hasText = true,
+        )
+    }
+
     private fun assertFraction(
         expected: Float,
         current: Int,
@@ -50,6 +81,24 @@ class MessageComposerTest {
                 hasText = hasText,
             ),
             0.0001f,
+        )
+    }
+
+    private fun assertExpandedContentVisible(
+        expected: Boolean,
+        current: Int,
+        source: Int,
+        target: Int,
+        hasText: Boolean = false,
+    ) {
+        assertEquals(
+            expected,
+            composerExpandedContentVisible(
+                currentBottom = current,
+                sourceBottom = source,
+                targetBottom = target,
+                hasText = hasText,
+            ),
         )
     }
 }
