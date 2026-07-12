@@ -967,9 +967,13 @@ class CodexRepository(
             )
 
             "item/started", "item/completed" -> {
+                val itemPayload = params.requiredObject("item")
+                if (method == "item/started" && itemPayload.requiredString("type") == "userMessage") {
+                    bumpThreadRevision(serverId)
+                }
                 if (state == null) return
                 val item = ProtocolMapper.conversationItem(
-                    item = params.requiredObject("item"),
+                    item = itemPayload,
                     turnId = params.requiredString("turnId"),
                     isCompleted = method == "item/completed",
                 )
