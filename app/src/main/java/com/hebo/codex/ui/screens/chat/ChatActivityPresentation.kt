@@ -27,7 +27,6 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.HourglassTop
 import androidx.compose.material3.Icon
@@ -59,11 +58,6 @@ internal fun ActivityGroupCard(items: List<ConversationItem>) {
     if (items.isEmpty()) return
     var showDetails by rememberSaveable(items.first().turnId) { mutableStateOf(false) }
     val status = activityGroupStatus(items)
-    val icon = if (items.any { it is ConversationItem.Reasoning }) {
-        Icons.Rounded.AutoAwesome
-    } else {
-        Icons.Rounded.Code
-    }
     val contentColor = when (status) {
         ActivityStatus.FAILED, ActivityStatus.DECLINED -> MaterialTheme.colorScheme.error
         else -> MaterialTheme.colorScheme.onSurfaceVariant
@@ -77,7 +71,12 @@ internal fun ActivityGroupCard(items: List<ConversationItem>) {
             .padding(horizontal = 4.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp), tint = contentColor)
+        Icon(
+            Icons.Rounded.AutoAwesome,
+            contentDescription = null,
+            modifier = Modifier.size(22.dp),
+            tint = contentColor,
+        )
         Spacer(Modifier.width(10.dp))
         Text(
             text = activityGroupLabel(items),
@@ -89,7 +88,7 @@ internal fun ActivityGroupCard(items: List<ConversationItem>) {
         )
         Icon(
             Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-            contentDescription = "查看思考与操作详情",
+            contentDescription = "查看处理过程详情",
             modifier = Modifier.size(22.dp),
             tint = contentColor,
         )
@@ -101,30 +100,42 @@ internal fun ActivityGroupCard(items: List<ConversationItem>) {
 }
 
 internal fun activityGroupLabel(items: List<ConversationItem>): String {
-    val status = activityGroupStatus(items)
     val activeItem = items.lastOrNull { it.activityStatus() == ActivityStatus.IN_PROGRESS }
     if (activeItem != null) {
-        return when (activeItem) {
+        val activeSummary = when (activeItem) {
             is ConversationItem.Reasoning -> "正在思考"
             is ConversationItem.Plan -> "正在制定计划"
             is ConversationItem.CommandExecution -> "正在执行 ${activeItem.command.commandPreview()}"
-            is ConversationItem.FileChange -> "正在修改 ${activeItem.changes.size} 个文件"
+            is ConversationItem.FileChange -> {
+                val fileCount = activeItem.changes.distinctBy(ChangedFile::path).size
+                "正在修改 $fileCount 个文件"
+            }
             is ConversationItem.Activity -> activeItem.title
             is ConversationItem.UserMessage, is ConversationItem.AgentMessage -> "正在处理"
         }
+        return "处理中 · $activeSummary"
     }
-    if (status == ActivityStatus.FAILED) return "操作失败，查看详情"
-    if (status == ActivityStatus.DECLINED) return "操作已取消，查看详情"
-    if (items.any { it is ConversationItem.Reasoning }) return "思考过程"
+
+    val failedCount = items.count { it.activityStatus() == ActivityStatus.FAILED }
+    if (failedCount > 0) return "处理过程 · $failedCount 项失败"
+
+    val declinedCount = items.count { it.activityStatus() == ActivityStatus.DECLINED }
+    if (declinedCount > 0) return "处理过程 · $declinedCount 项已取消"
 
     val commandCount = items.count { it is ConversationItem.CommandExecution }
-    val changedFileCount = items.filterIsInstance<ConversationItem.FileChange>().sumOf { it.changes.size }
-    val activityCount = items.size - commandCount - items.count { it is ConversationItem.FileChange }
+    val changedFileCount = items
+        .filterIsInstance<ConversationItem.FileChange>()
+        .flatMap(ConversationItem.FileChange::changes)
+        .distinctBy(ChangedFile::path)
+        .size
+    val activityCount = items.count { it is ConversationItem.Activity }
     return buildList {
+        add("处理过程")
+        if (items.any { it is ConversationItem.Reasoning }) add("思考")
         if (commandCount > 0) add("$commandCount 条命令")
         if (changedFileCount > 0) add("$changedFileCount 个文件")
         if (activityCount > 0) add("$activityCount 项操作")
-    }.joinToString(" · ").ifBlank { "活动详情" }
+    }.joinToString(" · ")
 }
 
 private fun activityGroupStatus(items: List<ConversationItem>): ActivityStatus {
@@ -150,7 +161,6 @@ internal fun ConversationItem.activityStatus(): ActivityStatus = when (this) {
 @Composable
 private fun ActivityDetailsSheet(items: List<ConversationItem>, onDismiss: () -> Unit) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
-    val hasReasoning = items.any { it is ConversationItem.Reasoning }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -163,7 +173,7 @@ private fun ActivityDetailsSheet(items: List<ConversationItem>, onDismiss: () ->
                 .navigationBarsPadding(),
         ) {
             Text(
-                text = if (hasReasoning) "思考过程" else "活动详情",
+                text = "处理过程",
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
                 style = MaterialTheme.typography.titleMedium,
                 textAlign = TextAlign.Center,

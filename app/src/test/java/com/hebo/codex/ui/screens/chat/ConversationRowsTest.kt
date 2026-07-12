@@ -1,7 +1,9 @@
 package com.hebo.codex.ui.screens.chat
 
 import com.hebo.codex.domain.ActivityStatus
+import com.hebo.codex.domain.ChangedFile
 import com.hebo.codex.domain.ConversationItem
+import com.hebo.codex.domain.FileChangeKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -79,7 +81,7 @@ class ConversationRowsTest {
         assertEquals(1, rows.size)
         assertEquals(2, (rows.single() as ConversationRow.ActivityGroup).items.size)
         assertEquals(
-            "思考过程",
+            "处理过程 · 思考 · 1 条命令",
             activityGroupLabel((rows.single() as ConversationRow.ActivityGroup).items),
         )
     }
@@ -91,8 +93,33 @@ class ConversationRowsTest {
         )
 
         assertEquals(
-            "正在执行 pwd",
+            "处理中 · 正在执行 pwd",
             activityGroupLabel((rows.single() as ConversationRow.ActivityGroup).items),
+        )
+    }
+
+    @Test
+    fun `文件摘要按不同路径计数`() {
+        val firstChange = fileChange(
+            id = "change-1",
+            paths = listOf("src/Main.kt", "src/Theme.kt"),
+        )
+        val secondChange = fileChange(
+            id = "change-2",
+            paths = listOf("src/Main.kt"),
+        )
+
+        assertEquals(
+            "处理过程 · 2 个文件",
+            activityGroupLabel(listOf(firstChange, secondChange)),
+        )
+    }
+
+    @Test
+    fun `失败摘要保留统一的处理过程名称`() {
+        assertEquals(
+            "处理过程 · 1 项失败",
+            activityGroupLabel(listOf(command("command", "turn-1", ActivityStatus.FAILED))),
         )
     }
 
@@ -124,5 +151,17 @@ class ConversationRowsTest {
         output = "",
         exitCode = 0,
         status = status,
+    )
+
+    private fun fileChange(
+        id: String,
+        paths: List<String>,
+    ) = ConversationItem.FileChange(
+        id = id,
+        turnId = "turn-1",
+        changes = paths.map { path ->
+            ChangedFile(path = path, kind = FileChangeKind.Update(movePath = null), diff = "")
+        },
+        status = ActivityStatus.COMPLETED,
     )
 }
