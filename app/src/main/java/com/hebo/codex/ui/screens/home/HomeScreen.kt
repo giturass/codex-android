@@ -97,8 +97,8 @@ fun HomeScreen(
     newTaskViewModel: NewTaskViewModel,
     quickPhraseViewModel: QuickPhraseViewModel,
     rateLimitsState: RateLimitsUiState,
-    showNavigationIcon: Boolean,
-    onOpenNavigation: () -> Unit,
+    navigationOpen: Boolean,
+    onToggleNavigation: () -> Unit,
     onAddServer: () -> Unit,
     onRefreshRateLimits: () -> Unit,
     onShowError: suspend (UserFacingError) -> Unit,
@@ -155,10 +155,11 @@ fun HomeScreen(
                 TopAppBar(
                     title = { Text("新建任务") },
                     navigationIcon = {
-                        if (showNavigationIcon) {
-                            IconButton(onClick = onOpenNavigation) {
-                                Icon(Icons.Rounded.Menu, contentDescription = "打开导航")
-                            }
+                        IconButton(onClick = onToggleNavigation) {
+                            Icon(
+                                Icons.Rounded.Menu,
+                                contentDescription = if (navigationOpen) "收起导航" else "打开导航",
+                            )
                         }
                     },
                 )
@@ -192,9 +193,9 @@ fun HomeScreen(
                 isLoadingResources = newTaskState.isLoadingResources,
                 isCreating = newTaskState.isCreatingConversation || newTaskState.isLoadingDraft,
                 rateLimitsState = rateLimitsState,
-                showNavigationIcon = showNavigationIcon,
+                navigationOpen = navigationOpen,
                 projectMenuExpanded = showProjectMenu,
-                onOpenNavigation = onOpenNavigation,
+                onToggleNavigation = onToggleNavigation,
                 onRefreshRateLimits = onRefreshRateLimits,
                 onLoadResources = newTaskViewModel::loadInputResources,
                 onMessageChange = newTaskViewModel::updateMessage,
@@ -261,9 +262,9 @@ private fun NewTaskContent(
     isLoadingResources: Boolean,
     isCreating: Boolean,
     rateLimitsState: RateLimitsUiState,
-    showNavigationIcon: Boolean,
+    navigationOpen: Boolean,
     projectMenuExpanded: Boolean,
-    onOpenNavigation: () -> Unit,
+    onToggleNavigation: () -> Unit,
     onRefreshRateLimits: () -> Unit,
     onLoadResources: (Boolean) -> Unit,
     onMessageChange: (String) -> Unit,
@@ -329,8 +330,9 @@ private fun NewTaskContent(
             newConversationSubtitle = "${if (cwd.isBlank()) "选择项目" else projectName(cwd)} · $serverName",
             connectionStatus = connectionStatus,
             rateLimitsState = rateLimitsState,
-            showNavigationIcon = showNavigationIcon,
-            onOpenNavigation = onOpenNavigation,
+            navigationOpen = navigationOpen,
+            onToggleNavigation = onToggleNavigation,
+            showNewTaskAction = false,
             actions = null,
             onRefreshRateLimits = onRefreshRateLimits,
             modifier = Modifier.align(Alignment.TopCenter),

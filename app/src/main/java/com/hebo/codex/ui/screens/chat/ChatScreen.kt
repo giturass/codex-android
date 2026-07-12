@@ -215,8 +215,9 @@ fun ChatScreen(
     viewModel: ChatViewModel,
     quickPhraseViewModel: QuickPhraseViewModel,
     rateLimitsState: RateLimitsUiState,
-    showNavigationIcon: Boolean,
-    onOpenNavigation: () -> Unit,
+    navigationOpen: Boolean,
+    showNewTaskAction: Boolean,
+    onToggleNavigation: () -> Unit,
     onNewTask: (String) -> Unit,
     onOpenConversation: (String) -> Unit,
     onRefreshRateLimits: () -> Unit,
@@ -478,8 +479,9 @@ fun ChatScreen(
                 newConversationSubtitle = null,
                 connectionStatus = state.connectionStatus,
                 rateLimitsState = rateLimitsState,
-                showNavigationIcon = showNavigationIcon,
-                onOpenNavigation = onOpenNavigation,
+                navigationOpen = navigationOpen,
+                onToggleNavigation = onToggleNavigation,
+                showNewTaskAction = showNewTaskAction,
                 actions = ConversationHeaderActions(
                     onNewTask = { conversation?.let { onNewTask(it.cwd) } },
                     onRename = { dialog = ChatDialog.Rename },
@@ -783,8 +785,9 @@ internal fun ConversationFloatingHeader(
     newConversationSubtitle: String?,
     connectionStatus: ConnectionStatus,
     rateLimitsState: RateLimitsUiState,
-    showNavigationIcon: Boolean,
-    onOpenNavigation: () -> Unit,
+    navigationOpen: Boolean,
+    onToggleNavigation: () -> Unit,
+    showNewTaskAction: Boolean,
     actions: ConversationHeaderActions?,
     onRefreshRateLimits: () -> Unit,
     modifier: Modifier = Modifier,
@@ -801,50 +804,65 @@ internal fun ConversationFloatingHeader(
         }
         "$status · ${projectName(it.cwd)} · ${it.serverName}"
     } ?: newConversationSubtitle
-    Box(
+    Row(
         modifier
             .fillMaxWidth()
             .statusBarsPadding()
             .padding(horizontal = 12.dp, vertical = ConversationHeaderVerticalPadding),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (showNavigationIcon) {
+        if (headerTitle == null) {
             Surface(
-                modifier = Modifier.align(Alignment.CenterStart).size(ConversationHeaderItemMinHeight),
+                onClick = onToggleNavigation,
+                modifier = Modifier.size(ConversationHeaderItemMinHeight),
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 shadowElevation = 2.dp,
             ) {
-                IconButton(onClick = onOpenNavigation) {
-                    Icon(Icons.Rounded.Menu, contentDescription = "打开导航")
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Rounded.Menu,
+                        contentDescription = if (navigationOpen) "收起导航" else "打开导航",
+                    )
                 }
             }
-        } else if (headerTitle != null) {
+        } else {
             Surface(
+                onClick = onToggleNavigation,
                 modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .fillMaxWidth()
-                    .padding(start = 4.dp, end = 116.dp)
+                    .weight(1f)
                     .heightIn(min = ConversationHeaderItemMinHeight),
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.82f),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                 shadowElevation = 2.dp,
             ) {
-                Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
-                    Text(
-                        headerTitle,
-                        style = MaterialTheme.typography.titleSmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Rounded.Menu,
+                        contentDescription = if (navigationOpen) "收起导航" else "打开导航",
                     )
-                    Text(
-                        headerSubtitle.orEmpty(),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            headerTitle,
+                            style = MaterialTheme.typography.titleSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            headerSubtitle.orEmpty(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
         }
@@ -852,7 +870,6 @@ internal fun ConversationFloatingHeader(
         if (headerTitle != null) {
             Surface(
                 modifier = Modifier
-                    .align(Alignment.CenterEnd)
                     .heightIn(min = ConversationHeaderItemMinHeight),
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -864,7 +881,7 @@ internal fun ConversationFloatingHeader(
                         state = rateLimitsState,
                         onRefresh = onRefreshRateLimits,
                     )
-                    if (showNavigationIcon && actions != null) {
+                    if (showNewTaskAction && actions != null) {
                         IconButton(onClick = actions.onNewTask) {
                             Icon(Icons.Rounded.Edit, contentDescription = "新建任务")
                         }

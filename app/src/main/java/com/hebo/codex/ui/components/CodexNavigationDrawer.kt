@@ -45,6 +45,7 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DismissibleDrawerSheet
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
@@ -56,7 +57,6 @@ import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.PermanentDrawerSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -120,7 +120,7 @@ fun CodexNavigationDrawer(
     isLoadingMore: Boolean,
     hasMore: Boolean,
     activeTarget: DrawerActiveTarget?,
-    isPermanent: Boolean,
+    isWideLayout: Boolean,
     onNewConversation: () -> Unit,
     onOpenConversation: (String) -> Unit,
     onOpenDraft: (DraftSummary) -> Unit,
@@ -184,8 +184,8 @@ fun CodexNavigationDrawer(
         )
     }
 
-    if (isPermanent) {
-        PermanentDrawerSheet(
+    if (isWideLayout) {
+        DismissibleDrawerSheet(
             modifier = sheetModifier,
             drawerContainerColor = MaterialTheme.colorScheme.surface,
             content = content,

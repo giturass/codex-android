@@ -2,9 +2,9 @@ package com.hebo.codex.ui
 
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.material3.DismissibleNavigationDrawer
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.PermanentNavigationDrawer
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
@@ -96,7 +96,8 @@ fun CodexApp(
     val quickPhraseState by quickPhraseViewModel.state.collectAsStateWithLifecycle()
     val rateLimitsViewModel: RateLimitsViewModel = viewModel(factory = RateLimitsViewModel.factory(repository))
     val rateLimitsStates by rateLimitsViewModel.state.collectAsStateWithLifecycle()
-    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val modalDrawerState = rememberDrawerState(DrawerValue.Closed)
+    val wideDrawerState = rememberDrawerState(DrawerValue.Open)
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val snackbarHostState = remember { SnackbarHostState() }
@@ -130,14 +131,6 @@ fun CodexApp(
         if (result == SnackbarResult.ActionPerformed) technicalError = error
     }
 
-    fun closeDrawer() {
-        scope.launch { drawerState.close() }
-    }
-
-    fun openDrawer() {
-        scope.launch { drawerState.open() }
-    }
-
     fun openNewTask(
         serverId: String? = null,
         cwd: String? = null,
@@ -165,13 +158,6 @@ fun CodexApp(
         navController.navigate(ChatRoute(serverId, threadId)) {
             popUpTo<NewTaskRoute> { inclusive = true }
             launchSingleTop = true
-        }
-    }
-
-    LaunchedEffect(drawerState.targetValue) {
-        if (drawerState.targetValue == DrawerValue.Open) {
-            focusManager.clearFocus()
-            keyboardController?.hide()
         }
     }
 
@@ -213,7 +199,26 @@ fun CodexApp(
     }
 
     BoxWithConstraints {
-        val isPermanent = maxWidth >= PermanentDrawerThreshold
+        val isWideLayout = maxWidth >= PermanentDrawerThreshold
+        val drawerState = if (isWideLayout) wideDrawerState else modalDrawerState
+
+        fun dismissModalDrawer() {
+            if (!isWideLayout) scope.launch { drawerState.close() }
+        }
+
+        fun toggleDrawer() {
+            scope.launch {
+                if (drawerState.isOpen) drawerState.close() else drawerState.open()
+            }
+        }
+
+        LaunchedEffect(drawerState.targetValue) {
+            if (drawerState.targetValue == DrawerValue.Open) {
+                focusManager.clearFocus()
+                keyboardController?.hide()
+            }
+        }
+
         val drawerContent: @Composable () -> Unit = {
             CodexNavigationDrawer(
                 servers = homeState.servers,
@@ -231,17 +236,17 @@ fun CodexApp(
                 isLoadingMore = homeState.isLoadingMore,
                 hasMore = homeState.nextCursor != null,
                 activeTarget = activeDrawerTarget,
-                isPermanent = isPermanent,
+                isWideLayout = isWideLayout,
                 onNewConversation = {
-                    closeDrawer()
+                    dismissModalDrawer()
                     openNewTask(homeState.activeServerId)
                 },
                 onOpenConversation = { threadId ->
-                    closeDrawer()
+                    dismissModalDrawer()
                     homeState.activeServerId?.let { openConversation(it, threadId) }
                 },
                 onOpenDraft = { draft ->
-                    closeDrawer()
+                    dismissModalDrawer()
                     when (val target = draft.key.target) {
                         is DraftTarget.NewTask -> openNewTask(
                             serverId = draft.key.serverId,
@@ -254,7 +259,7 @@ fun CodexApp(
                 },
                 onDeleteDraft = homeViewModel::deleteDraft,
                 onNewProjectTask = { cwd ->
-                    closeDrawer()
+                    dismissModalDrawer()
                     openNewTask(homeState.activeServerId, cwd)
                 },
                 onSearch = homeViewModel::search,
@@ -267,25 +272,25 @@ fun CodexApp(
                 onArchiveConversation = homeViewModel::archiveConversation,
                 onDeleteConversation = homeViewModel::deleteConversation,
                 onSelectServer = { serverId ->
-                    closeDrawer()
+                    dismissModalDrawer()
                     openNewTask(serverId)
                 },
                 onReconnectServer = homeViewModel::reconnectServer,
                 onEditServer = { serverId ->
-                    closeDrawer()
+                    dismissModalDrawer()
                     navController.navigate(ServerEditorRoute(serverId))
                 },
                 onRemoveServer = { serverId ->
                     homeViewModel.removeServer(serverId)
-                    closeDrawer()
+                    dismissModalDrawer()
                     openNewTask()
                 },
                 onAddServer = {
-                    closeDrawer()
+                    dismissModalDrawer()
                     navController.navigate(ServerEditorRoute())
                 },
                 onOpenSettings = { serverId ->
-                    closeDrawer()
+                    dismissModalDrawer()
                     navController.navigate(ServerHubRoute(serverId))
                 },
             )
@@ -328,8 +333,8 @@ fun CodexApp(
                         newTaskViewModel = newTaskViewModel,
                         quickPhraseViewModel = quickPhraseViewModel,
                         rateLimitsState = homeState.activeServerId?.let(rateLimitsStates::get) ?: RateLimitsUiState(),
-                        showNavigationIcon = !isPermanent,
-                        onOpenNavigation = ::openDrawer,
+                        navigationOpen = drawerState.isOpen,
+                        onToggleNavigation = ::toggleDrawer,
                         onAddServer = { navController.navigate(ServerEditorRoute()) },
                         onRefreshRateLimits = {
                             homeState.activeServerId?.let(rateLimitsViewModel::refresh)
@@ -360,8 +365,9 @@ fun CodexApp(
                         viewModel = viewModel,
                         quickPhraseViewModel = quickPhraseViewModel,
                         rateLimitsState = rateLimitsStates[route.serverId] ?: RateLimitsUiState(),
-                        showNavigationIcon = !isPermanent,
-                        onOpenNavigation = ::openDrawer,
+                        navigationOpen = drawerState.isOpen,
+                        showNewTaskAction = !isWideLayout,
+                        onToggleNavigation = ::toggleDrawer,
                         onNewTask = { cwd -> openNewTask(route.serverId, cwd) },
                         onOpenConversation = { openConversation(route.serverId, it) },
                         onRefreshRateLimits = { rateLimitsViewModel.refresh(route.serverId) },
@@ -378,8 +384,12 @@ fun CodexApp(
             }
         }
 
-        if (isPermanent) {
-            PermanentNavigationDrawer(drawerContent = drawerContent, content = content)
+        if (isWideLayout) {
+            DismissibleNavigationDrawer(
+                drawerState = drawerState,
+                drawerContent = drawerContent,
+                content = content,
+            )
         } else {
             ModalNavigationDrawer(
                 drawerState = drawerState,
