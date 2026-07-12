@@ -346,6 +346,8 @@ private fun NewTaskContent(
                 .imePadding(),
         ) {
             ConversationComposer(
+                serverId = null,
+                conversationId = null,
                 isRunning = false,
                 plan = null,
                 activeTurnId = null,

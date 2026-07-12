@@ -103,6 +103,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -516,6 +517,8 @@ fun ChatScreen(
                         )
                     }
                     ConversationComposer(
+                        serverId = conversation.serverId,
+                        conversationId = conversation.threadId,
                         isRunning = conversation.isRunning,
                         plan = conversation.plan,
                         activeTurnId = conversation.activeTurnId,
@@ -1376,6 +1379,8 @@ private fun PermissionsCard(
 
 @Composable
 internal fun ConversationComposer(
+    serverId: String?,
+    conversationId: String?,
     isRunning: Boolean,
     plan: ActiveTurnPlan?,
     activeTurnId: String?,
@@ -1458,10 +1463,9 @@ internal fun ConversationComposer(
         Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 12.dp),
     ) {
         if (isRunning) {
-            ActivePlanCard(
-                plan = plan,
-                activeTurnId = activeTurnId,
-            )
+            key(serverId, conversationId, activeTurnId) {
+                ActivePlanCard(plan = plan)
+            }
         }
         if (activeToken != null && (paletteEntries.isNotEmpty() || isLoadingResources)) {
             ComposerPalette(
@@ -1646,26 +1650,31 @@ internal fun composerModelLabel(
 }
 
 @Composable
-private fun ActivePlanCard(plan: ActiveTurnPlan?, activeTurnId: String?) {
+private fun ActivePlanCard(plan: ActiveTurnPlan?) {
     val canExpand = plan?.steps?.isNotEmpty() == true
     val activeStep = plan?.steps?.firstOrNull { it.status == PlanStepStatus.IN_PROGRESS }
-    var expanded by rememberSaveable(activeTurnId) { mutableStateOf(false) }
-    var expansionPhase by remember(activeTurnId) {
+    var expanded by remember { mutableStateOf(false) }
+    var expansionPhase by remember {
         mutableStateOf(PlanExpansionPhase.COLLAPSED)
     }
+    val expansionTarget = planExpansionTarget(expanded = expanded, canExpand = canExpand)
     val bodyAlpha by animateFloatAsState(
         targetValue = if (expansionPhase.bodyVisible) 1f else 0f,
         animationSpec = tween(ACTIVE_PLAN_CONTENT_FADE_DURATION_MILLIS),
         label = "工作计划内容透明度",
     )
     val arrowRotation by animateFloatAsState(
-        targetValue = if (expanded) 180f else 0f,
+        targetValue = if (expansionTarget) 180f else 0f,
         animationSpec = tween(ACTIVE_PLAN_CONTENT_FADE_DURATION_MILLIS),
         label = "工作计划展开箭头",
     )
 
-    LaunchedEffect(expanded) {
-        expansionPhase = expansionPhase.startTransition(expanded)
+    LaunchedEffect(canExpand) {
+        if (!canExpand) expanded = false
+    }
+
+    LaunchedEffect(expansionTarget) {
+        expansionPhase = expansionPhase.startTransition(expansionTarget)
         when (expansionPhase) {
             PlanExpansionPhase.EXPANDING -> {
                 delay(ACTIVE_PLAN_SIZE_ANIMATION_DURATION_MILLIS.toLong())
@@ -1699,7 +1708,7 @@ private fun ActivePlanCard(plan: ActiveTurnPlan?, activeTurnId: String?) {
                     .then(if (expansionPhase.bodyIncluded) Modifier.fillMaxWidth() else Modifier)
                     .clickable(enabled = canExpand, role = Role.Button) { expanded = !expanded }
                     .semantics {
-                        if (canExpand) stateDescription = if (expanded) "已展开" else "已收起"
+                        if (canExpand) stateDescription = if (expansionTarget) "已展开" else "已收起"
                     }
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
