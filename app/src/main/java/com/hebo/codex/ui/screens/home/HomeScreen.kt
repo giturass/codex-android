@@ -218,7 +218,7 @@ fun HomeScreen(
                 onMoveQuickPhraseUp = quickPhraseViewModel::moveUp,
                 onMoveQuickPhraseDown = quickPhraseViewModel::moveDown,
                 onSend = newTaskViewModel::startConversation,
-                modifier = Modifier.fillMaxSize().padding(padding),
+                modifier = Modifier.fillMaxSize(),
             )
         }
     }
