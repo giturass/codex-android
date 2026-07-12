@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
@@ -199,7 +200,9 @@ private val highlightedMarkdownComponents = markdownComponents(
 
 private const val CHAT_LIST_END_KEY = "chat-list-end"
 private const val SCROLL_TO_BOTTOM_BUTTON_DELAY_MILLIS = 500L
-private val ChatHeaderControlsHeight = 64.dp
+private val ConversationHeaderItemMinHeight = 48.dp
+private val ConversationHeaderVerticalPadding = 8.dp
+private val ChatHeaderControlsHeight = ConversationHeaderItemMinHeight + ConversationHeaderVerticalPadding * 2
 private val ChatHeaderContentSpacing = 24.dp
 private val ChatComposerOverlayMinHeight = 116.dp
 private val ChatComposerMaxWidth = 760.dp
@@ -787,11 +790,11 @@ internal fun ConversationFloatingHeader(
         modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = ConversationHeaderVerticalPadding),
     ) {
         if (showNavigationIcon) {
             Surface(
-                modifier = Modifier.align(Alignment.CenterStart).size(48.dp),
+                modifier = Modifier.align(Alignment.CenterStart).size(ConversationHeaderItemMinHeight),
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -806,7 +809,8 @@ internal fun ConversationFloatingHeader(
                 modifier = Modifier
                     .align(Alignment.CenterStart)
                     .fillMaxWidth()
-                    .padding(start = 4.dp, end = 116.dp),
+                    .padding(start = 4.dp, end = 116.dp)
+                    .heightIn(min = ConversationHeaderItemMinHeight),
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.82f),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -832,7 +836,9 @@ internal fun ConversationFloatingHeader(
 
         if (headerTitle != null) {
             Surface(
-                modifier = Modifier.align(Alignment.CenterEnd),
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .heightIn(min = ConversationHeaderItemMinHeight),
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
