@@ -19,6 +19,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -93,6 +95,8 @@ fun CodexApp(
     val rateLimitsViewModel: RateLimitsViewModel = viewModel(factory = RateLimitsViewModel.factory(repository))
     val rateLimitsStates by rateLimitsViewModel.state.collectAsStateWithLifecycle()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val snackbarHostState = remember { SnackbarHostState() }
     var technicalError by remember { mutableStateOf<UserFacingError?>(null) }
     val detailsLabel = stringResource(R.string.common_details)
@@ -111,6 +115,10 @@ fun CodexApp(
 
     fun closeDrawer() {
         scope.launch { drawerState.close() }
+    }
+
+    fun openDrawer() {
+        scope.launch { drawerState.open() }
     }
 
     fun openNewTask(
@@ -133,6 +141,13 @@ fun CodexApp(
         navController.navigate(ChatRoute(serverId, threadId)) {
             popUpTo<NewTaskRoute> { inclusive = false }
             launchSingleTop = true
+        }
+    }
+
+    LaunchedEffect(drawerState.targetValue) {
+        if (drawerState.targetValue == DrawerValue.Open) {
+            focusManager.clearFocus()
+            keyboardController?.hide()
         }
     }
 
@@ -288,7 +303,7 @@ fun CodexApp(
                         newTaskViewModel = newTaskViewModel,
                         rateLimitsState = homeState.activeServerId?.let(rateLimitsStates::get) ?: RateLimitsUiState(),
                         showNavigationIcon = !isPermanent,
-                        onOpenNavigation = { scope.launch { drawerState.open() } },
+                        onOpenNavigation = ::openDrawer,
                         onAddServer = { navController.navigate(ServerEditorRoute()) },
                         onRefreshRateLimits = {
                             homeState.activeServerId?.let(rateLimitsViewModel::refresh)
@@ -319,7 +334,7 @@ fun CodexApp(
                         viewModel = viewModel,
                         rateLimitsState = rateLimitsStates[route.serverId] ?: RateLimitsUiState(),
                         showNavigationIcon = !isPermanent,
-                        onOpenNavigation = { scope.launch { drawerState.open() } },
+                        onOpenNavigation = ::openDrawer,
                         onNewTask = { cwd -> openNewTask(route.serverId, cwd) },
                         onOpenConversation = { openConversation(route.serverId, it) },
                         onRefreshRateLimits = { rateLimitsViewModel.refresh(route.serverId) },

@@ -21,8 +21,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
@@ -64,6 +66,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -241,6 +244,12 @@ private fun ColumnScope.DrawerContent(
     var expansionInitialized by remember(activeServer?.id) { mutableStateOf(false) }
     var selectedThread by remember(activeServer?.id) { mutableStateOf<ThreadSummary?>(null) }
     var selectedDraft by remember(activeServer?.id) { mutableStateOf<DraftSummary?>(null) }
+    val recentListState = key(activeServer?.id, DrawerPage.RECENT) { rememberLazyListState() }
+    val searchListState = key(activeServer?.id, DrawerPage.SEARCH) { rememberLazyListState() }
+    val currentDraftKeys: Set<DraftKey> = remember(drafts) {
+        drafts.mapTo(mutableSetOf()) { it.key }
+    }
+    var previousDraftKeys by remember(activeServer?.id) { mutableStateOf(currentDraftKeys) }
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
 
@@ -257,6 +266,13 @@ private fun ColumnScope.DrawerContent(
 
     fun leaveTransientPage() {
         showRecent()
+    }
+
+    LaunchedEffect(currentDraftKeys) {
+        if (hasNewDraft(previousDraftKeys, drafts)) {
+            recentListState.requestScrollToItem(0)
+        }
+        previousDraftKeys = currentDraftKeys
     }
 
     LaunchedEffect(projects, activeThreadId) {
@@ -327,6 +343,10 @@ private fun ColumnScope.DrawerContent(
         if (isLoading && !isRefreshing) LinearProgressIndicator(Modifier.fillMaxWidth())
 
         RefreshableDrawerList(
+            state = when (drawerPage) {
+                DrawerPage.RECENT -> recentListState
+                DrawerPage.SEARCH -> searchListState
+            },
             isRefreshing = isRefreshing,
             enabled = activeServer != null &&
                 !isLoading &&
@@ -551,6 +571,7 @@ private fun ColumnScope.DrawerContent(
 
 @Composable
 private fun RefreshableDrawerList(
+    state: LazyListState,
     isRefreshing: Boolean,
     enabled: Boolean,
     onRefresh: () -> Unit,
@@ -563,10 +584,10 @@ private fun RefreshableDrawerList(
             onRefresh = onRefresh,
             modifier = modifier,
         ) {
-            LazyColumn(modifier = Modifier.fillMaxSize(), content = content)
+            LazyColumn(state = state, modifier = Modifier.fillMaxSize(), content = content)
         }
     } else {
-        LazyColumn(modifier = modifier.fillMaxSize(), content = content)
+        LazyColumn(state = state, modifier = modifier.fillMaxSize(), content = content)
     }
 }
 
@@ -756,6 +777,9 @@ internal fun projectsWithoutDrafts(
     project.copy(threads = threadsWithoutDrafts(project.threads, drafts))
         .takeIf { it.threads.isNotEmpty() }
 }
+
+internal fun hasNewDraft(previousKeys: Set<DraftKey>, drafts: List<DraftSummary>): Boolean =
+    drafts.any { it.key !in previousKeys }
 
 private val DraftSummary.drawerKey: String
     get() = when (val target = key.target) {

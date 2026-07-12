@@ -7,6 +7,8 @@ import com.hebo.codex.domain.RecentProject
 import com.hebo.codex.domain.ThreadRuntimeStatus
 import com.hebo.codex.domain.ThreadSummary
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DrawerDraftsTest {
@@ -30,6 +32,16 @@ class DrawerDraftsTest {
             emptyList<RecentProject>(),
             projectsWithoutDrafts(listOf(project), listOf(draft(DraftTarget.Thread(drafted.id)))),
         )
+    }
+
+    @Test
+    fun onlyAddedDraftKeysAreDetected() {
+        val existing = draft(DraftTarget.Thread("thread-1"))
+        val added = draft(DraftTarget.NewTask("draft-1"))
+
+        assertFalse(hasNewDraft(setOf(existing.key), listOf(existing.copy(preview = "已更新"))))
+        assertFalse(hasNewDraft(setOf(existing.key, added.key), listOf(existing)))
+        assertTrue(hasNewDraft(setOf(existing.key), listOf(existing, added)))
     }
 
     private fun draft(target: DraftTarget) = DraftSummary(
