@@ -13,7 +13,6 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
@@ -38,6 +37,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -102,8 +102,6 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -185,7 +183,7 @@ private const val SCROLL_TO_BOTTOM_BUTTON_DELAY_MILLIS = 500L
 private val ChatHeaderControlsHeight = 64.dp
 private val ChatHeaderContentSpacing = 24.dp
 private val ChatComposerOverlayMinHeight = 116.dp
-private val ChatComposerFadeHeight = 44.dp
+private val ChatComposerMaxWidth = 760.dp
 private const val CHAT_CHROME_SETTLE_DURATION_MILLIS = 160
 
 internal data class ChatChromeScrollState(
@@ -431,7 +429,6 @@ fun ChatScreen(
             bottomOverlayMinHeight,
         ) + bottomSystemPadding
     }
-    val backgroundColor = MaterialTheme.colorScheme.background
     val topControlsTranslationY = -chromeScrollState.offset.coerceAtMost(topControlsHeightPx.toFloat())
     val bottomControlsTranslationY = if (bottomControlsCanHide) {
         chromeScrollState.offset.coerceAtMost(bottomControlsTranslationHeightPx.toFloat())
@@ -509,19 +506,13 @@ fun ChatScreen(
                     .graphicsLayer { translationY = bottomControlsTranslationY }
                     .navigationBarsPadding()
                     .imePadding(),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Column(
                     Modifier
+                        .widthIn(max = ChatComposerMaxWidth)
                         .fillMaxWidth()
-                        .onSizeChanged { bottomControlsHeightPx = it.height }
-                        .background(
-                            Brush.verticalGradient(
-                                0f to Color.Transparent,
-                                0.32f to backgroundColor.copy(alpha = 0.88f),
-                                1f to backgroundColor,
-                            ),
-                        )
-                        .padding(top = ChatComposerFadeHeight),
+                        .onSizeChanged { bottomControlsHeightPx = it.height },
                 ) {
                     conversation.pendingRequests.firstOrNull()?.let { request ->
                         PendingRequestBanner(
@@ -1410,26 +1401,33 @@ private fun ChatComposer(
     val hasInput = composerValue.text.isNotBlank() || draft.attachments.isNotEmpty()
 
     Column(
-        Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 10.dp),
+        Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 12.dp),
     ) {
         if (conversation.isRunning) {
             val activeStep = conversation.plan?.steps?.firstOrNull {
                 it.status == PlanStepStatus.IN_PROGRESS
             }
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            Surface(
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                shadowElevation = 2.dp,
             ) {
-                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = activeStep?.text ?: "正在处理",
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(
+                    Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = activeStep?.text ?: "正在处理",
+                        modifier = Modifier.widthIn(max = 400.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
         if (activeToken != null && (paletteEntries.isNotEmpty() || isLoadingResources)) {
@@ -1549,6 +1547,7 @@ private fun ChatComposer(
                     contentDescription = if (stopsActiveTurn) "停止" else "发送",
                 )
             },
+            shadowElevation = 6.dp,
             focusRequester = focusRequester,
         )
     }

@@ -83,6 +83,7 @@ internal fun MessageComposer(
     trailingContent: @Composable RowScope.() -> Unit,
     modifier: Modifier = Modifier,
     compactEndExtra: Dp = 0.dp,
+    shadowElevation: Dp = 2.dp,
     focusRequester: FocusRequester? = null,
 ) {
     val density = LocalDensity.current
@@ -108,7 +109,7 @@ internal fun MessageComposer(
                 .fillMaxWidth()
                 .graphicsLayer {
                     val fraction = imeAnimation.expansionFraction(this, hasText)
-                    shadowElevation = 2.dp.toPx()
+                    this.shadowElevation = shadowElevation.toPx()
                     shape = RoundedCornerShape(
                         lerpDp(ComposerCompactCornerRadius, ComposerExpandedCornerRadius, fraction),
                     )
