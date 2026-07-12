@@ -39,6 +39,8 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
@@ -51,6 +53,7 @@ import kotlinx.coroutines.withContext
 
 internal data class ComposerToken(
     val start: Int,
+    val end: Int,
     val trigger: Char,
     val query: String,
 )
@@ -82,17 +85,42 @@ internal sealed interface ComposerPaletteEntry {
     ) : ComposerPaletteEntry
 }
 
-internal fun activeComposerToken(text: String): ComposerToken? {
-    if (text.isEmpty()) return null
-    val start = text.indexOfLast(Char::isWhitespace) + 1
-    if (start >= text.length) return null
+internal fun activeComposerToken(text: String, cursor: Int = text.length): ComposerToken? {
+    val end = cursor.coerceIn(0, text.length)
+    if (end == 0) return null
+    val start = text.substring(0, end).indexOfLast(Char::isWhitespace) + 1
+    if (start >= end) return null
     val trigger = text[start]
     if (trigger != '/' && trigger != '$' && trigger != '@') return null
-    return ComposerToken(start = start, trigger = trigger, query = text.substring(start + 1))
+    return ComposerToken(
+        start = start,
+        end = end,
+        trigger = trigger,
+        query = text.substring(start + 1, end),
+    )
 }
 
 internal fun removeActiveComposerToken(text: String, token: ComposerToken): String =
-    text.removeRange(token.start, text.length).trimEnd()
+    text.removeRange(token.start, token.end).let { result ->
+        if (token.end == text.length) result.trimEnd() else result
+    }
+
+internal fun insertComposerTrigger(value: TextFieldValue, trigger: Char): TextFieldValue {
+    require(trigger == '$' || trigger == '@') { "不支持的输入触发符：$trigger" }
+    val selectionStart = value.selection.min.coerceIn(0, value.text.length)
+    val selectionEnd = value.selection.max.coerceIn(selectionStart, value.text.length)
+    val before = value.text.substring(0, selectionStart)
+    val after = value.text.substring(selectionEnd)
+    val insertion = buildString {
+        if (before.lastOrNull()?.isWhitespace() == false) append(' ')
+        append(trigger)
+    }
+    val cursor = before.length + insertion.length
+    return TextFieldValue(
+        text = before + insertion + after,
+        selection = TextRange(cursor),
+    )
+}
 
 internal fun composerPaletteEntries(
     token: ComposerToken?,

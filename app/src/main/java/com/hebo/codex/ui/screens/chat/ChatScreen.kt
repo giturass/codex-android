@@ -60,12 +60,11 @@ import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.MoreVert
-import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Stop
-import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -77,7 +76,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -107,18 +105,23 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.hebo.codex.R
@@ -130,7 +133,6 @@ import com.hebo.codex.domain.ConnectionStatus
 import com.hebo.codex.domain.ConversationItem
 import com.hebo.codex.domain.ConversationState
 import com.hebo.codex.domain.FeatureEntry
-import com.hebo.codex.domain.FeatureKind
 import com.hebo.codex.domain.ModelOption
 import com.hebo.codex.domain.NetworkPolicyRuleAction
 import com.hebo.codex.domain.PendingServerRequest
@@ -153,7 +155,6 @@ import com.hebo.codex.ui.displayLabelRes
 import com.hebo.codex.ui.formatCompactCount
 import com.hebo.codex.ui.formatCount
 import com.hebo.codex.ui.formatPercent
-import com.hebo.codex.ui.featureScopeLabel
 import com.hebo.codex.ui.components.MessageComposer
 import com.hebo.codex.ui.components.MessageComposerAction
 import com.hebo.codex.ui.components.MessageComposerActionButton
@@ -1339,9 +1340,28 @@ private fun ChatComposer(
     onStop: () -> Unit,
 ) {
     var dialog by remember { mutableStateOf<ComposerDialog?>(null) }
+    var addMenuExpanded by remember { mutableStateOf(false) }
     var isAddingImage by remember { mutableStateOf(false) }
+    var composerValue by remember {
+        mutableStateOf(
+            TextFieldValue(
+                text = draft.message,
+                selection = TextRange(draft.message.length),
+            ),
+        )
+    }
     val context = LocalContext.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusRequester = remember { FocusRequester() }
     val composerScope = rememberCoroutineScope()
+    LaunchedEffect(draft.message) {
+        if (draft.message != composerValue.text) {
+            composerValue = TextFieldValue(
+                text = draft.message,
+                selection = TextRange(draft.message.length),
+            )
+        }
+    }
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
@@ -1363,11 +1383,9 @@ private fun ChatComposer(
         selectedModel?.displayName ?: draft.options.model ?: "默认模型",
         effortLabel,
     ).joinToString(" · ")
-    val reviewerLabel = when (draft.options.approvalsReviewer?.wireValue ?: conversation.approvalsReviewer) {
-        ApprovalReviewer.AUTO_REVIEW.wireValue -> "自动审查"
-        else -> "由我审批"
+    val activeToken = composerValue.selection.takeIf { it.collapsed }?.let {
+        activeComposerToken(composerValue.text, it.start)
     }
-    val activeToken = activeComposerToken(draft.message)
     val paletteEntries = remember(activeToken, resources) {
         composerPaletteEntries(activeToken, resources)
     }
@@ -1375,7 +1393,7 @@ private fun ChatComposer(
         if (activeToken?.trigger == '$' || activeToken?.trigger == '@') onLoadResources(false)
     }
     val connected = connectionStatus is ConnectionStatus.Connected
-    val hasInput = draft.message.isNotBlank() || draft.attachments.isNotEmpty()
+    val hasInput = composerValue.text.isNotBlank() || draft.attachments.isNotEmpty()
 
     Column(
         Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 10.dp),
@@ -1405,7 +1423,13 @@ private fun ChatComposer(
                 entries = paletteEntries,
                 isLoading = isLoadingResources,
                 onSelect = { entry ->
-                    onMessageChange(removeActiveComposerToken(draft.message, activeToken))
+                    val nextMessage = removeActiveComposerToken(composerValue.text, activeToken)
+                    composerValue = composerValue.copy(
+                        text = nextMessage,
+                        selection = TextRange(activeToken.start.coerceAtMost(nextMessage.length)),
+                        composition = null,
+                    )
+                    onMessageChange(nextMessage)
                     when (entry) {
                         is ComposerPaletteEntry.Resource -> onAddAttachment(entry.input, null)
                         is ComposerPaletteEntry.Command -> when (entry.command) {
@@ -1416,7 +1440,7 @@ private fun ChatComposer(
                                 onLoadResources(false)
                                 dialog = ComposerDialog.Options
                             }
-                            ComposerCommand.ATTACH -> dialog = ComposerDialog.Attachments
+                            ComposerCommand.ATTACH -> addMenuExpanded = true
                         }
                     }
                 },
@@ -1438,8 +1462,11 @@ private fun ChatComposer(
         val compactEndExtra = (if (isAddingImage) 28.dp else 0.dp) +
             (if (conversation.isRunning && hasInput) 40.dp else 0.dp)
         MessageComposer(
-            value = draft.message,
-            onValueChange = onMessageChange,
+            value = composerValue,
+            onValueChange = {
+                composerValue = it
+                onMessageChange(it.text)
+            },
             placeholder = when {
                 !connected -> "服务器已断开"
                 conversation.isRunning -> "继续对话"
@@ -1448,14 +1475,34 @@ private fun ChatComposer(
             enabled = !isSending,
             compactEndExtra = compactEndExtra,
             leadingContent = {
-                MessageComposerAddButton(
-                    onClick = {
-                        onLoadResources(false)
-                        dialog = ComposerDialog.Attachments
-                    },
+                ComposerAddMenu(
+                    expanded = addMenuExpanded,
+                    onExpandedChange = { addMenuExpanded = it },
                     enabled = !isSending,
-                    contentDescription = "添加内容或调整设置",
+                    onPickImage = {
+                        imagePicker.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                        )
+                    },
+                    onAddImageAddress = { dialog = ComposerDialog.ImageAddress },
+                    onInsertTrigger = { trigger ->
+                        val nextValue = insertComposerTrigger(composerValue, trigger)
+                        composerValue = nextValue
+                        onMessageChange(nextValue.text)
+                        focusRequester.requestFocus()
+                        keyboardController?.show()
+                    },
                 )
+            },
+            expandedContent = {
+                TextButton(
+                    onClick = { dialog = ComposerDialog.Options },
+                    enabled = !conversation.isRunning && !isSending,
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                ) {
+                    Text(modelLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             },
             trailingContent = {
                 if (isAddingImage) {
@@ -1488,25 +1535,17 @@ private fun ChatComposer(
                     contentDescription = if (stopsActiveTurn) "停止" else "发送",
                 )
             },
+            focusRequester = focusRequester,
         )
     }
 
     when (dialog) {
-        ComposerDialog.Attachments -> AttachmentSheet(
-            resources = resources,
-            isLoading = isLoadingResources,
-            onRefresh = { onLoadResources(true) },
+        ComposerDialog.ImageAddress -> ImageAddressDialog(
             onDismiss = { dialog = null },
             onAdd = {
                 onAddAttachment(it, null)
                 dialog = null
             },
-            onPickImage = {
-                imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-            },
-            settingsSummary = "$modelLabel · $reviewerLabel",
-            optionsEnabled = !conversation.isRunning && !isSending,
-            onOpenOptions = { dialog = ComposerDialog.Options },
         )
 
         ComposerDialog.Options -> TurnOptionsSheet(
@@ -1524,189 +1563,108 @@ private fun ChatComposer(
 }
 
 @Composable
-private fun AttachmentSheet(
-    resources: List<FeatureEntry>,
-    isLoading: Boolean,
-    onRefresh: () -> Unit,
+private fun ComposerAddMenu(
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    enabled: Boolean,
+    onPickImage: () -> Unit,
+    onAddImageAddress: () -> Unit,
+    onInsertTrigger: (Char) -> Unit,
+) {
+    Box {
+        MessageComposerAddButton(
+            onClick = { onExpandedChange(true) },
+            enabled = enabled,
+            contentDescription = "添加内容",
+        )
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { onExpandedChange(false) },
+            properties = PopupProperties(focusable = false),
+        ) {
+            DropdownMenuItem(
+                text = { Text("设备图片") },
+                leadingIcon = { Icon(Icons.Rounded.Image, contentDescription = null) },
+                onClick = {
+                    onExpandedChange(false)
+                    onPickImage()
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("图片地址") },
+                leadingIcon = { Icon(Icons.Rounded.Link, contentDescription = null) },
+                onClick = {
+                    onExpandedChange(false)
+                    onAddImageAddress()
+                },
+            )
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = { Text("Skill") },
+                leadingIcon = { Icon(Icons.Rounded.AutoAwesome, contentDescription = null) },
+                onClick = {
+                    onExpandedChange(false)
+                    onInsertTrigger('$')
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("App 与 Plugin") },
+                leadingIcon = { Icon(Icons.Rounded.Apps, contentDescription = null) },
+                onClick = {
+                    onExpandedChange(false)
+                    onInsertTrigger('@')
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ImageAddressDialog(
     onDismiss: () -> Unit,
     onAdd: (UserInputPart) -> Unit,
-    onPickImage: () -> Unit,
-    settingsSummary: String,
-    optionsEnabled: Boolean,
-    onOpenOptions: () -> Unit,
 ) {
     var kind by rememberSaveable { mutableStateOf(ManualAttachment.IMAGE_URL) }
     var value by rememberSaveable { mutableStateOf("") }
-    var query by rememberSaveable { mutableStateOf("") }
-    var resourceFilter by rememberSaveable { mutableStateOf(ResourceFilter.ALL) }
-    var showImageForm by rememberSaveable { mutableStateOf(false) }
-    val filteredResources = remember(resources, query, resourceFilter) {
-        resources.filter { entry ->
-            resourceFilter.accepts(entry.kind) &&
-                (query.isBlank() || listOf(entry.title, entry.description, entry.parentId, entry.path)
-                    .filterNotNull()
-                    .joinToString(" ")
-                    .contains(query, ignoreCase = true))
-        }
-    }
-    ModalBottomSheet(
+    AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = MaterialTheme.colorScheme.surface,
-    ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.85f)
-                .navigationBarsPadding()
-                .imePadding()
-                .padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text("添加与设置", style = MaterialTheme.typography.titleLarge)
-            Surface(
-                onClick = onOpenOptions,
-                enabled = optionsEnabled,
-                modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.medium,
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Rounded.Tune, contentDescription = null)
-                    Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                        Text("回合设置", style = MaterialTheme.typography.labelLarge)
-                        Text(
-                            if (optionsEnabled) settingsSummary else "当前回合运行中，完成后可调整",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Icon(
-                        Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onPickImage) {
-                    Icon(Icons.Rounded.Image, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
-                    Text("设备图片")
-                }
-                TextButton(onClick = { showImageForm = !showImageForm }) {
-                    Text(if (showImageForm) "收起地址输入" else "图片地址")
-                }
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = onRefresh) { Text("刷新") }
-            }
-            if (showImageForm) {
+        title = { Text("添加图片地址") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OptionRow(
                     values = ManualAttachment.entries,
                     selected = kind,
-                    label = { if (it == ManualAttachment.IMAGE_URL) "图片 URL" else "服务端本地图片" },
+                    label = { if (it == ManualAttachment.IMAGE_URL) "图片 URL" else "服务端图片" },
                     onSelect = { kind = it },
                 )
                 OutlinedTextField(
                     value = value,
                     onValueChange = { value = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text(if (kind == ManualAttachment.IMAGE_URL) "URL 或 data URL" else "服务端绝对路径") },
-                )
-                Button(
-                    onClick = {
-                        onAdd(
-                            if (kind == ManualAttachment.IMAGE_URL) UserInputPart.Image(value.trim())
-                            else UserInputPart.LocalImage(value.trim()),
+                    label = {
+                        Text(
+                            if (kind == ManualAttachment.IMAGE_URL) "URL 或 data URL" else "服务端绝对路径",
                         )
                     },
-                    enabled = value.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("添加图片") }
-                HorizontalDivider()
+                    singleLine = true,
+                )
             }
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("搜索 Skills、Apps 与 Plugins") },
-                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-                trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        IconButton(onClick = { query = "" }) {
-                            Icon(Icons.Rounded.Close, contentDescription = "清除搜索")
-                        }
-                    }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onAdd(
+                        if (kind == ManualAttachment.IMAGE_URL) UserInputPart.Image(value.trim())
+                        else UserInputPart.LocalImage(value.trim()),
+                    )
                 },
-                singleLine = true,
-                shape = MaterialTheme.shapes.large,
-            )
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                ResourceFilter.entries.forEachIndexed { index, filter ->
-                    if (index > 0) Spacer(Modifier.width(8.dp))
-                    FilterChip(
-                        selected = resourceFilter == filter,
-                        onClick = { resourceFilter = filter },
-                        label = { Text(filter.label) },
-                    )
-                }
+                enabled = value.isNotBlank(),
+            ) {
+                Text("添加")
             }
-            if (isLoading) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
-            LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
-                if (!isLoading && filteredResources.isEmpty()) {
-                    item("resources-empty") {
-                        Box(
-                            Modifier.fillMaxWidth().padding(vertical = 40.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                if (query.isBlank()) "当前没有可用内容" else "没有匹配的内容",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-                items(filteredResources, key = { "${it.kind}:${it.id}" }) { entry ->
-                    ListItem(
-                        headlineContent = { Text(entry.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        supportingContent = {
-                            if (entry.description.isNotBlank()) {
-                                Text(entry.description, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            }
-                        },
-                        leadingContent = {
-                            Icon(
-                                when (entry.kind) {
-                                    FeatureKind.SKILL -> Icons.Rounded.AutoAwesome
-                                    FeatureKind.APP -> Icons.Rounded.Apps
-                                    else -> Icons.Rounded.Extension
-                                },
-                                contentDescription = null,
-                            )
-                        },
-                        trailingContent = {
-                            Text(entry.resourceOrigin, style = MaterialTheme.typography.labelSmall)
-                        },
-                        modifier = Modifier.clickable {
-                            val input = if (entry.kind == FeatureKind.SKILL) {
-                                UserInputPart.Skill(entry.title, entry.path ?: entry.id)
-                            } else {
-                                UserInputPart.Mention(entry.title, entry.metadata["mentionPath"] ?: entry.path ?: entry.id)
-                            }
-                            onAdd(input)
-                        },
-                    )
-                    HorizontalDivider(Modifier.padding(start = 56.dp))
-                }
-            }
-            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("关闭") }
-            Spacer(Modifier.height(12.dp))
-        }
-    }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
 }
 
 @Composable
@@ -2218,7 +2176,7 @@ private sealed interface ChatDialog {
 }
 
 private enum class ComposerDialog {
-    Attachments,
+    ImageAddress,
     Options,
 }
 
@@ -2227,32 +2185,9 @@ private enum class ManualAttachment {
     LOCAL_IMAGE,
 }
 
-private enum class ResourceFilter(val label: String) {
-    ALL("全部"),
-    SKILLS("Skills"),
-    APPS("Apps"),
-    PLUGINS("Plugins"),
-    ;
-
-    fun accepts(kind: FeatureKind): Boolean = when (this) {
-        ALL -> kind == FeatureKind.SKILL || kind == FeatureKind.APP || kind == FeatureKind.PLUGIN
-        SKILLS -> kind == FeatureKind.SKILL
-        APPS -> kind == FeatureKind.APP
-        PLUGINS -> kind == FeatureKind.PLUGIN
-    }
-}
-
 private enum class ReviewType(val label: String, val inputLabel: String) {
     UNCOMMITTED("未提交修改", ""),
     BASE_BRANCH("相对分支", "基础分支"),
     COMMIT("提交", "提交 SHA"),
     CUSTOM("自定义", "审查说明"),
 }
-
-private val FeatureEntry.resourceOrigin: String
-    get() = when (kind) {
-        FeatureKind.SKILL -> metadata["scope"]?.ifBlank { null }?.let(::featureScopeLabel) ?: "Skill"
-        FeatureKind.APP -> "App"
-        FeatureKind.PLUGIN -> parentId ?: "Plugin"
-        else -> "其他资源"
-    }

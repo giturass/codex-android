@@ -1,5 +1,7 @@
 package com.hebo.codex.ui.screens.chat
 
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import com.hebo.codex.domain.FeatureEntry
 import com.hebo.codex.domain.FeatureKind
 import com.hebo.codex.domain.UserInputPart
@@ -19,14 +21,25 @@ class ComposerPaletteTest {
     }
 
     @Test
+    fun `在光标处插入 Skill 触发符`() {
+        val value = TextFieldValue("请处理问题", selection = TextRange(3))
+
+        val result = insertComposerTrigger(value, '$')
+
+        assertEquals("请处理 ${'$'}问题", result.text)
+        assertEquals(5, result.selection.start)
+        assertEquals("", requireNotNull(activeComposerToken(result.text, result.selection.start)).query)
+    }
+
+    @Test
     fun `Skill 和提及按触发符过滤`() {
         val resources = listOf(
             entry(FeatureKind.SKILL, "design"),
             entry(FeatureKind.APP, "docs"),
         )
 
-        val skills = composerPaletteEntries(ComposerToken(0, '$', "des"), resources)
-        val mentions = composerPaletteEntries(ComposerToken(0, '@', "doc"), resources)
+        val skills = composerPaletteEntries(ComposerToken(0, 4, '$', "des"), resources)
+        val mentions = composerPaletteEntries(ComposerToken(0, 4, '@', "doc"), resources)
 
         assertTrue((skills.single() as ComposerPaletteEntry.Resource).input is UserInputPart.Skill)
         assertTrue((mentions.single() as ComposerPaletteEntry.Resource).input is UserInputPart.Mention)

@@ -1,6 +1,7 @@
 package com.hebo.codex.ui.components
 
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -41,9 +42,12 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp as lerpColor
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.constrainHeight
@@ -70,14 +74,16 @@ internal enum class MessageComposerAction {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun MessageComposer(
-    value: String,
-    onValueChange: (String) -> Unit,
+    value: TextFieldValue,
+    onValueChange: (TextFieldValue) -> Unit,
     placeholder: String,
     enabled: Boolean,
-    leadingContent: @Composable () -> Unit,
+    leadingContent: (@Composable () -> Unit)? = null,
+    expandedContent: @Composable RowScope.() -> Unit = {},
     trailingContent: @Composable RowScope.() -> Unit,
     modifier: Modifier = Modifier,
     compactEndExtra: Dp = 0.dp,
+    focusRequester: FocusRequester? = null,
 ) {
     val density = LocalDensity.current
     val imeInsets = WindowInsets.ime
@@ -86,7 +92,7 @@ internal fun MessageComposer(
     val imeAnimation = remember(imeInsets, imeAnimationSource, imeAnimationTarget) {
         ComposerImeAnimation(imeInsets, imeAnimationSource, imeAnimationTarget)
     }
-    val hasText = value.isNotEmpty()
+    val hasText = value.text.isNotEmpty()
     val allowsMultipleLines by remember(density, imeAnimation, hasText) {
         derivedStateOf { hasText || imeAnimation.isVisibleOrOpening(density) }
     }
@@ -134,14 +140,6 @@ internal fun MessageComposer(
                 }
                 .padding(horizontal = 6.dp, vertical = 5.dp),
         ) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .size(48.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                leadingContent()
-            }
             BasicTextField(
                 value = value,
                 onValueChange = onValueChange,
@@ -149,10 +147,12 @@ internal fun MessageComposer(
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .fillMaxWidth()
+                    .then(focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
                     .composerTextFieldLayout(
                         imeAnimation = imeAnimation,
                         compactEndExtra = compactEndExtra,
                         hasText = hasText,
+                        hasLeadingContent = leadingContent != null,
                     ),
                 textStyle = MaterialTheme.typography.bodyLarge.copy(
                     color = MaterialTheme.colorScheme.onSurface,
@@ -162,7 +162,7 @@ internal fun MessageComposer(
                 maxLines = if (allowsMultipleLines) 5 else 1,
                 decorationBox = { innerTextField ->
                     ComposerTextFieldDecoration(
-                        value = value,
+                        value = value.text,
                         placeholder = placeholder,
                         imeAnimation = imeAnimation,
                         hasText = hasText,
@@ -171,10 +171,31 @@ internal fun MessageComposer(
                 },
             )
             Row(
-                modifier = Modifier.align(Alignment.BottomEnd),
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                content = trailingContent,
-            )
+            ) {
+                if (leadingContent != null) {
+                    Box(
+                        modifier = Modifier.size(48.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        leadingContent()
+                    }
+                }
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (allowsMultipleLines) expandedContent()
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    content = trailingContent,
+                )
+            }
         }
     }
 }
@@ -183,10 +204,11 @@ private fun Modifier.composerTextFieldLayout(
     imeAnimation: ComposerImeAnimation,
     compactEndExtra: Dp,
     hasText: Boolean,
+    hasLeadingContent: Boolean,
 ) = layout { measurable, constraints ->
     val fraction = imeAnimation.expansionFraction(this, hasText)
     val startPadding = lerpDp(
-        ComposerCompactControlInset,
+        if (hasLeadingContent) ComposerCompactControlInset else ComposerExpandedTextInset,
         ComposerExpandedTextInset,
         fraction,
     ).roundToPx()

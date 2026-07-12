@@ -53,6 +53,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -71,7 +73,6 @@ import com.hebo.codex.domain.projectName
 import com.hebo.codex.ui.components.MessageComposer
 import com.hebo.codex.ui.components.MessageComposerAction
 import com.hebo.codex.ui.components.MessageComposerActionButton
-import com.hebo.codex.ui.components.MessageComposerAddButton
 import com.hebo.codex.ui.displayDescriptionRes
 import com.hebo.codex.ui.displayLabelRes
 import com.hebo.codex.ui.ratelimits.RateLimitIndicator
@@ -178,6 +179,11 @@ fun HomeScreen(
 
             else -> NewTaskContent(
                 message = newTaskState.message,
+                modelLabel = state.models
+                    .firstOrNull { it.model == newTaskState.options.model }
+                    ?.displayName
+                    ?: newTaskState.options.model
+                    ?: "默认模型",
                 cwd = newTaskState.cwd,
                 projects = state.recentProjects,
                 isCreating = newTaskState.isCreatingConversation || newTaskState.isLoadingDraft,
@@ -226,6 +232,7 @@ fun HomeScreen(
 @Composable
 private fun NewTaskContent(
     message: String,
+    modelLabel: String,
     cwd: String,
     projects: List<RecentProject>,
     isCreating: Boolean,
@@ -239,6 +246,22 @@ private fun NewTaskContent(
     onSend: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var composerValue by remember {
+        mutableStateOf(
+            TextFieldValue(
+                text = message,
+                selection = TextRange(message.length),
+            ),
+        )
+    }
+    LaunchedEffect(message) {
+        if (message != composerValue.text) {
+            composerValue = TextFieldValue(
+                text = message,
+                selection = TextRange(message.length),
+            )
+        }
+    }
     Column(
         modifier = modifier.imePadding(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -276,20 +299,25 @@ private fun NewTaskContent(
             }
         }
         MessageComposer(
-            value = message,
-            onValueChange = onMessageChange,
+            value = composerValue,
+            onValueChange = {
+                composerValue = it
+                onMessageChange(it.text)
+            },
             placeholder = "描述要完成的任务……",
             enabled = !isCreating,
             modifier = Modifier
                 .widthIn(max = 760.dp)
                 .fillMaxWidth()
                 .padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 10.dp),
-            leadingContent = {
-                MessageComposerAddButton(
+            expandedContent = {
+                TextButton(
                     onClick = onOpenOptions,
                     enabled = !isCreating,
-                    contentDescription = "调整会话设置",
-                )
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(modelLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             },
             trailingContent = {
                 MessageComposerActionButton(
