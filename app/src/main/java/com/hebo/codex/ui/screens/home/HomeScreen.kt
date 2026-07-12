@@ -58,6 +58,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hebo.codex.R
@@ -426,6 +427,7 @@ private fun ProjectSelector(
             expanded = expanded,
             onDismissRequest = onDismiss,
             modifier = Modifier.widthIn(min = 280.dp, max = 600.dp),
+            properties = PopupProperties(focusable = false),
         ) {
             projects.take(8).forEach { project ->
                 DropdownMenuItem(
