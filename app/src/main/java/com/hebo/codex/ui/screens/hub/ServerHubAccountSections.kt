@@ -512,7 +512,7 @@ fun ExpandableJsonSection(title: String, json: String) {
     ) {
         Column {
             ListItem(
-                headlineContent = { Text(title) },
+                onClick = { expanded = !expanded },
                 supportingContent = {
                     Text(
                         stringResource(
@@ -522,8 +522,9 @@ fun ExpandableJsonSection(title: String, json: String) {
                     )
                 },
                 leadingContent = { Icon(Icons.Rounded.Code, contentDescription = null) },
-                modifier = Modifier.clickable { expanded = !expanded },
-            )
+            ) {
+                Text(title)
+            }
             if (expanded) {
                 HorizontalDivider()
                 Box(Modifier.padding(12.dp)) { JsonBlock(json) }

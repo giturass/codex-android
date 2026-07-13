@@ -2,7 +2,6 @@
 
 package com.hebo.codex.ui.screens.hub
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -229,16 +228,6 @@ private fun ModelsContent(
         } else {
             items(models, key = ModelOption::id) { model ->
                 ListItem(
-                    headlineContent = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(model.displayName, modifier = Modifier.weight(1f))
-                            if (model.isDefault) StatusBadge("默认", StatusTone.POSITIVE)
-                            if (model.hidden) {
-                                Spacer(Modifier.width(6.dp))
-                                StatusBadge("隐藏", StatusTone.NEUTRAL)
-                            }
-                        }
-                    },
                     supportingContent = {
                         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text(model.model, style = MaterialTheme.typography.labelMedium)
@@ -252,7 +241,16 @@ private fun ModelsContent(
                         }
                     },
                     leadingContent = { Icon(Icons.Rounded.SmartToy, contentDescription = null) },
-                )
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(model.displayName, modifier = Modifier.weight(1f))
+                        if (model.isDefault) StatusBadge("默认", StatusTone.POSITIVE)
+                        if (model.hidden) {
+                            Spacer(Modifier.width(6.dp))
+                            StatusBadge("隐藏", StatusTone.NEUTRAL)
+                        }
+                    }
+                }
                 HorizontalDivider(Modifier.padding(start = 56.dp))
             }
         }
@@ -273,7 +271,7 @@ private fun PermissionContent(
         items(catalog.entries, key = FeatureEntry::id) { entry ->
             val allowed = entry.enabled
             ListItem(
-                headlineContent = { Text(entry.title) },
+                onClick = { onDetails(FeatureDetails(entry)) },
                 supportingContent = {
                     if (entry.description.isNotBlank()) Text(entry.description)
                 },
@@ -292,8 +290,9 @@ private fun PermissionContent(
                         },
                     )
                 },
-                modifier = Modifier.clickable { onDetails(FeatureDetails(entry)) },
-            )
+            ) {
+                Text(entry.title)
+            }
             HorizontalDivider(Modifier.padding(start = 56.dp))
         }
     }
@@ -354,7 +353,7 @@ private fun SkillsContent(
             val actionKey = "skill:${entry.id}"
             val pending = actionKey in pendingActions
             ListItem(
-                headlineContent = { Text(entry.title) },
+                onClick = { onDetails(FeatureDetails(entry)) },
                 supportingContent = {
                     Column {
                         Text(entry.description, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -381,8 +380,9 @@ private fun SkillsContent(
                         )
                     }
                 },
-                modifier = Modifier.clickable { onDetails(FeatureDetails(entry)) },
-            )
+            ) {
+                Text(entry.title)
+            }
             HorizontalDivider(Modifier.padding(start = 56.dp))
         }
     }
@@ -402,7 +402,7 @@ private fun HooksContent(
         items(catalog.entries, key = FeatureEntry::id) { entry ->
             val trust = entry.metadata["trust"].orEmpty()
             ListItem(
-                headlineContent = { Text(entry.title) },
+                onClick = { onDetails(FeatureDetails(entry)) },
                 supportingContent = {
                     Column {
                         if (entry.description.isNotBlank()) {
@@ -424,8 +424,9 @@ private fun HooksContent(
                         if (entry.enabled == false) StatusTone.NEUTRAL else StatusTone.POSITIVE,
                     )
                 },
-                modifier = Modifier.clickable { onDetails(FeatureDetails(entry)) },
-            )
+            ) {
+                Text(entry.title)
+            }
             HorizontalDivider(Modifier.padding(start = 56.dp))
         }
     }
@@ -459,7 +460,7 @@ private fun AppsContent(
             val actionKey = "app:${entry.id}"
             val pending = actionKey in pendingActions
             ListItem(
-                headlineContent = { Text(entry.title) },
+                onClick = { onDetails(FeatureDetails(entry)) },
                 supportingContent = {
                     Column {
                         Text(entry.description, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -495,8 +496,9 @@ private fun AppsContent(
                         )
                     }
                 },
-                modifier = Modifier.clickable { onDetails(FeatureDetails(entry)) },
-            )
+            ) {
+                Text(entry.title)
+            }
             HorizontalDivider(Modifier.padding(start = 56.dp))
         }
     }

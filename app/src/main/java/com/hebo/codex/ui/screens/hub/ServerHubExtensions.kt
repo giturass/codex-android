@@ -3,7 +3,6 @@
 package com.hebo.codex.ui.screens.hub
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -213,12 +212,7 @@ private fun PluginRow(
     val uninstallKey = "plugin:uninstall:${entry.id}"
     val pending = installKey in pendingActions || uninstallKey in pendingActions
     ListItem(
-        headlineContent = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(entry.title, modifier = Modifier.weight(1f))
-                if (entry.installed == true) StatusBadge("已安装", StatusTone.POSITIVE)
-            }
-        },
+        onClick = { onDetails(FeatureDetails(entry)) },
         supportingContent = {
             Column {
                 if (entry.description.isNotBlank()) {
@@ -281,8 +275,12 @@ private fun PluginRow(
                 }
             }
         },
-        modifier = Modifier.clickable { onDetails(FeatureDetails(entry)) },
-    )
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(entry.title, modifier = Modifier.weight(1f))
+            if (entry.installed == true) StatusBadge("已安装", StatusTone.POSITIVE)
+        }
+    }
 }
 
 @Composable
@@ -339,7 +337,7 @@ private fun MarketplaceRow(
     val pending = upgradeKey in pendingActions || removeKey in pendingActions
     var expanded by remember { mutableStateOf(false) }
     ListItem(
-        headlineContent = { Text(entry.title) },
+        onClick = { onDetails(FeatureDetails(entry)) },
         supportingContent = {
             Text(entry.description.ifBlank { "插件目录来源" }, maxLines = 2, overflow = TextOverflow.Ellipsis)
         },
@@ -391,8 +389,9 @@ private fun MarketplaceRow(
                 }
             }
         },
-        modifier = Modifier.clickable { onDetails(FeatureDetails(entry)) },
-    )
+    ) {
+        Text(entry.title)
+    }
 }
 
 @Composable
@@ -415,7 +414,7 @@ fun SharedPluginsContent(
             val pending = checkoutKey in pendingActions || deleteKey in pendingActions
             var expanded by remember { mutableStateOf(false) }
             ListItem(
-                headlineContent = { Text(entry.title) },
+                onClick = { onDetails(FeatureDetails(entry)) },
                 supportingContent = {
                     Column {
                         Text(entry.description.ifBlank { "共享插件" })
@@ -487,8 +486,9 @@ fun SharedPluginsContent(
                         }
                     }
                 },
-                modifier = Modifier.clickable { onDetails(FeatureDetails(entry)) },
-            )
+            ) {
+                Text(entry.title)
+            }
             HorizontalDivider(Modifier.padding(start = 56.dp))
         }
     }
@@ -517,15 +517,18 @@ fun McpContent(
                 color = MaterialTheme.colorScheme.surfaceContainerLow,
             ) {
                 ListItem(
-                    headlineContent = { Text("开发者操作") },
+                    checked = showDeveloperActions,
+                    onCheckedChange = { showDeveloperActions = it },
                     supportingContent = { Text("允许手动读取资源和调用工具") },
                     trailingContent = {
                         Switch(
                             checked = showDeveloperActions,
-                            onCheckedChange = { showDeveloperActions = it },
+                            onCheckedChange = null,
                         )
                     },
-                )
+                ) {
+                    Text("开发者操作")
+                }
             }
         }
         warnings(catalog.warnings)
@@ -573,7 +576,7 @@ private fun McpServerBlock(
     ) {
         Column {
             ListItem(
-                headlineContent = { Text(server.title) },
+                onClick = onToggle,
                 supportingContent = {
                     Text("${mcpAuthStatusLabel(authStatus)} · $toolCount 个工具 · $resourceCount 个资源")
                 },
@@ -604,8 +607,9 @@ private fun McpServerBlock(
                         )
                     }
                 },
-                modifier = Modifier.clickable(onClick = onToggle),
-            )
+            ) {
+                Text(server.title)
+            }
             if (expanded) {
                 HorizontalDivider()
                 Row(
@@ -648,7 +652,8 @@ private fun McpChildRow(
 ) {
     val resourceKey = "mcp:resource:${entry.id}"
     ListItem(
-        headlineContent = { Text(entry.title) },
+        onClick = { onDetails(FeatureDetails(entry)) },
+        modifier = Modifier.padding(start = 24.dp),
         supportingContent = {
             if (entry.description.isNotBlank()) {
                 Text(entry.description, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -685,8 +690,9 @@ private fun McpChildRow(
                 }
             }
         },
-        modifier = Modifier.padding(start = 24.dp).clickable { onDetails(FeatureDetails(entry)) },
-    )
+    ) {
+        Text(entry.title)
+    }
 }
 
 private fun authStatusTone(status: String): StatusTone = when (status) {

@@ -4,7 +4,6 @@ package com.hebo.codex.ui.screens.hub
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -291,7 +290,8 @@ private fun SettingsIndex(
                                 if (index > 0) HorizontalDivider()
                                 val selected = state.selectedSection == section
                                 ListItem(
-                                    headlineContent = { Text(section.title) },
+                                    selected = selected,
+                                    onClick = { onSelect(section) },
                                     supportingContent = {
                                         Text(
                                             sectionSummary(section, state.sections[section]),
@@ -306,14 +306,12 @@ private fun SettingsIndex(
                                         Icon(Icons.Rounded.ChevronRight, contentDescription = null)
                                     },
                                     colors = androidx.compose.material3.ListItemDefaults.colors(
-                                        containerColor = if (selected) {
-                                            MaterialTheme.colorScheme.secondaryContainer
-                                        } else {
-                                            MaterialTheme.colorScheme.surfaceContainerLow
-                                        },
+                                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                                        selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
                                     ),
-                                    modifier = Modifier.clickable { onSelect(section) },
-                                )
+                                ) {
+                                    Text(section.title)
+                                }
                             }
                         }
                     }
