@@ -220,7 +220,7 @@ private fun ActivityGroupMetrics(
                 Icon(
                     imageVector = metric.icon(),
                     contentDescription = null,
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(20.dp),
                     tint = color,
                 )
                 Spacer(Modifier.width(4.dp))
