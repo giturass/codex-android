@@ -188,9 +188,18 @@ sealed interface ConversationItem {
         val summary: String? = null,
         val details: String = "",
         val technicalDetails: String? = null,
+        val remotePath: String? = null,
         val status: ActivityStatus,
     ) : ConversationItem
 }
+
+data class RemoteFileMetadata(
+    val isDirectory: Boolean,
+    val isFile: Boolean,
+    val isSymlink: Boolean,
+    val createdAtMillis: Long,
+    val modifiedAtMillis: Long,
+)
 
 sealed interface UserMessagePart {
     data class Text(val text: String) : UserMessagePart

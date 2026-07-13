@@ -212,6 +212,28 @@ class ProtocolMapperTest {
     }
 
     @Test
+    fun mapsImageActivitiesToRemotePaths() {
+        val imageView = ProtocolMapper.conversationItem(
+            json.parseToJsonElement(
+                """{"type":"imageView","id":"view-1","path":"/workspace/chart.png"}""",
+            ).jsonObject,
+            "turn-1",
+            isCompleted = true,
+        ) as ConversationItem.Activity
+        val imageGeneration = ProtocolMapper.conversationItem(
+            json.parseToJsonElement(
+                """{"type":"imageGeneration","id":"generate-1","status":"completed","revisedPrompt":null,"result":"data:image/png;base64,AAAA","savedPath":"/workspace/generated.png"}""",
+            ).jsonObject,
+            "turn-1",
+            isCompleted = true,
+        ) as ConversationItem.Activity
+
+        assertEquals("/workspace/chart.png", imageView.remotePath)
+        assertEquals("/workspace/generated.png", imageGeneration.remotePath)
+        assertFalse(imageGeneration.technicalDetails.orEmpty().contains("data:image"))
+    }
+
+    @Test
     fun mapsAppServerWebSearchActionsUsingCamelCaseTypes() {
         val cases = listOf(
             """{

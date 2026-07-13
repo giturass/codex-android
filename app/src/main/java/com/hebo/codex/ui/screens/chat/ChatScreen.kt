@@ -106,12 +106,14 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -129,6 +131,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -249,6 +252,7 @@ fun ChatScreen(
     var activeRequestKey by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
     var shownNoticeId by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
     var technicalError by remember { mutableStateOf<UserFacingError?>(null) }
+    var remoteFileTarget by remember(conversation?.threadId) { mutableStateOf<RemoteFileTarget?>(null) }
     val detailsLabel = stringResource(R.string.common_details)
     val activeRequest = conversation?.pendingRequests?.firstOrNull { it.requestKey == activeRequestKey }
     val density = LocalDensity.current
@@ -265,6 +269,13 @@ fun ChatScreen(
                 return Offset.Zero
             }
         }
+    }
+    val showLinkError: (String) -> Unit = { message ->
+        scrollScope.launch { snackbarHostState.showSnackbar(message) }
+    }
+    val openRemotePath: (String) -> Unit = { path ->
+        val target = resolveRemotePath(path)
+        if (target == null) showLinkError("无法解析服务端文件路径：$path") else remoteFileTarget = target
     }
 
     LifecycleResumeEffect(viewModel) {
@@ -383,10 +394,17 @@ fun ChatScreen(
             ) {
                 items(conversationRows, key = ConversationRow::key) { row ->
                     when (row) {
-                        is ConversationRow.Item -> ConversationItemView(row.item)
+                        is ConversationRow.Item -> ConversationItemView(
+                            item = row.item,
+                            cwd = conversation.cwd,
+                            onOpenRemoteFile = { remoteFileTarget = it },
+                            onLinkError = showLinkError,
+                            onOpenRemotePath = openRemotePath,
+                        )
                         is ConversationRow.ActivityGroup -> ActivityGroupCard(
                             items = row.items,
                             isSealed = row.isSealed,
+                            onOpenRemotePath = openRemotePath,
                         )
                     }
                 }
@@ -648,6 +666,19 @@ fun ChatScreen(
     technicalError?.let { error ->
         UserFacingErrorDialog(error = error, onDismiss = { technicalError = null })
     }
+    remoteFileTarget?.let { target ->
+        RemoteFileSheet(
+            target = target,
+            serverName = conversation?.serverName.orEmpty(),
+            onDismiss = { remoteFileTarget = null },
+            getMetadata = viewModel::getRemoteFileMetadata,
+            readFile = viewModel::readRemoteFile,
+            onSaved = { fileName ->
+                remoteFileTarget = null
+                scrollScope.launch { snackbarHostState.showSnackbar("已保存 $fileName") }
+            },
+        )
+    }
     if (showTurnOptions) {
         TurnOptionsSheet(
             value = state.draft.options,
@@ -892,21 +923,32 @@ private fun ChatActionMenuItem(
 }
 
 @Composable
-private fun ConversationItemView(item: ConversationItem) {
+private fun ConversationItemView(
+    item: ConversationItem,
+    cwd: String,
+    onOpenRemoteFile: (RemoteFileTarget) -> Unit,
+    onLinkError: (String) -> Unit,
+    onOpenRemotePath: (String) -> Unit,
+) {
     when (item) {
         is ConversationItem.UserMessage -> UserMessage(item)
-        is ConversationItem.AgentMessage -> AgentMessage(item)
-        is ConversationItem.Plan -> PlanSnapshot(item)
-        else -> ActivityGroupCard(items = listOf(item), isSealed = true)
+        is ConversationItem.AgentMessage -> AgentMessage(item, cwd, onOpenRemoteFile, onLinkError)
+        is ConversationItem.Plan -> PlanSnapshot(item, cwd, onOpenRemoteFile, onLinkError)
+        else -> ActivityGroupCard(
+            items = listOf(item),
+            isSealed = true,
+            onOpenRemotePath = onOpenRemotePath,
+        )
     }
 }
 
 @Composable
-private fun PlanSnapshot(item: ConversationItem.Plan) {
-    val markdownState = rememberMarkdownState(
-        content = item.text.ifEmpty { "正在制定计划…" },
-        retainState = true,
-    )
+private fun PlanSnapshot(
+    item: ConversationItem.Plan,
+    cwd: String,
+    onOpenRemoteFile: (RemoteFileTarget) -> Unit,
+    onLinkError: (String) -> Unit,
+) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
@@ -924,10 +966,11 @@ private fun PlanSnapshot(item: ConversationItem.Plan) {
                 }
             }
             SelectionContainer {
-                Markdown(
-                    markdownState = markdownState,
-                    components = highlightedMarkdownComponents,
-                    modifier = Modifier.fillMaxWidth(),
+                ChatMarkdown(
+                    content = item.text.ifEmpty { "正在制定计划…" },
+                    cwd = cwd,
+                    onOpenRemoteFile = onOpenRemoteFile,
+                    onLinkError = onLinkError,
                 )
             }
         }
@@ -935,20 +978,57 @@ private fun PlanSnapshot(item: ConversationItem.Plan) {
 }
 
 @Composable
-private fun AgentMessage(item: ConversationItem.AgentMessage) {
-    val markdownState = rememberMarkdownState(
-        content = item.text.ifEmpty { "…" },
-        retainState = true,
-    )
-
+private fun AgentMessage(
+    item: ConversationItem.AgentMessage,
+    cwd: String,
+    onOpenRemoteFile: (RemoteFileTarget) -> Unit,
+    onLinkError: (String) -> Unit,
+) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 2.dp)) {
         SelectionContainer {
-            Markdown(
-                markdownState = markdownState,
-                components = highlightedMarkdownComponents,
-                modifier = Modifier.fillMaxWidth(),
+            ChatMarkdown(
+                content = item.text.ifEmpty { "…" },
+                cwd = cwd,
+                onOpenRemoteFile = onOpenRemoteFile,
+                onLinkError = onLinkError,
             )
         }
+    }
+}
+
+@Composable
+private fun ChatMarkdown(
+    content: String,
+    cwd: String,
+    onOpenRemoteFile: (RemoteFileTarget) -> Unit,
+    onLinkError: (String) -> Unit,
+) {
+    val markdownState = rememberMarkdownState(content = content, retainState = true)
+    val externalUriHandler = LocalUriHandler.current
+    val currentOpenRemoteFile by rememberUpdatedState(onOpenRemoteFile)
+    val currentLinkError by rememberUpdatedState(onLinkError)
+    val uriHandler = remember(cwd, externalUriHandler) {
+        object : UriHandler {
+            override fun openUri(uri: String) {
+                when (val destination = resolveChatLink(uri, cwd)) {
+                    is ChatLinkDestination.RemoteFile -> currentOpenRemoteFile(destination.target)
+                    is ChatLinkDestination.External -> runCatching {
+                        externalUriHandler.openUri(destination.uri)
+                    }.onFailure { error ->
+                        currentLinkError(error.message ?: "无法打开链接")
+                    }
+
+                    is ChatLinkDestination.Invalid -> currentLinkError(destination.message)
+                }
+            }
+        }
+    }
+    CompositionLocalProvider(LocalUriHandler provides uriHandler) {
+        Markdown(
+            markdownState = markdownState,
+            components = highlightedMarkdownComponents,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 

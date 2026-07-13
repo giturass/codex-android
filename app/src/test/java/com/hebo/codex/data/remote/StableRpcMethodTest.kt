@@ -13,7 +13,10 @@ class StableRpcMethodTest {
         assertEquals(methods.size, methods.distinct().size)
         assertFalse(methods.any { it.startsWith("thread/realtime/") })
         assertFalse(methods.any { it.startsWith("process/") })
-        assertFalse(methods.any { it.startsWith("fs/") })
+        assertEquals(
+            setOf("fs/getMetadata", "fs/readFile"),
+            methods.filter { it.startsWith("fs/") }.toSet(),
+        )
         assertFalse(methods.any { it.startsWith("command/") })
         assertFalse(methods.any { it.startsWith("windows") })
         assertFalse(methods.any { it.startsWith("remoteControl/") })
@@ -33,6 +36,8 @@ class StableRpcMethodTest {
             "thread/unarchive",
             "thread/compact/start",
             "review/start",
+            "fs/getMetadata",
+            "fs/readFile",
             "model/list",
             "modelProvider/capabilities/read",
             "permissionProfile/list",

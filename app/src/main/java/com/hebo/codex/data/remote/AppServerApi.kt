@@ -2,6 +2,7 @@ package com.hebo.codex.data.remote
 
 import com.hebo.codex.domain.ReviewDelivery
 import com.hebo.codex.domain.ReviewTarget
+import com.hebo.codex.domain.RemoteFileMetadata
 import com.hebo.codex.domain.SandboxMode
 import com.hebo.codex.domain.SortDirection
 import com.hebo.codex.domain.ThreadSortKey
@@ -17,6 +18,7 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
+import java.util.Base64
 
 enum class StableRpcMethod(val wireName: String) {
     THREAD_FORK("thread/fork"),
@@ -48,6 +50,8 @@ enum class StableRpcMethod(val wireName: String) {
     PLUGIN_INSTALL("plugin/install"),
     PLUGIN_UNINSTALL("plugin/uninstall"),
     APP_LIST("app/list"),
+    FS_GET_METADATA("fs/getMetadata"),
+    FS_READ_FILE("fs/readFile"),
     REVIEW_START("review/start"),
     MODEL_LIST("model/list"),
     MODEL_PROVIDER_CAPABILITIES("modelProvider/capabilities/read"),
@@ -192,6 +196,35 @@ class AppServerApi(
     suspend fun request(method: StableRpcMethod, params: JsonObject? = null): JsonElement =
         connection.request(method.wireName, params)
 
+    suspend fun getFileMetadata(path: String): RemoteFileMetadata {
+        val response = request(
+            StableRpcMethod.FS_GET_METADATA,
+            buildJsonObject { put("path", path) },
+        ).jsonObject
+        return RemoteFileMetadata(
+            isDirectory = response.requiredBoolean("isDirectory"),
+            isFile = response.requiredBoolean("isFile"),
+            isSymlink = response.requiredBoolean("isSymlink"),
+            createdAtMillis = response.requiredLong("createdAtMs"),
+            modifiedAtMillis = response.requiredLong("modifiedAtMs"),
+        )
+    }
+
+    suspend fun readFile(path: String): ByteArray {
+        val encoded = request(
+            StableRpcMethod.FS_READ_FILE,
+            buildJsonObject { put("path", path) },
+        ).jsonObject.requiredString("dataBase64")
+        if (encoded.length > MAX_REMOTE_FILE_BASE64_LENGTH) {
+            throw ProtocolException("远端文件超过客户端 $MAX_REMOTE_FILE_MEBIBYTES MiB 限制")
+        }
+        return try {
+            Base64.getDecoder().decode(encoded)
+        } catch (error: IllegalArgumentException) {
+            throw ProtocolException("fs/readFile 返回了无效的 Base64 内容", error)
+        }
+    }
+
     private fun buildTurnParams(
         threadId: String,
         clientMessageId: String,
@@ -298,5 +331,8 @@ class AppServerApi(
     private companion object {
         const val THREAD_PAGE_LIMIT = 50
         const val CLIENT_NAME = "codex_android"
+        private const val MAX_REMOTE_FILE_MEBIBYTES = 16
+        private const val MAX_REMOTE_FILE_BYTES = MAX_REMOTE_FILE_MEBIBYTES * 1024 * 1024
+        private const val MAX_REMOTE_FILE_BASE64_LENGTH = ((MAX_REMOTE_FILE_BYTES + 2) / 3) * 4
     }
 }

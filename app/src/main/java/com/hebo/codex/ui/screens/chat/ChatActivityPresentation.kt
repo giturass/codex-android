@@ -29,10 +29,12 @@ import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.HourglassTop
+import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -58,6 +60,7 @@ import com.hebo.codex.domain.FileChangeKind
 internal fun ActivityGroupCard(
     items: List<ConversationItem>,
     isSealed: Boolean,
+    onOpenRemotePath: (String) -> Unit,
 ) {
     if (items.isEmpty()) return
     var showDetails by rememberSaveable(items.first().turnId) { mutableStateOf(false) }
@@ -109,7 +112,14 @@ internal fun ActivityGroupCard(
     }
 
     if (showDetails) {
-        ActivityDetailsSheet(items = items, onDismiss = { showDetails = false })
+        ActivityDetailsSheet(
+            items = items,
+            onOpenRemotePath = { path ->
+                showDetails = false
+                onOpenRemotePath(path)
+            },
+            onDismiss = { showDetails = false },
+        )
     }
 }
 
@@ -185,7 +195,11 @@ internal fun ConversationItem.activityStatus(): ActivityStatus = when (this) {
 }
 
 @Composable
-private fun ActivityDetailsSheet(items: List<ConversationItem>, onDismiss: () -> Unit) {
+private fun ActivityDetailsSheet(
+    items: List<ConversationItem>,
+    onOpenRemotePath: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -215,7 +229,11 @@ private fun ActivityDetailsSheet(items: List<ConversationItem>, onDismiss: () ->
                 verticalArrangement = Arrangement.spacedBy(22.dp),
             ) {
                 itemsIndexed(items, key = { _, item -> "${item.turnId}:${item.id}" }) { index, item ->
-                    ActivityTimelineItem(item = item, isLast = index == items.lastIndex)
+                    ActivityTimelineItem(
+                        item = item,
+                        isLast = index == items.lastIndex,
+                        onOpenRemotePath = onOpenRemotePath,
+                    )
                 }
             }
         }
@@ -223,7 +241,11 @@ private fun ActivityDetailsSheet(items: List<ConversationItem>, onDismiss: () ->
 }
 
 @Composable
-private fun ActivityTimelineItem(item: ConversationItem, isLast: Boolean) {
+private fun ActivityTimelineItem(
+    item: ConversationItem,
+    isLast: Boolean,
+    onOpenRemotePath: (String) -> Unit,
+) {
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
         Box(
             modifier = Modifier
@@ -248,7 +270,7 @@ private fun ActivityTimelineItem(item: ConversationItem, isLast: Boolean) {
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(activityItemTitle(item), style = MaterialTheme.typography.bodyLarge)
-            ActivityItemDetails(item)
+            ActivityItemDetails(item, onOpenRemotePath)
         }
     }
 }
@@ -308,7 +330,7 @@ private fun activityItemTitle(item: ConversationItem): String = when (item) {
 }
 
 @Composable
-private fun ActivityItemDetails(item: ConversationItem) {
+private fun ActivityItemDetails(item: ConversationItem, onOpenRemotePath: (String) -> Unit) {
     when (item) {
         is ConversationItem.Reasoning -> {
             if (item.details.isNotBlank()) {
@@ -374,6 +396,13 @@ private fun ActivityItemDetails(item: ConversationItem) {
                 }
             }
             item.technicalDetails?.takeIf(String::isNotBlank)?.let { ExpandableTechnicalDetails(it) }
+            item.remotePath?.let { path ->
+                OutlinedButton(onClick = { onOpenRemotePath(path) }) {
+                    Icon(Icons.Rounded.Visibility, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("查看文件")
+                }
+            }
         }
 
         is ConversationItem.UserMessage, is ConversationItem.AgentMessage -> Unit

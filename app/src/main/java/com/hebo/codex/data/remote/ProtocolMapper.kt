@@ -309,6 +309,7 @@ object ProtocolMapper {
                 title = "查看图片",
                 summary = item.requiredString("path").fileName(),
                 details = item.requiredString("path"),
+                remotePath = item.requiredString("path"),
                 isCompleted = isCompleted,
             )
 
@@ -319,6 +320,7 @@ object ProtocolMapper {
                 summary = item.optionalString("revisedPrompt"),
                 details = item.optionalString("savedPath").orEmpty(),
                 technicalDetails = item.withoutLargeImageResult(),
+                remotePath = item.optionalString("savedPath"),
                 isCompleted = isCompleted,
             )
 
@@ -348,6 +350,7 @@ object ProtocolMapper {
         summary: String? = null,
         details: String = "",
         technicalDetails: String? = null,
+        remotePath: String? = null,
         isCompleted: Boolean,
     ) = ConversationItem.Activity(
         id = item.requiredString("id"),
@@ -356,6 +359,7 @@ object ProtocolMapper {
         summary = summary,
         details = details,
         technicalDetails = technicalDetails,
+        remotePath = remotePath,
         status = activityStatus(item.optionalString("status"), isCompleted),
     )
 
@@ -519,6 +523,9 @@ internal fun JsonObject.requiredDouble(name: String): Double =
 
 internal fun JsonObject.optionalBoolean(name: String): Boolean? =
     (this[name] as? JsonPrimitive)?.contentOrNull?.toBooleanStrictOrNull()
+
+internal fun JsonObject.requiredBoolean(name: String): Boolean =
+    optionalBoolean(name) ?: throw ProtocolException("协议字段 $name 缺失或不是布尔值")
 
 internal fun JsonObject.requiredObject(name: String): JsonObject =
     this[name] as? JsonObject ?: throw ProtocolException("协议字段 $name 缺失或不是对象")

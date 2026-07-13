@@ -341,6 +341,12 @@ class CodexRepository(
         )
     }
 
+    suspend fun getRemoteFileMetadata(serverId: String, path: String): RemoteFileMetadata =
+        api(serverId).getFileMetadata(path)
+
+    suspend fun readRemoteFile(serverId: String, path: String): ByteArray =
+        api(serverId).readFile(path)
+
     suspend fun reviewConversation(
         serverId: String,
         threadId: String,

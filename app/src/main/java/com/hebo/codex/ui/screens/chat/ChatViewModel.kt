@@ -19,6 +19,7 @@ import com.hebo.codex.domain.FeatureEntry
 import com.hebo.codex.domain.ModelOption
 import com.hebo.codex.domain.ReviewDelivery
 import com.hebo.codex.domain.ReviewTarget
+import com.hebo.codex.domain.RemoteFileMetadata
 import com.hebo.codex.domain.ThreadGoal
 import com.hebo.codex.domain.ThreadGoalStatus
 import com.hebo.codex.domain.TurnOptions
@@ -242,6 +243,11 @@ class ChatViewModel(
                 .onFailure(::showError)
         }
     }
+
+    suspend fun getRemoteFileMetadata(path: String): RemoteFileMetadata =
+        repository.getRemoteFileMetadata(serverId, path)
+
+    suspend fun readRemoteFile(path: String): ByteArray = repository.readRemoteFile(serverId, path)
 
     fun compact() {
         viewModelScope.launch {
