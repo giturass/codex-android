@@ -2246,9 +2246,8 @@ private fun TokenUsageComparisonChart(
 ) {
     val rows = tokenUsageComparisonRows(usage)
     val axisMaximum = rows.maxOf(TokenUsageComparisonRow::cumulativeTokens)
-    val previousColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
-    val latestColor = MaterialTheme.colorScheme.primary
-    val trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+    val previousColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.24f)
+    val latestColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.58f)
     Text("Token 用量", style = MaterialTheme.typography.titleMedium)
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -2292,14 +2291,10 @@ private fun TokenUsageComparisonChart(
                 Text(
                     "最近 ${formatCompactCount(row.latestTokens)}",
                     style = MaterialTheme.typography.labelSmall,
-                    color = latestColor,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Canvas(Modifier.fillMaxWidth().height(8.dp)) {
-                drawRoundRect(
-                    color = trackColor,
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2f),
-                )
+            Canvas(Modifier.fillMaxWidth().height(6.dp)) {
                 if (axisMaximum > 0L && row.cumulativeTokens > 0L) {
                     val cumulativeWidth = size.width * row.cumulativeTokens.toFloat() / axisMaximum.toFloat()
                     val previousWidth = size.width * row.previousTokens.toFloat() / axisMaximum.toFloat()
