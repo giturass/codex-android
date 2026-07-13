@@ -50,4 +50,36 @@ class RemoteFilePreviewTest {
         )
         assertNull(decodeRemoteText(byteArrayOf(0x41, 0x00, 0x42)))
     }
+
+    @Test
+    fun identifiesFormatsThatSupportOriginalImageSubSampling() {
+        assertTrue(
+            supportsBitmapRegionDecoding(
+                byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0x00),
+            ),
+        )
+        assertTrue(
+            supportsBitmapRegionDecoding(
+                byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A),
+            ),
+        )
+        assertTrue(supportsBitmapRegionDecoding("RIFF0000WEBP".toByteArray()))
+        assertFalse(supportsBitmapRegionDecoding("GIF89a".toByteArray()))
+    }
+
+    @Test
+    fun keepsOriginalPixelsForTilesAndBoundsUnsupportedBitmapsInMemory() {
+        assertEquals(
+            4,
+            bitmapPreviewSampleSize(width = 8_192, height = 4_096, supportsSubSampling = true),
+        )
+        assertEquals(
+            1,
+            bitmapPreviewSampleSize(width = 4_000, height = 2_000, supportsSubSampling = false),
+        )
+        assertEquals(
+            2,
+            bitmapPreviewSampleSize(width = 4_001, height = 2_000, supportsSubSampling = false),
+        )
+    }
 }

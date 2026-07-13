@@ -63,6 +63,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
+    implementation(libs.telephoto.subsampling)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.sqlite.framework)
     implementation(libs.material)

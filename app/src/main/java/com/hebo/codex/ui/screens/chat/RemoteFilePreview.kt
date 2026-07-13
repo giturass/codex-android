@@ -1,10 +1,12 @@
 package com.hebo.codex.ui.screens.chat
 
-import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.Picture
+import android.graphics.RectF
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.unit.IntSize
 import androidx.core.graphics.createBitmap
 import com.caverock.androidsvg.SVG
 import dev.snipme.highlights.model.SyntaxLanguage
@@ -24,7 +26,7 @@ internal suspend fun decodeRemotePreview(
     val declaredSvg = fileName.extension().equals("svg", ignoreCase = true)
     if (declaredSvg) return@withContext decodeSvgPreview(bytes)
 
-    decodeBitmap(bytes)?.let { return@withContext RemotePreview.Image(it) }
+    decodeBitmap(bytes)?.let { return@withContext it }
 
     val text = decodeRemoteText(bytes) ?: return@withContext RemotePreview.Unsupported
     if (text.looksLikeSvg()) return@withContext decodeSvgPreview(text)
@@ -44,25 +46,59 @@ internal suspend fun decodeRemotePreview(
     )
 }
 
-private fun decodeBitmap(bytes: ByteArray): ImageBitmap? {
+private fun decodeBitmap(bytes: ByteArray): RemotePreview.Image? {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
 
-    var sampleSize = 1
-    while (bounds.outWidth / sampleSize > MAX_IMAGE_PREVIEW_DIMENSION ||
-        bounds.outHeight / sampleSize > MAX_IMAGE_PREVIEW_DIMENSION
-    ) {
-        sampleSize *= 2
-    }
+    val supportsSubSampling = supportsBitmapRegionDecoding(bytes)
+    val sampleSize = bitmapPreviewSampleSize(
+        width = bounds.outWidth,
+        height = bounds.outHeight,
+        supportsSubSampling = supportsSubSampling,
+    )
     val bitmap = BitmapFactory.decodeByteArray(
         bytes,
         0,
         bytes.size,
         BitmapFactory.Options().apply { inSampleSize = sampleSize },
     ) ?: error("无法解码图片")
-    return bitmap.asImageBitmap()
+    return RemotePreview.Image(
+        preview = bitmap.asImageBitmap(),
+        encodedBytes = bytes.takeIf { supportsSubSampling },
+    )
 }
+
+internal fun bitmapPreviewSampleSize(
+    width: Int,
+    height: Int,
+    supportsSubSampling: Boolean,
+): Int {
+    require(width > 0 && height > 0)
+    var sampleSize = 1
+    if (supportsSubSampling) {
+        while (width / sampleSize > MAX_IMAGE_PREVIEW_DIMENSION ||
+            height / sampleSize > MAX_IMAGE_PREVIEW_DIMENSION
+        ) {
+            sampleSize *= 2
+        }
+    } else {
+        while ((width / sampleSize).toLong() * (height / sampleSize) > MAX_IN_MEMORY_IMAGE_PIXELS) {
+            sampleSize *= 2
+        }
+    }
+    return sampleSize
+}
+
+internal fun supportsBitmapRegionDecoding(bytes: ByteArray): Boolean =
+    bytes.startsWith(JPEG_SIGNATURE) ||
+        bytes.startsWith(PNG_SIGNATURE) ||
+        bytes.isWebp()
+
+private fun ByteArray.isWebp(): Boolean =
+    size >= 12 &&
+        copyOfRange(0, 4).contentEquals(RIFF_SIGNATURE) &&
+        copyOfRange(8, 12).contentEquals(WEBP_SIGNATURE)
 
 private fun decodeSvgPreview(bytes: ByteArray): RemotePreview.Svg {
     val text = decodeRemoteText(bytes) ?: error("SVG 不是 UTF-8 或带 BOM 的 UTF-16 文本")
@@ -73,14 +109,16 @@ private fun decodeSvgPreview(text: String): RemotePreview.Svg {
     require(!UNSAFE_XML_DECLARATION.containsMatchIn(text)) { "SVG 包含不允许的 DTD 或实体声明" }
     val svg = runCatching { SVG.getFromString(text) }
         .getOrElse { error -> throw IllegalArgumentException("无法解析 SVG：${error.message}", error) }
-    val bitmap = renderSvg(svg)
+    val rendered = renderSvg(svg)
     return RemotePreview.Svg(
-        bitmap = bitmap.asImageBitmap(),
+        picture = rendered.picture,
+        imageSize = rendered.imageSize,
+        preview = rendered.preview,
         source = text.toPreviewText(),
     )
 }
 
-private fun renderSvg(svg: SVG): Bitmap {
+private fun renderSvg(svg: SVG): RenderedSvg {
     val viewBox = svg.documentViewBox
     val documentWidth = svg.documentWidth.validDimension()
     val documentHeight = svg.documentHeight.validDimension()
@@ -99,18 +137,35 @@ private fun renderSvg(svg: SVG): Bitmap {
         documentHeight != null -> documentHeight to documentHeight
         else -> DEFAULT_SVG_PREVIEW_DIMENSION.toFloat() to DEFAULT_SVG_PREVIEW_DIMENSION.toFloat()
     }
-    val longestDimension = maxOf(sourceWidth, sourceHeight)
-    val scale = when {
-        longestDimension > MAX_IMAGE_PREVIEW_DIMENSION -> MAX_IMAGE_PREVIEW_DIMENSION / longestDimension
-        longestDimension < DEFAULT_SVG_PREVIEW_DIMENSION -> DEFAULT_SVG_PREVIEW_DIMENSION / longestDimension
+    val sourceLongestDimension = maxOf(sourceWidth, sourceHeight)
+    val sourceScale = when {
+        sourceLongestDimension > MAX_SVG_LOGICAL_DIMENSION -> MAX_SVG_LOGICAL_DIMENSION / sourceLongestDimension
+        sourceLongestDimension < DEFAULT_SVG_PREVIEW_DIMENSION ->
+            DEFAULT_SVG_PREVIEW_DIMENSION / sourceLongestDimension
+
         else -> 1f
     }
-    val width = (sourceWidth * scale).roundToInt().coerceIn(1, MAX_IMAGE_PREVIEW_DIMENSION)
-    val height = (sourceHeight * scale).roundToInt().coerceIn(1, MAX_IMAGE_PREVIEW_DIMENSION)
-    val bitmap = createBitmap(width, height)
-    Canvas(bitmap).drawPicture(svg.renderToPicture(width, height))
-    return bitmap
+    val imageSize = IntSize(
+        width = (sourceWidth * sourceScale).roundToInt().coerceIn(1, MAX_SVG_LOGICAL_DIMENSION),
+        height = (sourceHeight * sourceScale).roundToInt().coerceIn(1, MAX_SVG_LOGICAL_DIMENSION),
+    )
+    val picture = svg.renderToPicture(imageSize.width, imageSize.height)
+    val previewScale = (MAX_IMAGE_PREVIEW_DIMENSION / imageSize.maxDimension.toFloat()).coerceAtMost(1f)
+    val previewWidth = (imageSize.width * previewScale).roundToInt().coerceAtLeast(1)
+    val previewHeight = (imageSize.height * previewScale).roundToInt().coerceAtLeast(1)
+    val preview = createBitmap(previewWidth, previewHeight)
+    Canvas(preview).drawPicture(
+        picture,
+        RectF(0f, 0f, previewWidth.toFloat(), previewHeight.toFloat()),
+    )
+    return RenderedSvg(
+        picture = picture,
+        imageSize = imageSize,
+        preview = preview.asImageBitmap(),
+    )
 }
+
+private val IntSize.maxDimension: Int get() = maxOf(width, height)
 
 private fun Float.validDimension(): Float? = takeIf { it.isFinite() && it > 0f }
 
@@ -214,10 +269,15 @@ internal enum class TextPreviewKind {
 }
 
 internal sealed interface RemotePreview {
-    data class Image(val bitmap: ImageBitmap) : RemotePreview
+    data class Image(
+        val preview: ImageBitmap,
+        val encodedBytes: ByteArray?,
+    ) : RemotePreview
 
     data class Svg(
-        val bitmap: ImageBitmap,
+        val picture: Picture,
+        val imageSize: IntSize,
+        val preview: ImageBitmap,
         val source: PreviewText,
     ) : RemotePreview
 
@@ -230,6 +290,12 @@ internal sealed interface RemotePreview {
 
     data object Unsupported : RemotePreview
 }
+
+private data class RenderedSvg(
+    val picture: Picture,
+    val imageSize: IntSize,
+    val preview: ImageBitmap,
+)
 
 private val PRETTY_JSON = Json { prettyPrint = true }
 private val AUTO_PREVIEW_FILE_NAMES = setOf(
@@ -319,9 +385,24 @@ private val AUTO_PREVIEW_EXTENSIONS = setOf(
 private val UTF_8_BOM = byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte())
 private val UTF_16_LE_BOM = byteArrayOf(0xFF.toByte(), 0xFE.toByte())
 private val UTF_16_BE_BOM = byteArrayOf(0xFE.toByte(), 0xFF.toByte())
+private val JPEG_SIGNATURE = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte())
+private val PNG_SIGNATURE = byteArrayOf(
+    0x89.toByte(),
+    0x50,
+    0x4E,
+    0x47,
+    0x0D,
+    0x0A,
+    0x1A,
+    0x0A,
+)
+private val RIFF_SIGNATURE = "RIFF".toByteArray(Charsets.US_ASCII)
+private val WEBP_SIGNATURE = "WEBP".toByteArray(Charsets.US_ASCII)
 private val SVG_ROOT = Regex("^(?:\\s|<\\?xml.*?\\?>|<!--.*?-->)*<svg(?:\\s|>)", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
 private val UNSAFE_XML_DECLARATION = Regex("<!\\s*(?:DOCTYPE|ENTITY)\\b", RegexOption.IGNORE_CASE)
 private const val SVG_PREAMBLE_LIMIT = 4_096
 private const val DEFAULT_SVG_PREVIEW_DIMENSION = 512
 private const val MAX_IMAGE_PREVIEW_DIMENSION = 2_048
+private const val MAX_SVG_LOGICAL_DIMENSION = 32_768
+private const val MAX_IN_MEMORY_IMAGE_PIXELS = 8_000_000L
 private const val MAX_TEXT_PREVIEW_CHARACTERS = 1_000_000

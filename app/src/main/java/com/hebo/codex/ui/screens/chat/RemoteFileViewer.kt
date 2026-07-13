@@ -7,7 +7,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -56,7 +55,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -102,6 +100,7 @@ internal fun RemoteFileSheet(
     var isOpening by remember(target.path) { mutableStateOf(false) }
     var actionError by remember(target.path) { mutableStateOf<String?>(null) }
     var expansionPhase by remember(target.path) { mutableStateOf(ContentExpansionPhase.COLLAPSED) }
+    var isPreviewZoomed by remember(target.path) { mutableStateOf(false) }
     val previewContentTarget = when (val preview = previewState) {
         is RemoteLoadState.Ready -> preview.value != RemotePreview.Unsupported
         RemoteLoadState.Idle, RemoteLoadState.Loading, is RemoteLoadState.Failed -> false
@@ -203,6 +202,7 @@ internal fun RemoteFileSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
+        sheetGesturesEnabled = !isPreviewZoomed,
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
         Column(
@@ -280,6 +280,7 @@ internal fun RemoteFileSheet(
                                         target = target,
                                         onOpenRemoteFile = onOpenRemoteFile,
                                         onLinkError = onLinkError,
+                                        onZoomedChange = { isPreviewZoomed = it },
                                     )
                                 }
                             }
@@ -423,16 +424,16 @@ private fun RemotePreviewContent(
     target: RemoteFileTarget,
     onOpenRemoteFile: (RemoteFileTarget) -> Unit,
     onLinkError: (String) -> Unit,
+    onZoomedChange: (Boolean) -> Unit,
 ) {
     when (preview) {
-        is RemotePreview.Image -> Image(
-            bitmap = preview.bitmap,
+        is RemotePreview.Image -> ZoomableRemoteImage(
+            image = preview,
             contentDescription = target.path.remoteFileName(),
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Fit,
+            onZoomedChange = onZoomedChange,
         )
 
-        is RemotePreview.Svg -> SvgFilePreview(preview, target.line)
+        is RemotePreview.Svg -> SvgFilePreview(preview, target.line, onZoomedChange)
         is RemotePreview.Text -> TextFilePreview(
             preview = preview,
             target = target,
@@ -450,7 +451,11 @@ private fun RemotePreviewContent(
 }
 
 @Composable
-private fun SvgFilePreview(preview: RemotePreview.Svg, targetLine: Int?) {
+private fun SvgFilePreview(
+    preview: RemotePreview.Svg,
+    targetLine: Int?,
+    onZoomedChange: (Boolean) -> Unit,
+) {
     var showSource by remember(preview, targetLine) { mutableStateOf(targetLine != null) }
     Column(Modifier.fillMaxSize()) {
         PreviewModeSelector(
@@ -461,11 +466,10 @@ private fun SvgFilePreview(preview: RemotePreview.Svg, targetLine: Int?) {
         if (showSource) {
             SourceTextPreview(preview.source, targetLine, language = null)
         } else {
-            Image(
-                bitmap = preview.bitmap,
+            ZoomableRemoteSvg(
+                svg = preview,
                 contentDescription = "SVG 预览",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit,
+                onZoomedChange = onZoomedChange,
             )
         }
     }
