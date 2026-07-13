@@ -184,6 +184,7 @@ sealed interface ConversationItem {
     data class Activity(
         override val id: String,
         override val turnId: String,
+        val kind: ActivityKind,
         val title: String,
         val summary: String? = null,
         val details: String = "",
@@ -191,6 +192,21 @@ sealed interface ConversationItem {
         val remotePath: String? = null,
         val status: ActivityStatus,
     ) : ConversationItem
+}
+
+enum class ActivityKind {
+    MCP_TOOL,
+    DYNAMIC_TOOL,
+    COLLAB_AGENT,
+    WEB_SEARCH,
+    CONTEXT_COMPACTION,
+    REVIEW,
+    HOOK,
+    SUB_AGENT,
+    IMAGE_VIEW,
+    IMAGE_GENERATION,
+    WAIT,
+    UNKNOWN,
 }
 
 data class RemoteFileMetadata(

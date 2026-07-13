@@ -1,5 +1,6 @@
 package com.hebo.codex.data.remote
 
+import com.hebo.codex.domain.ActivityKind
 import com.hebo.codex.domain.ActivityStatus
 import com.hebo.codex.domain.CommandAction
 import com.hebo.codex.domain.ConversationItem
@@ -206,8 +207,9 @@ class ProtocolMapperTest {
         val mapped = ProtocolMapper.conversationItem(item, "turn-1", isCompleted = true)
             as ConversationItem.Activity
 
-        assertEquals("网页搜索", mapped.title)
-        assertEquals("搜索：Compose Material 3", mapped.summary)
+        assertEquals(ActivityKind.WEB_SEARCH, mapped.kind)
+        assertEquals("Compose Material 3", mapped.title)
+        assertEquals(null, mapped.summary)
         assertTrue(mapped.technicalDetails.orEmpty().contains("webSearch"))
     }
 
@@ -229,7 +231,9 @@ class ProtocolMapperTest {
         ) as ConversationItem.Activity
 
         assertEquals("/workspace/chart.png", imageView.remotePath)
+        assertEquals(ActivityKind.IMAGE_VIEW, imageView.kind)
         assertEquals("/workspace/generated.png", imageGeneration.remotePath)
+        assertEquals(ActivityKind.IMAGE_GENERATION, imageGeneration.kind)
         assertFalse(imageGeneration.technicalDetails.orEmpty().contains("data:image"))
     }
 
@@ -241,13 +245,13 @@ class ProtocolMapperTest {
               "id":"open-page-1",
               "query":"Compose Material 3",
               "action":{"type":"openPage","url":"https://developer.android.com/compose"}
-            }""" to "打开页面：https://developer.android.com/compose",
+            }""" to "https://developer.android.com/compose",
             """{
               "type":"webSearch",
               "id":"find-in-page-1",
               "query":"Compose Material 3",
               "action":{"type":"findInPage","pattern":"MaterialTheme"}
-            }""" to "在页面中查找：MaterialTheme",
+            }""" to "MaterialTheme",
         )
 
         cases.forEach { (payload, expectedSummary) ->
@@ -257,7 +261,7 @@ class ProtocolMapperTest {
                 isCompleted = true,
             ) as ConversationItem.Activity
 
-            assertEquals(expectedSummary, mapped.summary)
+            assertEquals(expectedSummary, mapped.title)
         }
     }
 

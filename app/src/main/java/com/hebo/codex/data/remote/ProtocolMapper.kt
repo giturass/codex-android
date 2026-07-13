@@ -1,5 +1,6 @@
 package com.hebo.codex.data.remote
 
+import com.hebo.codex.domain.ActivityKind
 import com.hebo.codex.domain.ActivityStatus
 import com.hebo.codex.domain.ChangedFile
 import com.hebo.codex.domain.CommandAction
@@ -231,8 +232,9 @@ object ProtocolMapper {
             "mcpToolCall" -> genericActivity(
                 item = item,
                 turnId = turnId,
-                title = "MCP 工具 · ${item.requiredString("tool")}",
-                summary = "来自 ${item.requiredString("server")}",
+                kind = ActivityKind.MCP_TOOL,
+                title = item.requiredString("tool"),
+                summary = item.requiredString("server"),
                 details = (item["error"] as? JsonObject)?.optionalString("message").orEmpty(),
                 technicalDetails = item.compactText(),
                 isCompleted = isCompleted,
@@ -241,8 +243,9 @@ object ProtocolMapper {
             "dynamicToolCall" -> genericActivity(
                 item = item,
                 turnId = turnId,
-                title = "工具 · ${item.requiredString("tool")}",
-                summary = item.optionalString("namespace")?.let { "命名空间 $it" },
+                kind = ActivityKind.DYNAMIC_TOOL,
+                title = item.requiredString("tool"),
+                summary = item.optionalString("namespace"),
                 details = item.dynamicToolOutputText(),
                 technicalDetails = item.compactText(),
                 isCompleted = isCompleted,
@@ -251,6 +254,7 @@ object ProtocolMapper {
             "collabAgentToolCall" -> genericActivity(
                 item = item,
                 turnId = turnId,
+                kind = ActivityKind.COLLAB_AGENT,
                 title = collabActivityTitle(item.requiredString("tool")),
                 summary = item.optionalString("prompt"),
                 technicalDetails = item.compactText(),
@@ -260,8 +264,8 @@ object ProtocolMapper {
             "webSearch" -> genericActivity(
                 item = item,
                 turnId = turnId,
-                title = "网页搜索",
-                summary = webSearchSummary(item),
+                kind = ActivityKind.WEB_SEARCH,
+                title = webSearchTitle(item),
                 technicalDetails = item.compactText(),
                 isCompleted = isCompleted,
             )
@@ -269,6 +273,7 @@ object ProtocolMapper {
             "contextCompaction" -> ConversationItem.Activity(
                 id = id,
                 turnId = turnId,
+                kind = ActivityKind.CONTEXT_COMPACTION,
                 title = "压缩上下文",
                 details = "",
                 status = if (isCompleted) ActivityStatus.COMPLETED else ActivityStatus.IN_PROGRESS,
@@ -277,6 +282,7 @@ object ProtocolMapper {
             "enteredReviewMode", "exitedReviewMode" -> ConversationItem.Activity(
                 id = id,
                 turnId = turnId,
+                kind = ActivityKind.REVIEW,
                 title = if (type == "enteredReviewMode") "进入审查" else "完成审查",
                 details = item.optionalString("review").orEmpty(),
                 status = if (isCompleted) ActivityStatus.COMPLETED else ActivityStatus.IN_PROGRESS,
@@ -285,6 +291,7 @@ object ProtocolMapper {
             "hookPrompt" -> genericActivity(
                 item = item,
                 turnId = turnId,
+                kind = ActivityKind.HOOK,
                 title = "Hook 提示",
                 details = item.requiredArray("fragments").joinToString("\n") { fragment ->
                     fragment.jsonObject.requiredString("text")
@@ -296,9 +303,9 @@ object ProtocolMapper {
             "subAgentActivity" -> genericActivity(
                 item = item,
                 turnId = turnId,
-                title = "子代理活动",
-                summary = subAgentActivitySummary(item.requiredString("kind")),
-                details = item.requiredString("agentPath"),
+                kind = ActivityKind.SUB_AGENT,
+                title = subAgentActivityTitle(item.requiredString("kind")),
+                summary = item.requiredString("agentPath"),
                 technicalDetails = item.compactText(),
                 isCompleted = isCompleted,
             )
@@ -306,8 +313,8 @@ object ProtocolMapper {
             "imageView" -> genericActivity(
                 item = item,
                 turnId = turnId,
-                title = "查看图片",
-                summary = item.requiredString("path").fileName(),
+                kind = ActivityKind.IMAGE_VIEW,
+                title = item.requiredString("path").fileName(),
                 details = item.requiredString("path"),
                 remotePath = item.requiredString("path"),
                 isCompleted = isCompleted,
@@ -316,6 +323,7 @@ object ProtocolMapper {
             "imageGeneration" -> genericActivity(
                 item = item,
                 turnId = turnId,
+                kind = ActivityKind.IMAGE_GENERATION,
                 title = "生成图片",
                 summary = item.optionalString("revisedPrompt"),
                 details = item.optionalString("savedPath").orEmpty(),
@@ -327,14 +335,15 @@ object ProtocolMapper {
             "sleep" -> genericActivity(
                 item = item,
                 turnId = turnId,
-                title = "等待",
-                summary = formatDurationMillis(item.requiredLong("durationMs")),
+                kind = ActivityKind.WAIT,
+                title = formatDurationMillis(item.requiredLong("durationMs")),
                 isCompleted = isCompleted,
             )
 
             else -> genericActivity(
                 item = item,
                 turnId = turnId,
+                kind = ActivityKind.UNKNOWN,
                 title = "未知活动",
                 summary = "客户端尚未支持此类活动",
                 technicalDetails = item.compactText(),
@@ -346,6 +355,7 @@ object ProtocolMapper {
     private fun genericActivity(
         item: JsonObject,
         turnId: String,
+        kind: ActivityKind,
         title: String,
         summary: String? = null,
         details: String = "",
@@ -355,6 +365,7 @@ object ProtocolMapper {
     ) = ConversationItem.Activity(
         id = item.requiredString("id"),
         turnId = turnId,
+        kind = kind,
         title = title,
         summary = summary,
         details = details,
@@ -455,21 +466,21 @@ object ProtocolMapper {
         else -> throw ProtocolException("未知协作代理操作：$tool")
     }
 
-    private fun subAgentActivitySummary(kind: String): String = when (kind) {
+    private fun subAgentActivityTitle(kind: String): String = when (kind) {
         "started" -> "子代理已启动"
         "interacted" -> "子代理正在交互"
         "interrupted" -> "子代理已中断"
         else -> throw ProtocolException("未知子代理活动：$kind")
     }
 
-    private fun webSearchSummary(item: JsonObject): String {
+    private fun webSearchTitle(item: JsonObject): String {
         val query = item.requiredString("query")
-        val action = item["action"] as? JsonObject ?: return "搜索：$query"
+        val action = item["action"] as? JsonObject ?: return query
         return when (action.requiredString("type")) {
-            "search" -> action.optionalString("query")?.let { "搜索：$it" } ?: "搜索：$query"
-            "openPage" -> action.optionalString("url")?.let { "打开页面：$it" } ?: "打开搜索结果"
-            "findInPage" -> action.optionalString("pattern")?.let { "在页面中查找：$it" } ?: "在页面中查找"
-            "other" -> "处理搜索结果"
+            "search" -> action.optionalString("query") ?: query
+            "openPage" -> action.optionalString("url") ?: "搜索结果"
+            "findInPage" -> action.optionalString("pattern") ?: "页面内容"
+            "other" -> query
             else -> throw ProtocolException("未知网页搜索操作：${action.requiredString("type")}")
         }
     }

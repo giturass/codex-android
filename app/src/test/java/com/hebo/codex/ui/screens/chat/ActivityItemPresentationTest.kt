@@ -1,5 +1,6 @@
 package com.hebo.codex.ui.screens.chat
 
+import com.hebo.codex.domain.ActivityKind
 import com.hebo.codex.domain.ActivityStatus
 import com.hebo.codex.domain.ChangedFile
 import com.hebo.codex.domain.ConversationItem
@@ -22,7 +23,7 @@ class ActivityItemPresentationTest {
             status = ActivityStatus.FAILED,
         )
 
-        assertEquals("执行失败 · ./gradlew test", activityItemTitle(item))
+        assertEquals("./gradlew test · 失败", activityItemTitle(item))
     }
 
     @Test
@@ -37,7 +38,7 @@ class ActivityItemPresentationTest {
             status = ActivityStatus.IN_PROGRESS,
         )
 
-        assertEquals("正在执行 ./gradlew test --stacktrace", activityItemTitle(item))
+        assertEquals("./gradlew test --stacktrace", activityItemTitle(item))
     }
 
     @Test
@@ -52,7 +53,7 @@ class ActivityItemPresentationTest {
             status = ActivityStatus.FAILED,
         )
 
-        assertEquals("修改失败 · 2 个文件", activityItemTitle(item))
+        assertEquals("2 个文件 · 失败", activityItemTitle(item))
     }
 
     @Test
@@ -75,11 +76,41 @@ class ActivityItemPresentationTest {
         val item = ConversationItem.Activity(
             id = "activity",
             turnId = "turn",
+            kind = ActivityKind.IMAGE_GENERATION,
             title = "生成图片",
             remotePath = "/tmp/image.png",
             status = ActivityStatus.COMPLETED,
         )
 
         assertTrue(activityItemHasDetails(item))
+    }
+
+    @Test
+    fun `单个文件标题直接显示路径`() {
+        val item = ConversationItem.FileChange(
+            id = "change",
+            turnId = "turn",
+            changes = listOf(
+                ChangedFile(path = "src/Main.kt", kind = FileChangeKind.Update(movePath = null), diff = ""),
+            ),
+            status = ActivityStatus.COMPLETED,
+        )
+
+        assertEquals("src/Main.kt", activityItemTitle(item))
+    }
+
+    @Test
+    fun `通用活动摘要作为次级文字`() {
+        val item = ConversationItem.Activity(
+            id = "activity",
+            turnId = "turn",
+            kind = ActivityKind.MCP_TOOL,
+            title = "fetch",
+            summary = "github",
+            status = ActivityStatus.COMPLETED,
+        )
+
+        assertEquals("fetch", activityItemTitle(item))
+        assertEquals("github", activityItemSubtitle(item))
     }
 }

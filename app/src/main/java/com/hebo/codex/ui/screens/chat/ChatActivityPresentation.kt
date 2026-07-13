@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -25,22 +26,35 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.FactCheck
+import androidx.compose.material.icons.automirrored.rounded.HelpOutline
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.rounded.AccountTree
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Block
-import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Checklist
+import androidx.compose.material.icons.rounded.Compress
+import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.HourglassTop
+import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.Psychology
+import androidx.compose.material.icons.rounded.SmartToy
+import androidx.compose.material.icons.rounded.Terminal
+import androidx.compose.material.icons.rounded.TravelExplore
 import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.Webhook
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -54,12 +68,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.hebo.codex.domain.ActivityKind
 import com.hebo.codex.domain.ActivityStatus
 import com.hebo.codex.domain.ChangedFile
 import com.hebo.codex.domain.ConversationItem
@@ -210,8 +226,12 @@ private fun ActivityDetailsSheet(
     onOpenRemotePath: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+    val sheetState = rememberBottomSheetState(
+        initialValue = SheetValue.Hidden,
+        enabledValues = setOf(SheetValue.Hidden, SheetValue.PartiallyExpanded, SheetValue.Expanded),
+    )
     var expandedItemKeys by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
+    val maxSheetHeight = LocalConfiguration.current.screenHeightDp.dp * 0.88f
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -220,7 +240,7 @@ private fun ActivityDetailsSheet(
         Column(
             Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.88f)
+                .heightIn(max = maxSheetHeight)
                 .navigationBarsPadding(),
         ) {
             Text(
@@ -230,7 +250,7 @@ private fun ActivityDetailsSheet(
                 textAlign = TextAlign.Center,
             )
             LazyColumn(
-                modifier = Modifier.fillMaxWidth().weight(1f),
+                modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
                     start = 20.dp,
                     top = 22.dp,
@@ -241,7 +261,7 @@ private fun ActivityDetailsSheet(
                 items.forEachIndexed { index, item ->
                     val itemKey = "${item.turnId}:${item.id}"
                     val expanded = itemKey in expandedItemKeys
-                    stickyHeader(key = "$itemKey:header") {
+                    item(key = itemKey) {
                         ActivityTimelineHeader(
                             item = item,
                             isLast = index == items.lastIndex,
@@ -252,8 +272,6 @@ private fun ActivityDetailsSheet(
                                 }
                             },
                         )
-                    }
-                    item(key = "$itemKey:body") {
                         ActivityTimelineBody(
                             item = item,
                             isLast = index == items.lastIndex,
@@ -280,33 +298,37 @@ private fun ActivityTimelineHeader(
         animationSpec = tween(EXPANDABLE_CONTENT_FADE_DURATION_MILLIS),
         label = "处理过程详情展开箭头",
     )
+    val statusDescription = buildString {
+        append(activityStatusDescription(item.activityStatus()))
+        if (hasDetails) append(if (expanded) "，已展开" else "，已收起")
+    }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = 48.dp)
             .height(IntrinsicSize.Min)
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
             .then(
                 if (hasDetails) {
                     Modifier
                         .clickable(role = Role.Button, onClick = onToggle)
-                        .semantics {
-                            stateDescription = if (expanded) "已展开" else "已收起"
-                        }
                 } else {
                     Modifier
                 },
-            ),
+            )
+            .semantics(mergeDescendants = true) {
+                stateDescription = statusDescription
+            },
         verticalAlignment = Alignment.Top,
     ) {
         Box(
             modifier = Modifier
-                .width(28.dp)
+                .width(30.dp)
                 .fillMaxHeight(),
             contentAlignment = Alignment.TopCenter,
         ) {
             if (!isLast) {
-                ActivityTimelineConnector(Modifier.padding(top = 26.dp))
+                ActivityTimelineConnector(Modifier.padding(top = 30.dp))
             }
             ActivityTimelineIcon(item)
         }
@@ -315,13 +337,23 @@ private fun ActivityTimelineHeader(
             modifier = Modifier.weight(1f),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = activityItemTitle(item),
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodyLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = activityItemTitle(item),
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                activityItemSubtitle(item)?.let { subtitle ->
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
             if (hasDetails) {
                 Spacer(Modifier.width(8.dp))
                 Icon(
@@ -375,7 +407,7 @@ private fun ActivityTimelineBody(
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
         Box(
             modifier = Modifier
-                .width(28.dp)
+                .width(30.dp)
                 .fillMaxHeight(),
             contentAlignment = Alignment.TopCenter,
         ) {
@@ -400,7 +432,7 @@ private fun ActivityTimelineBody(
                     ActivityItemDetails(item, onOpenRemotePath)
                 }
             }
-            if (!isLast) Spacer(Modifier.height(22.dp))
+            if (!isLast && expansionPhase.bodyIncluded) Spacer(Modifier.height(16.dp))
         }
     }
 }
@@ -418,55 +450,137 @@ private fun ActivityTimelineConnector(modifier: Modifier = Modifier) {
 @Composable
 private fun ActivityTimelineIcon(item: ConversationItem) {
     val status = item.activityStatus()
-    val icon: ImageVector = when (status) {
-        ActivityStatus.IN_PROGRESS -> Icons.Rounded.HourglassTop
-        ActivityStatus.COMPLETED -> Icons.Rounded.Check
-        ActivityStatus.FAILED -> Icons.Rounded.ErrorOutline
-        ActivityStatus.DECLINED -> Icons.Rounded.Block
-    }
+    val icon = activityTypeIcon(item)
     val tint = when (status) {
         ActivityStatus.IN_PROGRESS -> MaterialTheme.colorScheme.onSurfaceVariant
         ActivityStatus.COMPLETED -> MaterialTheme.colorScheme.onSurfaceVariant
         ActivityStatus.FAILED, ActivityStatus.DECLINED -> MaterialTheme.colorScheme.error
     }
-    Surface(
-        modifier = Modifier.size(26.dp),
-        shape = CircleShape,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        contentColor = tint,
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
+    Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
+        Surface(
+            modifier = Modifier.size(26.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = tint,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    icon,
+                    contentDescription = activityTypeDescription(item),
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        }
+        if (status == ActivityStatus.IN_PROGRESS) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(30.dp),
+                color = MaterialTheme.colorScheme.primary,
+                strokeWidth = 2.dp,
+            )
+        }
+        if (status == ActivityStatus.FAILED || status == ActivityStatus.DECLINED) {
+            Surface(
+                modifier = Modifier.align(Alignment.BottomEnd).size(12.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.error,
+                contentColor = MaterialTheme.colorScheme.onError,
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        if (status == ActivityStatus.FAILED) Icons.Rounded.ErrorOutline else Icons.Rounded.Block,
+                        contentDescription = null,
+                        modifier = Modifier.size(9.dp),
+                    )
+                }
+            }
         }
     }
 }
 
-internal fun activityItemTitle(item: ConversationItem): String = when (item) {
-    is ConversationItem.Reasoning -> when {
-        item.isStreaming -> "正在分析"
-        item.summary.isNotBlank() -> item.summary
-        else -> "分析与推理"
+private fun activityTypeIcon(item: ConversationItem): ImageVector = when (item) {
+    is ConversationItem.Reasoning -> Icons.Rounded.Psychology
+    is ConversationItem.Plan -> Icons.Rounded.Checklist
+    is ConversationItem.CommandExecution -> Icons.Rounded.Terminal
+    is ConversationItem.FileChange -> Icons.Rounded.EditNote
+    is ConversationItem.Activity -> when (item.kind) {
+        ActivityKind.MCP_TOOL, ActivityKind.DYNAMIC_TOOL -> Icons.Rounded.Extension
+        ActivityKind.COLLAB_AGENT -> Icons.Rounded.AccountTree
+        ActivityKind.WEB_SEARCH -> Icons.Rounded.TravelExplore
+        ActivityKind.CONTEXT_COMPACTION -> Icons.Rounded.Compress
+        ActivityKind.REVIEW -> Icons.AutoMirrored.Rounded.FactCheck
+        ActivityKind.HOOK -> Icons.Rounded.Webhook
+        ActivityKind.SUB_AGENT -> Icons.Rounded.SmartToy
+        ActivityKind.IMAGE_VIEW -> Icons.Rounded.Image
+        ActivityKind.IMAGE_GENERATION -> Icons.Rounded.AutoAwesome
+        ActivityKind.WAIT -> Icons.Rounded.HourglassTop
+        ActivityKind.UNKNOWN -> Icons.AutoMirrored.Rounded.HelpOutline
     }
 
-    is ConversationItem.Plan -> if (item.isStreaming) "正在制定计划" else "执行计划"
+    is ConversationItem.UserMessage, is ConversationItem.AgentMessage -> Icons.AutoMirrored.Rounded.HelpOutline
+}
 
-    is ConversationItem.CommandExecution -> when (item.status) {
-        ActivityStatus.IN_PROGRESS -> "正在执行 ${item.command.commandPreview()}"
-        ActivityStatus.COMPLETED -> "执行 ${item.command.commandPreview()}"
-        ActivityStatus.FAILED -> "执行失败 · ${item.command.commandPreview()}"
-        ActivityStatus.DECLINED -> "未执行 · ${item.command.commandPreview()}"
+private fun activityTypeDescription(item: ConversationItem): String = when (item) {
+    is ConversationItem.Reasoning -> "分析推理"
+    is ConversationItem.Plan -> "计划"
+    is ConversationItem.CommandExecution -> "命令"
+    is ConversationItem.FileChange -> "文件修改"
+    is ConversationItem.Activity -> when (item.kind) {
+        ActivityKind.MCP_TOOL, ActivityKind.DYNAMIC_TOOL -> "工具调用"
+        ActivityKind.COLLAB_AGENT -> "协作代理"
+        ActivityKind.WEB_SEARCH -> "网页搜索"
+        ActivityKind.CONTEXT_COMPACTION -> "上下文压缩"
+        ActivityKind.REVIEW -> "审查"
+        ActivityKind.HOOK -> "Hook"
+        ActivityKind.SUB_AGENT -> "子代理"
+        ActivityKind.IMAGE_VIEW -> "图片"
+        ActivityKind.IMAGE_GENERATION -> "图片生成"
+        ActivityKind.WAIT -> "等待"
+        ActivityKind.UNKNOWN -> "未知活动"
     }
 
-    is ConversationItem.FileChange -> when (item.status) {
-        ActivityStatus.IN_PROGRESS -> "正在修改 ${item.changes.size} 个文件"
-        ActivityStatus.COMPLETED -> "修改 ${item.changes.size} 个文件"
-        ActivityStatus.FAILED -> "修改失败 · ${item.changes.size} 个文件"
-        ActivityStatus.DECLINED -> "修改已取消 · ${item.changes.size} 个文件"
-    }
-
-    is ConversationItem.Activity -> item.title
     is ConversationItem.UserMessage -> "用户消息"
     is ConversationItem.AgentMessage -> "Codex 回复"
+}
+
+private fun activityStatusDescription(status: ActivityStatus): String = when (status) {
+    ActivityStatus.IN_PROGRESS -> "进行中"
+    ActivityStatus.COMPLETED -> "已完成"
+    ActivityStatus.FAILED -> "失败"
+    ActivityStatus.DECLINED -> "已取消"
+}
+
+internal fun activityItemTitle(item: ConversationItem): String {
+    val title = when (item) {
+        is ConversationItem.Reasoning -> item.summary
+            .lineSequence()
+            .lastOrNull(String::isNotBlank)
+            ?.trim()
+            ?: "分析与推理"
+
+        is ConversationItem.Plan -> "计划"
+
+        is ConversationItem.CommandExecution -> item.command.commandPreview()
+
+        is ConversationItem.FileChange -> item.changes
+            .map(::changedFileLabel)
+            .map(ChangedFileLabel::path)
+            .distinct()
+            .let { paths -> paths.singleOrNull() ?: "${paths.size} 个文件" }
+
+        is ConversationItem.Activity -> item.title
+        is ConversationItem.UserMessage -> "用户消息"
+        is ConversationItem.AgentMessage -> "Codex 回复"
+    }
+    return when (item.activityStatus()) {
+        ActivityStatus.IN_PROGRESS, ActivityStatus.COMPLETED -> title
+        ActivityStatus.FAILED -> "$title · 失败"
+        ActivityStatus.DECLINED -> "$title · 已取消"
+    }
+}
+
+internal fun activityItemSubtitle(item: ConversationItem): String? = when (item) {
+    is ConversationItem.Activity -> item.summary?.takeIf(String::isNotBlank)
+    else -> null
 }
 
 internal fun activityItemHasDetails(item: ConversationItem): Boolean = when (item) {
