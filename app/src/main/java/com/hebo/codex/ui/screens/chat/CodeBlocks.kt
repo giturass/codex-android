@@ -54,16 +54,17 @@ import kotlinx.coroutines.withContext
 @Composable
 internal fun ShellCommandBlock(command: String) {
     val darkTheme = isSystemInDarkTheme()
+    val displayCommand = remember(command) { shellCommandForDisplay(command) }
     val highlightedCommand by produceState(
-        initialValue = AnnotatedString(command),
-        key1 = command,
+        initialValue = AnnotatedString(displayCommand),
+        key1 = displayCommand,
         key2 = darkTheme,
     ) {
         value = withContext(Dispatchers.Default) {
-            buildShellHighlightedText(command, darkTheme)
+            buildShellHighlightedText(displayCommand, darkTheme)
         }
     }
-    CodeTextSurface(highlightedCommand, title = "完整命令")
+    CodeTextSurface(highlightedCommand, title = "命令")
 }
 
 @Composable

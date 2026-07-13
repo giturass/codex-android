@@ -26,6 +26,21 @@ class ActivityItemPresentationTest {
     }
 
     @Test
+    fun `命令标题隐藏 shell 执行包装`() {
+        val item = ConversationItem.CommandExecution(
+            id = "command",
+            turnId = "turn",
+            command = "/usr/bin/zsh -lc \"./gradlew test --stacktrace\"",
+            cwd = "/workspace",
+            output = "",
+            exitCode = null,
+            status = ActivityStatus.IN_PROGRESS,
+        )
+
+        assertEquals("正在执行 ./gradlew test --stacktrace", activityItemTitle(item))
+    }
+
+    @Test
     fun `失败文件修改标题保留文件数量`() {
         val item = ConversationItem.FileChange(
             id = "change",

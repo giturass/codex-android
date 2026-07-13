@@ -598,4 +598,10 @@ private fun changedFileLabel(change: ChangedFile): ChangedFileLabel = when (val 
 }
 
 private fun String.commandPreview(): String =
-    lineSequence().firstOrNull()?.trim()?.take(56).orEmpty().ifBlank { "命令" }
+    shellCommandForDisplay(this)
+        .lineSequence()
+        .firstOrNull()
+        ?.trim()
+        ?.take(56)
+        .orEmpty()
+        .ifBlank { "命令" }
