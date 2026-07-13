@@ -4,6 +4,9 @@ package com.hebo.codex.ui.screens.chat
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -50,6 +53,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -60,6 +64,7 @@ import com.hebo.codex.domain.RemoteFileMetadata
 import com.hebo.codex.util.runSuspendCatching
 import dev.snipme.highlights.model.SyntaxLanguage
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.OutputStream
@@ -90,6 +95,16 @@ internal fun RemoteFileSheet(
     var isSaving by remember(target.path) { mutableStateOf(false) }
     var isOpening by remember(target.path) { mutableStateOf(false) }
     var actionError by remember(target.path) { mutableStateOf<String?>(null) }
+    var expansionPhase by remember(target.path) { mutableStateOf(ContentExpansionPhase.COLLAPSED) }
+    val previewContentTarget = when (val preview = previewState) {
+        is RemoteLoadState.Ready -> preview.value != RemotePreview.Unsupported
+        RemoteLoadState.Idle, RemoteLoadState.Loading, is RemoteLoadState.Failed -> false
+    }
+    val previewAlpha by animateFloatAsState(
+        targetValue = if (expansionPhase.bodyVisible) 1f else 0f,
+        animationSpec = tween(EXPANDABLE_CONTENT_FADE_DURATION_MILLIS),
+        label = "远程文件预览透明度",
+    )
 
     val saveLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument(mimeType),
@@ -137,12 +152,46 @@ internal fun RemoteFileSheet(
         }
     }
 
+    suspend fun loadPreview() {
+        previewState = RemoteLoadState.Loading
+        previewState = runSuspendCatching {
+            val bytes = loadedBytes ?: readPreview(target.path).also { loadedBytes = it }
+            decodeRemotePreview(bytes, fileName)
+        }.fold(
+            onSuccess = { RemoteLoadState.Ready(it) },
+            onFailure = { RemoteLoadState.Failed(it.message ?: "无法预览文件") },
+        )
+    }
+
     LaunchedEffect(target.path) {
-        metadataState = runSuspendCatching { getMetadata(target.path) }
+        val result = runSuspendCatching { getMetadata(target.path) }
             .fold(
                 onSuccess = { RemoteLoadState.Ready(it) },
                 onFailure = { RemoteLoadState.Failed(it.message ?: "无法读取文件信息") },
             )
+        metadataState = result
+        if (result is RemoteLoadState.Ready && result.value.isFile && shouldAutoPreviewRemoteFile(fileName)) {
+            loadPreview()
+        }
+    }
+
+    LaunchedEffect(previewContentTarget) {
+        expansionPhase = expansionPhase.startTransition(previewContentTarget)
+        when (expansionPhase) {
+            ContentExpansionPhase.EXPANDING -> {
+                delay(EXPANDABLE_CONTENT_SIZE_ANIMATION_DURATION_MILLIS.toLong())
+                expansionPhase = expansionPhase.settle()
+            }
+
+            ContentExpansionPhase.COLLAPSING -> {
+                delay(EXPANDABLE_CONTENT_FADE_DURATION_MILLIS.toLong())
+                expansionPhase = expansionPhase.settle()
+            }
+
+            ContentExpansionPhase.COLLAPSED,
+            ContentExpansionPhase.EXPANDED,
+            -> Unit
+        }
     }
 
     ModalBottomSheet(
@@ -152,7 +201,10 @@ internal fun RemoteFileSheet(
         Column(
             Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.9f)
+                .animateContentSize(
+                    animationSpec = tween(EXPANDABLE_CONTENT_SIZE_ANIMATION_DURATION_MILLIS),
+                )
+                .then(if (expansionPhase.bodyIncluded) Modifier.fillMaxHeight(0.9f) else Modifier)
                 .navigationBarsPadding()
                 .padding(horizontal = 20.dp),
         ) {
@@ -183,16 +235,21 @@ internal fun RemoteFileSheet(
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Spacer(Modifier.height(12.dp))
 
             when (val metadata = metadataState) {
-                RemoteLoadState.Idle, RemoteLoadState.Loading -> LoadingArea("正在读取文件信息")
-                is RemoteLoadState.Failed -> ErrorArea(metadata.message)
+                RemoteLoadState.Idle, RemoteLoadState.Loading -> CompactLoadingArea("正在读取文件信息")
+                is RemoteLoadState.Failed -> CompactMessage(metadata.message, isError = true)
                 is RemoteLoadState.Ready -> {
                     if (!metadata.value.isFile) {
-                        ErrorArea(if (metadata.value.isDirectory) "链接目标是目录" else "链接目标不是普通文件")
+                        CompactMessage(
+                            if (metadata.value.isDirectory) "链接目标是目录" else "链接目标不是普通文件",
+                            isError = true,
+                        )
                     } else {
                         if (metadata.value.isSymlink) {
                             Text(
@@ -202,17 +259,31 @@ internal fun RemoteFileSheet(
                             )
                             Spacer(Modifier.height(8.dp))
                         }
-                        Box(Modifier.fillMaxWidth().weight(1f)) {
+                        if (expansionPhase.bodyIncluded) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f)
+                                    .graphicsLayer { alpha = previewAlpha },
+                            ) {
+                                val preview = previewState
+                                if (preview is RemoteLoadState.Ready) {
+                                    RemotePreviewContent(
+                                        preview = preview.value,
+                                        target = target,
+                                        onOpenRemoteFile = onOpenRemoteFile,
+                                        onLinkError = onLinkError,
+                                    )
+                                }
+                            }
+                        } else {
                             when (val preview = previewState) {
-                                RemoteLoadState.Idle -> PreviewHint()
-                                RemoteLoadState.Loading -> LoadingArea("正在读取文件")
-                                is RemoteLoadState.Failed -> ErrorArea(preview.message)
-                                is RemoteLoadState.Ready -> RemotePreviewContent(
-                                    preview = preview.value,
-                                    target = target,
-                                    onOpenRemoteFile = onOpenRemoteFile,
-                                    onLinkError = onLinkError,
-                                )
+                                RemoteLoadState.Idle -> Unit
+                                RemoteLoadState.Loading -> CompactLoadingArea("正在读取文件")
+                                is RemoteLoadState.Failed -> CompactMessage(preview.message, isError = true)
+                                is RemoteLoadState.Ready -> if (preview.value == RemotePreview.Unsupported) {
+                                    CompactMessage("该文件不支持内置预览，可使用其他应用打开或保存到设备")
+                                }
                             }
                         }
                         actionError?.let {
@@ -227,37 +298,44 @@ internal fun RemoteFileSheet(
                             Modifier.fillMaxWidth().padding(vertical = 16.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
+                            val showPreviewAction = when (val preview = previewState) {
+                                is RemoteLoadState.Ready -> preview.value == RemotePreview.Unsupported
+                                RemoteLoadState.Idle,
+                                RemoteLoadState.Loading,
+                                is RemoteLoadState.Failed,
+                                -> true
+                            }
                             Row(
                                 Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
-                                OutlinedButton(
-                                    onClick = {
-                                        scope.launch {
-                                            previewState = RemoteLoadState.Loading
-                                            previewState = runSuspendCatching {
-                                                val bytes = loadedBytes
-                                                    ?: readPreview(target.path).also { loadedBytes = it }
-                                                decodeRemotePreview(bytes, fileName)
-                                            }.fold(
-                                                onSuccess = { RemoteLoadState.Ready(it) },
-                                                onFailure = {
-                                                    RemoteLoadState.Failed(it.message ?: "无法预览文件")
-                                                },
-                                            )
+                                if (showPreviewAction) {
+                                    OutlinedButton(
+                                        onClick = { scope.launch { loadPreview() } },
+                                        modifier = Modifier.weight(1f),
+                                        enabled = previewState !is RemoteLoadState.Loading &&
+                                            !isSaving &&
+                                            !isOpening,
+                                    ) {
+                                        if (previewState is RemoteLoadState.Loading) {
+                                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                        } else {
+                                            Icon(Icons.Rounded.Visibility, contentDescription = null)
                                         }
-                                    },
-                                    modifier = Modifier.weight(1f),
-                                    enabled = previewState !is RemoteLoadState.Loading && !isSaving && !isOpening,
-                                ) {
-                                    Icon(Icons.Rounded.Visibility, contentDescription = null)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("预览")
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            when (previewState) {
+                                                RemoteLoadState.Loading -> "预览中"
+                                                is RemoteLoadState.Failed -> "重试"
+                                                else -> "预览"
+                                            },
+                                        )
+                                    }
                                 }
                                 Button(
                                     onClick = { saveLauncher.launch(fileName) },
                                     modifier = Modifier.weight(1f),
-                                    enabled = !isSaving && !isOpening && previewState !is RemoteLoadState.Loading,
+                                    enabled = !isSaving && !isOpening,
                                 ) {
                                     if (isSaving) {
                                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -267,19 +345,36 @@ internal fun RemoteFileSheet(
                                     Spacer(Modifier.width(8.dp))
                                     Text(if (isSaving) "保存中" else "保存")
                                 }
-                            }
-                            OutlinedButton(
-                                onClick = ::openWithAnotherApp,
-                                modifier = Modifier.fillMaxWidth(),
-                                enabled = !isOpening && !isSaving && previewState !is RemoteLoadState.Loading,
-                            ) {
-                                if (isOpening) {
-                                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                                } else {
-                                    Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null)
+                                if (!showPreviewAction) {
+                                    OutlinedButton(
+                                        onClick = ::openWithAnotherApp,
+                                        modifier = Modifier.weight(1f),
+                                        enabled = !isOpening && !isSaving,
+                                    ) {
+                                        if (isOpening) {
+                                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                        } else {
+                                            Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null)
+                                        }
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(if (isOpening) "准备中" else "其他应用")
+                                    }
                                 }
-                                Spacer(Modifier.width(8.dp))
-                                Text(if (isOpening) "正在准备文件" else "使用其他应用打开")
+                            }
+                            if (showPreviewAction) {
+                                OutlinedButton(
+                                    onClick = ::openWithAnotherApp,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    enabled = !isOpening && !isSaving,
+                                ) {
+                                    if (isOpening) {
+                                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                    } else {
+                                        Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null)
+                                    }
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(if (isOpening) "正在准备文件" else "使用其他应用打开")
+                                }
                             }
                         }
                     }
@@ -295,28 +390,24 @@ private fun BoxScopeLoading(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun LoadingArea(label: String) {
-    BoxScopeLoading {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            CircularProgressIndicator()
-            Spacer(Modifier.height(12.dp))
-            Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+private fun CompactLoadingArea(label: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        Spacer(Modifier.width(12.dp))
+        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
-private fun ErrorArea(message: String) {
-    BoxScopeLoading {
-        Text(message, color = MaterialTheme.colorScheme.error)
-    }
-}
-
-@Composable
-private fun PreviewHint() {
-    BoxScopeLoading {
-        Text("选择预览读取文件内容，也可直接打开或保存", color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
+private fun CompactMessage(message: String, isError: Boolean = false) {
+    Text(
+        message,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable

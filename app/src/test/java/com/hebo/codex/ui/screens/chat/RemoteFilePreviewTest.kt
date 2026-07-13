@@ -2,7 +2,9 @@ package com.hebo.codex.ui.screens.chat
 
 import dev.snipme.highlights.model.SyntaxLanguage
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RemoteFilePreviewTest {
@@ -11,6 +13,17 @@ class RemoteFilePreviewTest {
         assertEquals(TextPreviewKind.Markdown, textPreviewKind("README.md"))
         assertEquals(TextPreviewKind.Json, textPreviewKind("package.JSON"))
         assertEquals(TextPreviewKind.Plain, textPreviewKind("config.yaml"))
+    }
+
+    @Test
+    fun automaticallyPreviewsCommonFilesWithoutReadingUnknownBinaryTypes() {
+        assertTrue(shouldAutoPreviewRemoteFile("README.md"))
+        assertTrue(shouldAutoPreviewRemoteFile("Main.kt"))
+        assertTrue(shouldAutoPreviewRemoteFile("diagram.SVG"))
+        assertTrue(shouldAutoPreviewRemoteFile("Dockerfile"))
+        assertFalse(shouldAutoPreviewRemoteFile("report.pdf"))
+        assertFalse(shouldAutoPreviewRemoteFile("archive.zip"))
+        assertFalse(shouldAutoPreviewRemoteFile("unknown"))
     }
 
     @Test

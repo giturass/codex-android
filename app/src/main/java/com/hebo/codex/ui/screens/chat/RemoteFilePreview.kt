@@ -157,6 +157,11 @@ internal fun textPreviewKind(fileName: String): TextPreviewKind = when (fileName
     else -> TextPreviewKind.Plain
 }
 
+internal fun shouldAutoPreviewRemoteFile(fileName: String): Boolean {
+    val normalizedName = fileName.lowercase()
+    return normalizedName in AUTO_PREVIEW_FILE_NAMES || normalizedName.extension() in AUTO_PREVIEW_EXTENSIONS
+}
+
 internal fun syntaxLanguageForFileName(fileName: String): SyntaxLanguage? {
     val normalizedName = fileName.lowercase()
     return when (normalizedName.extension()) {
@@ -227,6 +232,90 @@ internal sealed interface RemotePreview {
 }
 
 private val PRETTY_JSON = Json { prettyPrint = true }
+private val AUTO_PREVIEW_FILE_NAMES = setOf(
+    ".bashrc",
+    ".editorconfig",
+    ".env",
+    ".gitattributes",
+    ".gitignore",
+    ".zshrc",
+    "dockerfile",
+    "gradlew",
+    "license",
+    "makefile",
+    "readme",
+)
+private val AUTO_PREVIEW_EXTENSIONS = setOf(
+    "bash",
+    "bmp",
+    "c",
+    "cc",
+    "cjs",
+    "coffee",
+    "conf",
+    "config",
+    "cpp",
+    "cs",
+    "css",
+    "csv",
+    "cts",
+    "cxx",
+    "dart",
+    "gif",
+    "go",
+    "gradle",
+    "graphql",
+    "gql",
+    "h",
+    "hh",
+    "hpp",
+    "htm",
+    "html",
+    "hxx",
+    "ini",
+    "java",
+    "jpeg",
+    "jpg",
+    "js",
+    "json",
+    "jsonl",
+    "jsx",
+    "kt",
+    "kts",
+    "less",
+    "log",
+    "markdown",
+    "md",
+    "mdown",
+    "mjs",
+    "mkdn",
+    "mts",
+    "php",
+    "pl",
+    "pm",
+    "png",
+    "properties",
+    "pro",
+    "py",
+    "pyw",
+    "rb",
+    "rs",
+    "scss",
+    "sh",
+    "sql",
+    "svg",
+    "swift",
+    "toml",
+    "ts",
+    "tsv",
+    "tsx",
+    "txt",
+    "webp",
+    "xml",
+    "yaml",
+    "yml",
+    "zsh",
+)
 private val UTF_8_BOM = byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte())
 private val UTF_16_LE_BOM = byteArrayOf(0xFF.toByte(), 0xFE.toByte())
 private val UTF_16_BE_BOM = byteArrayOf(0xFE.toByte(), 0xFF.toByte())
