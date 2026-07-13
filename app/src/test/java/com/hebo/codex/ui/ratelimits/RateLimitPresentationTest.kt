@@ -105,6 +105,16 @@ class RateLimitPresentationTest {
     }
 
     @Test
+    fun emphasizesRateLimitOnlyWhenRemainingIsLow() {
+        assertEquals(RateLimitEmphasis.NORMAL, rateLimitEmphasis(100.0))
+        assertEquals(RateLimitEmphasis.NORMAL, rateLimitEmphasis(25.1))
+        assertEquals(RateLimitEmphasis.WARNING, rateLimitEmphasis(25.0))
+        assertEquals(RateLimitEmphasis.WARNING, rateLimitEmphasis(10.1))
+        assertEquals(RateLimitEmphasis.CRITICAL, rateLimitEmphasis(10.0))
+        assertEquals(RateLimitEmphasis.CRITICAL, rateLimitEmphasis(0.0))
+    }
+
+    @Test
     fun formatsResetCountdownAtUsefulPrecision() {
         val now = 1_000L
 

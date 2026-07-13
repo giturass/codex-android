@@ -76,7 +76,6 @@ internal data class PresentedRateLimitWindow(
     val window: RateLimitWindow,
     val label: String,
     val indicatorLabel: String?,
-    val isWeekly: Boolean,
 )
 
 internal data class CodexRateLimitWindows(
@@ -84,6 +83,12 @@ internal data class CodexRateLimitWindows(
     val featured: PresentedRateLimitWindow,
     val all: List<PresentedRateLimitWindow>,
 )
+
+internal enum class RateLimitEmphasis {
+    NORMAL,
+    WARNING,
+    CRITICAL,
+}
 
 @Composable
 fun RateLimitIndicator(
@@ -351,22 +356,19 @@ private fun TokenUsageDetails(state: RateLimitsUiState) {
     }
 }
 
-@Composable
-private fun rateLimitColor(remainingPercent: Double, normalColor: Color): Color = when {
-    remainingPercent <= CriticalRemainingPercent -> MaterialTheme.colorScheme.error
-    remainingPercent <= WarningRemainingPercent -> MaterialTheme.statusColors.warning
-    else -> normalColor
+internal fun rateLimitEmphasis(remainingPercent: Double): RateLimitEmphasis = when {
+    remainingPercent <= CriticalRemainingPercent -> RateLimitEmphasis.CRITICAL
+    remainingPercent <= WarningRemainingPercent -> RateLimitEmphasis.WARNING
+    else -> RateLimitEmphasis.NORMAL
 }
 
 @Composable
-private fun rateLimitWindowColor(window: PresentedRateLimitWindow): Color = rateLimitColor(
-    remainingPercent = window.window.remainingPercent(),
-    normalColor = if (window.isWeekly) {
-        MaterialTheme.statusColors.info
-    } else {
-        MaterialTheme.colorScheme.primary
-    },
-)
+private fun rateLimitWindowColor(window: PresentedRateLimitWindow): Color =
+    when (rateLimitEmphasis(window.window.remainingPercent())) {
+        RateLimitEmphasis.NORMAL -> MaterialTheme.colorScheme.onSurfaceVariant
+        RateLimitEmphasis.WARNING -> MaterialTheme.statusColors.warning
+        RateLimitEmphasis.CRITICAL -> MaterialTheme.colorScheme.error
+    }
 
 internal fun AccountRateLimits.codexWindows(): CodexRateLimitWindows? {
     val limit = limits.singleOrNull { it.id == "codex" } ?: return null
@@ -402,7 +404,6 @@ private fun RateLimitWindow.toPresentedRateLimitWindow(
             else -> windowDurationMinutes?.toRateLimitLabel() ?: fallbackLabel
         },
         indicatorLabel = if (isWeekly) "周" else null,
-        isWeekly = isWeekly,
     )
 }
 
