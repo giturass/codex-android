@@ -89,6 +89,9 @@ import kotlinx.coroutines.delay
 internal fun ActivityGroupCard(
     items: List<ConversationItem>,
     isSealed: Boolean,
+    cwd: String,
+    onOpenRemoteFile: (RemoteFileTarget) -> Unit,
+    onLinkError: (String) -> Unit,
     onOpenRemotePath: (String) -> Unit,
 ) {
     if (items.isEmpty()) return
@@ -143,6 +146,12 @@ internal fun ActivityGroupCard(
     if (showDetails) {
         ActivityDetailsSheet(
             items = items,
+            cwd = cwd,
+            onOpenRemoteFile = { target ->
+                showDetails = false
+                onOpenRemoteFile(target)
+            },
+            onLinkError = onLinkError,
             onOpenRemotePath = { path ->
                 showDetails = false
                 onOpenRemotePath(path)
@@ -167,7 +176,7 @@ internal fun activityGroupLabel(items: List<ConversationItem>, isSealed: Boolean
     return buildList {
         if (failedCount > 0) add("$failedCount 项失败")
         if (declinedCount > 0) add("$declinedCount 项已取消")
-        if (items.any { it is ConversationItem.Reasoning }) add("思考")
+        if (items.any { it is ConversationItem.Reasoning }) add("推理")
         if (commandCount > 0) add("执行 $commandCount 条命令")
         if (changedFileCount > 0) add("改动 $changedFileCount 个文件")
         if (activityCount > 0) add("执行 $activityCount 项操作")
@@ -178,11 +187,7 @@ private fun activeActivityLabel(items: List<ConversationItem>): String {
     val activeItem = items.lastOrNull { it.activityStatus() == ActivityStatus.IN_PROGRESS }
         ?: items.last()
     return when (activeItem) {
-        is ConversationItem.Reasoning -> activeItem.summary
-            .lineSequence()
-            .lastOrNull(String::isNotBlank)
-            ?.trim()
-            ?: "思考中"
+        is ConversationItem.Reasoning -> reasoningSummaryTitle(activeItem.summaryParts) ?: "推理中"
 
         is ConversationItem.Plan -> activeItem.text
             .lineSequence()
@@ -226,6 +231,9 @@ internal fun ConversationItem.activityStatus(): ActivityStatus = when (this) {
 @Composable
 private fun ActivityDetailsSheet(
     items: List<ConversationItem>,
+    cwd: String,
+    onOpenRemoteFile: (RemoteFileTarget) -> Unit,
+    onLinkError: (String) -> Unit,
     onOpenRemotePath: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -287,6 +295,9 @@ private fun ActivityDetailsSheet(
                             item = item,
                             isLast = index == items.lastIndex,
                             expanded = expanded,
+                            cwd = cwd,
+                            onOpenRemoteFile = onOpenRemoteFile,
+                            onLinkError = onLinkError,
                             onOpenRemotePath = onOpenRemotePath,
                         )
                     }
@@ -383,6 +394,9 @@ private fun ActivityTimelineBody(
     item: ConversationItem,
     isLast: Boolean,
     expanded: Boolean,
+    cwd: String,
+    onOpenRemoteFile: (RemoteFileTarget) -> Unit,
+    onLinkError: (String) -> Unit,
     onOpenRemotePath: (String) -> Unit,
 ) {
     val hasDetails = activityItemHasDetails(item)
@@ -440,7 +454,13 @@ private fun ActivityTimelineBody(
                         .graphicsLayer { alpha = bodyAlpha },
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    ActivityItemDetails(item, onOpenRemotePath)
+                    ActivityItemDetails(
+                        item = item,
+                        cwd = cwd,
+                        onOpenRemoteFile = onOpenRemoteFile,
+                        onLinkError = onLinkError,
+                        onOpenRemotePath = onOpenRemotePath,
+                    )
                 }
             }
             if (!isLast && expansionPhase.bodyIncluded) Spacer(Modifier.height(16.dp))
@@ -562,11 +582,8 @@ private fun activityStatusDescription(status: ActivityStatus): String = when (st
 
 internal fun activityItemTitle(item: ConversationItem): String {
     val title = when (item) {
-        is ConversationItem.Reasoning -> item.summary
-            .lineSequence()
-            .lastOrNull(String::isNotBlank)
-            ?.trim()
-            ?: "分析与推理"
+        is ConversationItem.Reasoning -> reasoningSummaryTitle(item.summaryParts)
+            ?: if (reasoningRawContent(item.rawContentParts).isNotBlank()) "原始推理" else "推理摘要"
 
         is ConversationItem.Plan -> "计划"
 
@@ -595,7 +612,8 @@ internal fun activityItemSubtitle(item: ConversationItem): String? = when (item)
 }
 
 internal fun activityItemHasDetails(item: ConversationItem): Boolean = when (item) {
-    is ConversationItem.Reasoning -> item.details.isNotBlank()
+    is ConversationItem.Reasoning -> reasoningSummaryBody(item.summaryParts).isNotBlank() ||
+        reasoningRawContent(item.rawContentParts).isNotBlank()
     is ConversationItem.Plan -> item.text.isNotBlank()
     is ConversationItem.CommandExecution -> item.command.isNotBlank() ||
         item.cwd.isNotBlank() ||
@@ -612,19 +630,20 @@ internal fun activityItemHasDetails(item: ConversationItem): Boolean = when (ite
 }
 
 @Composable
-private fun ActivityItemDetails(item: ConversationItem, onOpenRemotePath: (String) -> Unit) {
+private fun ActivityItemDetails(
+    item: ConversationItem,
+    cwd: String,
+    onOpenRemoteFile: (RemoteFileTarget) -> Unit,
+    onLinkError: (String) -> Unit,
+    onOpenRemotePath: (String) -> Unit,
+) {
     when (item) {
-        is ConversationItem.Reasoning -> {
-            if (item.details.isNotBlank()) {
-                SelectionContainer {
-                    Text(
-                        item.details,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
+        is ConversationItem.Reasoning -> ReasoningItemDetails(
+            item = item,
+            cwd = cwd,
+            onOpenRemoteFile = onOpenRemoteFile,
+            onLinkError = onLinkError,
+        )
 
         is ConversationItem.Plan -> {
             if (item.text.isNotBlank()) {

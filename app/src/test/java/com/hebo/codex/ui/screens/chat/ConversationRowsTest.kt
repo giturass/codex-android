@@ -74,8 +74,8 @@ class ConversationRowsTest {
         val reasoning = ConversationItem.Reasoning(
             id = "reasoning",
             turnId = "turn-1",
-            summary = "分析项目",
-            details = "先检查目录",
+            summaryParts = listOf("分析项目"),
+            rawContentParts = listOf("先检查目录"),
             isStreaming = false,
         )
 
@@ -87,7 +87,7 @@ class ConversationRowsTest {
         assertEquals(1, rows.size)
         assertEquals(2, (rows.single() as ConversationRow.ActivityGroup).items.size)
         assertEquals(
-            "思考 · 执行 1 条命令",
+            "推理 · 执行 1 条命令",
             activityGroupLabel(
                 items = (rows.single() as ConversationRow.ActivityGroup).items,
                 isSealed = true,
@@ -211,8 +211,8 @@ class ConversationRowsTest {
         val reasoning = ConversationItem.Reasoning(
             id = "reasoning",
             turnId = "turn-1",
-            summary = "检查项目\n定位活动组状态",
-            details = "",
+            summaryParts = listOf("检查项目", "定位活动组状态"),
+            rawContentParts = emptyList(),
             isStreaming = false,
         )
 

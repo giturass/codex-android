@@ -11,10 +11,14 @@ import com.hebo.codex.data.remote.ServerEvent
 import com.hebo.codex.data.remote.StableFeatureApi
 import com.hebo.codex.data.remote.StableRpcMethod
 import com.hebo.codex.data.remote.ThreadSnapshot
+import com.hebo.codex.data.remote.addSummaryPart
+import com.hebo.codex.data.remote.appendRawContentDelta
+import com.hebo.codex.data.remote.appendSummaryDelta
 import com.hebo.codex.data.remote.optionalBoolean
 import com.hebo.codex.data.remote.optionalLong
 import com.hebo.codex.data.remote.optionalString
 import com.hebo.codex.data.remote.requiredArray
+import com.hebo.codex.data.remote.requiredInt
 import com.hebo.codex.data.remote.requiredObject
 import com.hebo.codex.data.remote.requiredString
 import com.hebo.codex.util.runSuspendCatching
@@ -1030,19 +1034,25 @@ class CodexRepository(
             "item/reasoning/summaryTextDelta" -> updateNotifiedItem { item ->
                 val reasoning = item as? ConversationItem.Reasoning
                     ?: throw ProtocolException("reasoning summary delta 的目标类型不正确")
-                reasoning.copy(summary = reasoning.summary + params.requiredString("delta"))
+                reasoning.appendSummaryDelta(
+                    summaryIndex = params.requiredInt("summaryIndex"),
+                    delta = params.requiredString("delta"),
+                )
             }
 
             "item/reasoning/summaryPartAdded" -> updateNotifiedItem { item ->
                 val reasoning = item as? ConversationItem.Reasoning
                     ?: throw ProtocolException("reasoning summary part 的目标类型不正确")
-                reasoning.copy(summary = reasoning.summary.trimEnd() + "\n")
+                reasoning.addSummaryPart(params.requiredInt("summaryIndex"))
             }
 
             "item/reasoning/textDelta" -> updateNotifiedItem { item ->
                 val reasoning = item as? ConversationItem.Reasoning
                     ?: throw ProtocolException("reasoning delta 的目标类型不正确")
-                reasoning.copy(details = reasoning.details + params.requiredString("delta"))
+                reasoning.appendRawContentDelta(
+                    contentIndex = params.requiredInt("contentIndex"),
+                    delta = params.requiredString("delta"),
+                )
             }
 
             "item/commandExecution/outputDelta" -> updateNotifiedItem { item ->

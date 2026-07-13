@@ -152,8 +152,8 @@ sealed interface ConversationItem {
     data class Reasoning(
         override val id: String,
         override val turnId: String,
-        val summary: String,
-        val details: String,
+        val summaryParts: List<String>,
+        val rawContentParts: List<String>,
         val isStreaming: Boolean,
     ) : ConversationItem
 

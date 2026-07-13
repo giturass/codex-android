@@ -424,6 +424,9 @@ fun ChatScreen(
                             is ConversationRow.ActivityGroup -> ActivityGroupCard(
                                 items = row.items,
                                 isSealed = row.isSealed,
+                                cwd = conversation.cwd,
+                                onOpenRemoteFile = { remoteFileTarget = it },
+                                onLinkError = showLinkError,
                                 onOpenRemotePath = openRemotePath,
                             )
                         }
@@ -994,6 +997,9 @@ private fun ConversationItemView(
         else -> ActivityGroupCard(
             items = listOf(item),
             isSealed = true,
+            cwd = cwd,
+            onOpenRemoteFile = onOpenRemoteFile,
+            onLinkError = onLinkError,
             onOpenRemotePath = onOpenRemotePath,
         )
     }

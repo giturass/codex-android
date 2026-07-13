@@ -57,18 +57,52 @@ class ActivityItemPresentationTest {
     }
 
     @Test
-    fun `只有存在正文的分析条目可以展开`() {
+    fun `推理摘要或原始推理存在时条目可以展开`() {
         val emptyItem = ConversationItem.Reasoning(
             id = "empty",
             turnId = "turn",
-            summary = "分析与推理",
-            details = "",
+            summaryParts = emptyList(),
+            rawContentParts = emptyList(),
             isStreaming = false,
         )
-        val detailedItem = emptyItem.copy(id = "detailed", details = "推理详情")
+        val summaryItem = emptyItem.copy(
+            id = "summary",
+            summaryParts = listOf("**检查实现**\n\n正在定位问题"),
+        )
+        val rawItem = emptyItem.copy(id = "raw", rawContentParts = listOf("原始推理"))
 
         assertFalse(activityItemHasDetails(emptyItem))
-        assertTrue(activityItemHasDetails(detailedItem))
+        assertTrue(activityItemHasDetails(summaryItem))
+        assertTrue(activityItemHasDetails(rawItem))
+    }
+
+    @Test
+    fun `推理标题使用最新摘要分段的加粗标题`() {
+        val item = ConversationItem.Reasoning(
+            id = "reasoning",
+            turnId = "turn",
+            summaryParts = listOf(
+                "**检查项目**\n\n读取目录结构",
+                "**定位问题**\n\n检查消息渲染",
+            ),
+            rawContentParts = emptyList(),
+            isStreaming = false,
+        )
+
+        assertEquals("定位问题", activityItemTitle(item))
+    }
+
+    @Test
+    fun `推理摘要正文移除首个标题和空占位分段`() {
+        assertEquals(
+            "检查消息渲染",
+            reasoningSummaryBody(
+                listOf(
+                    "**准备分析**\n\n<!-- -->",
+                    "**定位问题**\n\n检查消息渲染",
+                ),
+            ),
+        )
     }
 
     @Test

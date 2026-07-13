@@ -123,6 +123,25 @@ class ProtocolMapperTest {
     }
 
     @Test
+    fun mapsReasoningPartsWithoutFlatteningProtocolArrays() {
+        val item = json.parseToJsonElement(
+            """{
+              "type":"reasoning",
+              "id":"reasoning-1",
+              "summary":["第一段","第二段"],
+              "content":["原始一","原始二"]
+            }""",
+        ).jsonObject
+
+        val mapped = ProtocolMapper.conversationItem(item, "turn-1", isCompleted = true)
+            as ConversationItem.Reasoning
+
+        assertEquals(listOf("第一段", "第二段"), mapped.summaryParts)
+        assertEquals(listOf("原始一", "原始二"), mapped.rawContentParts)
+        assertFalse(mapped.isStreaming)
+    }
+
+    @Test
     fun mapsTypedFileChangeKinds() {
         val item = json.parseToJsonElement(
             """

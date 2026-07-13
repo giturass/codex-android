@@ -39,10 +39,13 @@
     <string name="personality_default">默认</string>
     <string name="personality_friendly">友好</string>
     <string name="personality_pragmatic">务实</string>
-    <string name="reasoning_summary_auto">自动</string>
+    <string name="reasoning_summary_auto">自动（推荐）</string>
     <string name="reasoning_summary_concise">简洁</string>
     <string name="reasoning_summary_detailed">详细</string>
-    <string name="reasoning_summary_none">不显示</string>
+    <string name="reasoning_summary_none">关闭推理摘要</string>
+    <string name="reasoning_summary_title">推理摘要</string>
+    <string name="reasoning_raw_show">查看原始推理（仅部分模型提供）</string>
+    <string name="reasoning_raw_hide">隐藏原始推理</string>
 
     <string name="goal_status_active">进行中</string>
     <string name="goal_status_paused">已暂停</string>

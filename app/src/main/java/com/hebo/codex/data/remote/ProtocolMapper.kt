@@ -200,8 +200,8 @@ object ProtocolMapper {
             "reasoning" -> ConversationItem.Reasoning(
                 id = id,
                 turnId = turnId,
-                summary = item.stringArray("summary").joinToString("\n"),
-                details = item.stringArray("content").joinToString("\n"),
+                summaryParts = item.stringArray("summary"),
+                rawContentParts = item.stringArray("content"),
                 isStreaming = !isCompleted,
             )
 
@@ -524,6 +524,10 @@ internal fun JsonObject.optionalString(name: String): String? =
 internal fun JsonObject.requiredLong(name: String): Long =
     (this[name] as? JsonPrimitive)?.longOrNull
         ?: throw ProtocolException("协议字段 $name 缺失或不是整数")
+
+internal fun JsonObject.requiredInt(name: String): Int =
+    (this[name] as? JsonPrimitive)?.intOrNull
+        ?: throw ProtocolException("协议字段 $name 缺失或不是 Int 范围内的整数")
 
 internal fun JsonObject.optionalLong(name: String): Long? =
     (this[name] as? JsonPrimitive)?.longOrNull
