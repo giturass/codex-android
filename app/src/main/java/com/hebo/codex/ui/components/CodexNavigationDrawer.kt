@@ -268,7 +268,6 @@ private fun ColumnScope.DrawerContent(
     var drawerPage by rememberSaveable(activeServer?.id) { mutableStateOf(DrawerPage.RECENT) }
     var groupByProject by rememberSaveable { mutableStateOf(false) }
     var expandedProjects by remember(activeServer?.id) { mutableStateOf(emptySet<String>()) }
-    var expansionInitialized by remember(activeServer?.id) { mutableStateOf(false) }
     var selectedThread by remember(activeServer?.id) { mutableStateOf<ThreadActionSelection?>(null) }
     var selectedDraft by remember(activeServer?.id) { mutableStateOf<DraftSummary?>(null) }
     val recentListState = key(activeServer?.id, DrawerPage.RECENT) { rememberLazyListState() }
@@ -312,13 +311,6 @@ private fun ColumnScope.DrawerContent(
     val activeThreadId = (activeTarget as? DrawerActiveTarget.Thread)
         ?.takeIf { it.serverId == activeServer?.id }
         ?.threadId
-
-    LaunchedEffect(activeServer?.id, groupByProject, visibleProjects, activeThreadId) {
-        if (groupByProject && !expansionInitialized && visibleProjects.isNotEmpty()) {
-            expandedProjects = initialExpandedProjectPaths(visibleProjects, activeThreadId)
-            expansionInitialized = true
-        }
-    }
 
     val drawerBody: @Composable ColumnScope.(PaddingValues) -> Unit = { listContentPadding ->
         if (servers.isNotEmpty() && drawerPage == DrawerPage.SEARCH) {
@@ -382,10 +374,8 @@ private fun ColumnScope.DrawerContent(
                         onSearch = { drawerPage = DrawerPage.SEARCH },
                         onGroupByProjectChange = { enabled ->
                             groupByProject = enabled
-                            expansionInitialized = false
                             if (enabled) {
-                                expandedProjects = initialExpandedProjectPaths(visibleProjects, activeThreadId)
-                                expansionInitialized = visibleProjects.isNotEmpty()
+                                expandedProjects = emptySet()
                             }
                         },
                         onRefresh = onRefresh,
@@ -968,16 +958,6 @@ internal fun projectsWithoutDrafts(
 ): List<RecentProject> = projects.mapNotNull { project ->
     project.copy(threads = threadsWithoutDrafts(project.threads, drafts))
         .takeIf { it.threads.isNotEmpty() }
-}
-
-internal fun initialExpandedProjectPaths(
-    projects: List<RecentProject>,
-    activeThreadId: String?,
-): Set<String> {
-    val initialProject = projects.firstOrNull { project ->
-        project.threads.any { it.id == activeThreadId }
-    } ?: projects.firstOrNull()
-    return initialProject?.let { setOf(it.path) }.orEmpty()
 }
 
 internal fun hasNewDraft(previousKeys: Set<DraftKey>, drafts: List<DraftSummary>): Boolean =
