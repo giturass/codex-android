@@ -257,6 +257,28 @@ class ProtocolMapperTest {
     }
 
     @Test
+    fun mapsImageGenerationStatuses() {
+        val cases = listOf(
+            "in_progress" to ActivityStatus.IN_PROGRESS,
+            "completed" to ActivityStatus.COMPLETED,
+            "failed" to ActivityStatus.FAILED,
+        )
+
+        cases.forEach { (status, expected) ->
+            val item = json.parseToJsonElement(
+                """{"type":"imageGeneration","id":"generate-1","status":"$status","revisedPrompt":null,"result":""}""",
+            ).jsonObject
+            val mapped = ProtocolMapper.conversationItem(
+                item,
+                "turn-1",
+                isCompleted = status != "in_progress",
+            ) as ConversationItem.Activity
+
+            assertEquals(expected, mapped.status)
+        }
+    }
+
+    @Test
     fun mapsAppServerWebSearchActionsUsingCamelCaseTypes() {
         val cases = listOf(
             """{

@@ -330,6 +330,7 @@ object ProtocolMapper {
                 technicalDetails = item.withoutLargeImageResult(),
                 remotePath = item.optionalString("savedPath"),
                 isCompleted = isCompleted,
+                status = imageGenerationStatus(item.requiredString("status")),
             )
 
             "sleep" -> genericActivity(
@@ -362,6 +363,7 @@ object ProtocolMapper {
         technicalDetails: String? = null,
         remotePath: String? = null,
         isCompleted: Boolean,
+        status: ActivityStatus = activityStatus(item.optionalString("status"), isCompleted),
     ) = ConversationItem.Activity(
         id = item.requiredString("id"),
         turnId = turnId,
@@ -371,7 +373,7 @@ object ProtocolMapper {
         details = details,
         technicalDetails = technicalDetails,
         remotePath = remotePath,
-        status = activityStatus(item.optionalString("status"), isCompleted),
+        status = status,
     )
 
     private fun userMessagePart(input: JsonElement): UserMessagePart {
@@ -447,6 +449,13 @@ object ProtocolMapper {
         "declined" -> ActivityStatus.DECLINED
         null -> if (isCompleted) ActivityStatus.COMPLETED else ActivityStatus.IN_PROGRESS
         else -> throw ProtocolException("未知活动状态：$value")
+    }
+
+    private fun imageGenerationStatus(value: String): ActivityStatus = when (value) {
+        "in_progress" -> ActivityStatus.IN_PROGRESS
+        "completed" -> ActivityStatus.COMPLETED
+        "failed" -> ActivityStatus.FAILED
+        else -> throw ProtocolException("未知图片生成状态：$value")
     }
 
     private fun JsonObject.toThreadStatus(): ThreadRuntimeStatus = when (requiredString("type")) {
