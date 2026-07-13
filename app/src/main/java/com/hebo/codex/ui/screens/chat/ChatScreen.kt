@@ -90,7 +90,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -179,6 +178,7 @@ import com.hebo.codex.ui.components.MessageComposerActionButton
 import com.hebo.codex.ui.components.QuickPhraseManagerDialog
 import com.hebo.codex.ui.components.QuickPhraseMenuContent
 import com.hebo.codex.ui.components.NavigationAttention
+import com.hebo.codex.ui.components.RemainingLinearProgressIndicator
 import com.hebo.codex.ui.components.UserFacingErrorDialog
 import com.hebo.codex.ui.quickphrases.QuickPhraseViewModel
 import com.hebo.codex.ui.ratelimits.RateLimitIndicator
@@ -2227,20 +2227,22 @@ private fun ConversationStatisticsSheet(
 private fun ContextUsageSection(usage: TokenUsage) {
     val contextWindow = usage.modelContextWindow?.takeIf { it > 0 }
     val contextTokens = usage.last.totalTokens
-    val ratio = contextWindow?.let { (contextTokens.toFloat() / it).coerceIn(0f, 1f) }
     Text("当前上下文", style = MaterialTheme.typography.titleMedium)
-    Text(
-        if (contextWindow == null) {
-            "已用 ${formatCompactCount(contextTokens)} Token"
-        } else {
-            "已用 ${formatCompactCount(contextTokens)} / ${formatCompactCount(contextWindow)} Token" +
-                " · ${formatPercent(contextTokens.toDouble() / contextWindow * 100.0)}"
-        },
-        style = MaterialTheme.typography.bodyMedium,
-    )
-    if (ratio != null) {
-        LinearProgressIndicator(
-            progress = { ratio },
+    if (contextWindow == null) {
+        Text(
+            "已用 ${formatCompactCount(contextTokens)} Token",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    } else {
+        val remainingTokens = (contextWindow - contextTokens).coerceIn(0L, contextWindow)
+        val remainingRatio = remainingTokens.toFloat() / contextWindow
+        Text(
+            "剩余 ${formatCompactCount(remainingTokens)} / ${formatCompactCount(contextWindow)} Token" +
+                " · ${formatPercent(remainingRatio * 100.0)}",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        RemainingLinearProgressIndicator(
+            remainingRatio = remainingRatio,
             modifier = Modifier.fillMaxWidth(),
         )
     }

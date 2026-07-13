@@ -29,7 +29,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -59,6 +58,7 @@ import com.hebo.codex.domain.ServerConfiguration
 import com.hebo.codex.domain.SpendControlLimit
 import com.hebo.codex.ui.components.DAILY_TOKEN_USAGE_DAY_COUNT
 import com.hebo.codex.ui.components.DailyTokenUsageChart
+import com.hebo.codex.ui.components.RemainingLinearProgressIndicator
 import com.hebo.codex.ui.components.relativeTime
 import com.hebo.codex.ui.displayLabelRes
 import com.hebo.codex.ui.formatCompactCount
@@ -267,14 +267,14 @@ private fun AccountRateLimitView(limit: AccountRateLimit) {
 
 @Composable
 private fun SpendControlLimitView(limit: SpendControlLimit) {
-    val usedPercent = 100.0 - limit.remainingPercent
+    val remainingPercent = limit.remainingPercent.coerceIn(0.0, 100.0)
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("月度费用额度", style = MaterialTheme.typography.bodySmall)
         MetricValue("月度上限", limit.limit)
         MetricValue("已使用", limit.used)
-        MetricValue("剩余", formatPercent(limit.remainingPercent))
-        LinearProgressIndicator(
-            progress = { (usedPercent / 100.0).toFloat().coerceIn(0f, 1f) },
+        MetricValue("剩余", formatPercent(remainingPercent))
+        RemainingLinearProgressIndicator(
+            remainingRatio = (remainingPercent / 100.0).toFloat(),
             modifier = Modifier.fillMaxWidth(),
         )
         Text(
@@ -374,6 +374,7 @@ private fun RateLimitResetCreditView(credit: RateLimitResetCredit) {
 private fun RateLimitWindowView(label: String, window: RateLimitWindow) {
     val duration = window.windowDurationMinutes?.let { formatDurationSeconds(it * 60) }
     val reset = window.resetsAt?.let(::formatDateTime)
+    val remainingPercent = (100.0 - window.usedPercent).coerceIn(0.0, 100.0)
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(Modifier.fillMaxWidth()) {
             Text(
@@ -381,10 +382,10 @@ private fun RateLimitWindowView(label: String, window: RateLimitWindow) {
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodySmall,
             )
-            Text("已使用 ${formatPercent(window.usedPercent)}", style = MaterialTheme.typography.labelMedium)
+            Text("剩余 ${formatPercent(remainingPercent)}", style = MaterialTheme.typography.labelMedium)
         }
-        LinearProgressIndicator(
-            progress = { (window.usedPercent / 100.0).toFloat().coerceIn(0f, 1f) },
+        RemainingLinearProgressIndicator(
+            remainingRatio = (remainingPercent / 100.0).toFloat(),
             modifier = Modifier.fillMaxWidth(),
         )
         reset?.let {

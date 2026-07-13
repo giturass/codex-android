@@ -23,7 +23,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -60,6 +59,7 @@ import com.hebo.codex.domain.AccountRateLimits
 import com.hebo.codex.domain.RateLimitWindow
 import com.hebo.codex.ui.components.CompactDailyTokenUsageChart
 import com.hebo.codex.ui.components.DAILY_TOKEN_USAGE_DAY_COUNT
+import com.hebo.codex.ui.components.RemainingLinearProgressIndicator
 import com.hebo.codex.ui.components.relativeTime
 import com.hebo.codex.ui.formatDateTime
 import com.hebo.codex.ui.formatPercent
@@ -357,13 +357,11 @@ private fun RateLimitWindowDetails(
             Spacer(Modifier.weight(1f))
             Text("${formatPercent(remaining)} 剩余", style = MaterialTheme.typography.labelLarge)
         }
-        LinearProgressIndicator(
-            progress = { (remaining / 100.0).toFloat() },
+        RemainingLinearProgressIndicator(
+            remainingRatio = (remaining / 100.0).toFloat(),
             modifier = Modifier.fillMaxWidth(),
             color = color,
             trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f),
-            gapSize = 0.dp,
-            drawStopIndicator = {},
         )
         Text(
             text = window.resetsAt?.let { resetAt ->
