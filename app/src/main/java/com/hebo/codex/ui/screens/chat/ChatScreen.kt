@@ -477,7 +477,6 @@ fun ChatScreen(
                 conversation = conversation,
                 newConversationTitle = null,
                 newConversationSubtitle = null,
-                connectionStatus = state.connectionStatus,
                 rateLimitsState = rateLimitsState,
                 navigationOpen = navigationOpen,
                 onToggleNavigation = onToggleNavigation,
@@ -783,7 +782,6 @@ internal fun ConversationFloatingHeader(
     conversation: ConversationState?,
     newConversationTitle: String?,
     newConversationSubtitle: String?,
-    connectionStatus: ConnectionStatus,
     rateLimitsState: RateLimitsUiState,
     navigationOpen: Boolean,
     onToggleNavigation: () -> Unit,
@@ -794,16 +792,7 @@ internal fun ConversationFloatingHeader(
 ) {
     var actionsExpanded by remember { mutableStateOf(false) }
     val headerTitle = conversation?.title ?: newConversationTitle
-    val headerSubtitle = conversation?.let {
-        val status = when {
-            connectionStatus !is ConnectionStatus.Connected -> "已断开"
-            it.pendingRequests.isNotEmpty() -> "需要处理"
-            it.isRunning -> "运行中"
-            it.errorMessage != null -> "失败"
-            else -> "可继续"
-        }
-        "$status · ${projectName(it.cwd)} · ${it.serverName}"
-    } ?: newConversationSubtitle
+    val headerSubtitle = conversation?.let { projectName(it.cwd) } ?: newConversationSubtitle
     Box(
         modifier
             .fillMaxWidth()
