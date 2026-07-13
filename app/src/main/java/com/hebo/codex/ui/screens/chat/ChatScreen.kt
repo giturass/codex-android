@@ -73,6 +73,8 @@ import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -158,6 +160,7 @@ import com.hebo.codex.domain.ReviewTarget
 import com.hebo.codex.domain.SandboxMode
 import com.hebo.codex.domain.ThreadGoal
 import com.hebo.codex.domain.ThreadGoalStatus
+import com.hebo.codex.domain.ThreadAttention
 import com.hebo.codex.domain.TokenUsage
 import com.hebo.codex.domain.TokenUsageBreakdown
 import com.hebo.codex.domain.ActiveTurnPlan
@@ -176,12 +179,14 @@ import com.hebo.codex.ui.components.MessageComposerActionButton
 import com.hebo.codex.ui.components.QuickPhraseManagerDialog
 import com.hebo.codex.ui.components.QuickPhraseMenuContent
 import com.hebo.codex.ui.components.ScrollChromeState
+import com.hebo.codex.ui.components.NavigationAttention
 import com.hebo.codex.ui.components.UserFacingErrorDialog
 import com.hebo.codex.ui.components.afterUserScroll
 import com.hebo.codex.ui.components.settleTarget
 import com.hebo.codex.ui.quickphrases.QuickPhraseViewModel
 import com.hebo.codex.ui.ratelimits.RateLimitIndicator
 import com.hebo.codex.ui.ratelimits.RateLimitsUiState
+import com.hebo.codex.ui.theme.statusColors
 import com.mikepenz.markdown.compose.components.markdownComponents
 import com.mikepenz.markdown.compose.elements.highlightedCodeBlock
 import com.mikepenz.markdown.compose.elements.highlightedCodeFence
@@ -215,6 +220,7 @@ fun ChatScreen(
     viewModel: ChatViewModel,
     quickPhraseViewModel: QuickPhraseViewModel,
     rateLimitsState: RateLimitsUiState,
+    navigationAttention: NavigationAttention?,
     navigationOpen: Boolean,
     showNewTaskAction: Boolean,
     onToggleNavigation: () -> Unit,
@@ -478,6 +484,7 @@ fun ChatScreen(
                 newConversationTitle = null,
                 newConversationSubtitle = null,
                 rateLimitsState = rateLimitsState,
+                navigationAttention = navigationAttention,
                 navigationOpen = navigationOpen,
                 onToggleNavigation = onToggleNavigation,
                 showNewTaskAction = showNewTaskAction,
@@ -783,6 +790,7 @@ internal fun ConversationFloatingHeader(
     newConversationTitle: String?,
     newConversationSubtitle: String?,
     rateLimitsState: RateLimitsUiState,
+    navigationAttention: NavigationAttention?,
     navigationOpen: Boolean,
     onToggleNavigation: () -> Unit,
     showNewTaskAction: Boolean,
@@ -809,10 +817,7 @@ internal fun ConversationFloatingHeader(
                 shadowElevation = 2.dp,
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Rounded.Menu,
-                        contentDescription = if (navigationOpen) "收起导航" else "打开导航",
-                    )
+                    NavigationMenuIcon(navigationOpen, navigationAttention)
                 }
             }
         } else {
@@ -835,10 +840,7 @@ internal fun ConversationFloatingHeader(
                             .padding(start = 12.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(
-                            Icons.Rounded.Menu,
-                            contentDescription = if (navigationOpen) "收起导航" else "打开导航",
-                        )
+                        NavigationMenuIcon(navigationOpen, navigationAttention)
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
                             Text(
@@ -912,6 +914,36 @@ internal fun ConversationFloatingHeader(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun NavigationMenuIcon(
+    navigationOpen: Boolean,
+    attention: NavigationAttention?,
+) {
+    BadgedBox(
+        badge = {
+            if (attention != null) {
+                Badge(
+                    modifier = Modifier.size(8.dp),
+                    containerColor = when (attention.highestPriority) {
+                        ThreadAttention.FAILED -> MaterialTheme.colorScheme.error
+                        ThreadAttention.NEEDS_INPUT -> MaterialTheme.statusColors.warning
+                        ThreadAttention.READY -> MaterialTheme.statusColors.info
+                        ThreadAttention.RUNNING -> MaterialTheme.colorScheme.surface
+                    },
+                )
+            }
+        },
+    ) {
+        Icon(
+            Icons.Rounded.Menu,
+            contentDescription = buildString {
+                append(if (navigationOpen) "收起导航" else "打开导航")
+                attention?.let { append("，有 ${it.count} 个会话待处理") }
+            },
+        )
     }
 }
 

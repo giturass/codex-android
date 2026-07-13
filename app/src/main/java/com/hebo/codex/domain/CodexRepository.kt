@@ -939,15 +939,22 @@ class CodexRepository(
                         errorMessage = errorMessage,
                     )
                 }
-                val attention = if (errorMessage == null) ThreadAttention.READY else ThreadAttention.FAILED
-                setThreadAttention(serverId, threadId, attention)
+                val completionAttention = if (errorMessage == null) ThreadAttention.READY else ThreadAttention.FAILED
+                setThreadAttention(
+                    serverId,
+                    threadId,
+                    completedThreadAttention(
+                        hasError = errorMessage != null,
+                        isViewed = conversationLeases.isHeld(key),
+                    ),
+                )
                 notifyConversation(
                     ConversationNotification(
                         serverId = serverId,
                         threadId = threadId,
                         title = state.value.title,
                         message = if (errorMessage == null) "任务已完成，可以查看结果" else errorMessage.summary,
-                        attention = attention,
+                        attention = completionAttention,
                     ),
                 )
                 removePendingRequests(serverId, threadId)
@@ -1304,4 +1311,15 @@ class CodexRepository(
             "item/permissions/requestApproval",
         )
     }
+}
+
+internal fun completedThreadAttention(
+    hasError: Boolean,
+    isViewed: Boolean,
+): ThreadAttention? = if (isViewed) {
+    null
+} else if (hasError) {
+    ThreadAttention.FAILED
+} else {
+    ThreadAttention.READY
 }

@@ -41,6 +41,7 @@ import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.ui.components.CodexNavigationDrawer
 import com.hebo.codex.ui.components.DrawerActiveTarget
 import com.hebo.codex.ui.components.UserFacingErrorDialog
+import com.hebo.codex.ui.components.navigationAttention
 import com.hebo.codex.ui.ratelimits.RateLimitsUiState
 import com.hebo.codex.ui.ratelimits.RateLimitsViewModel
 import com.hebo.codex.ui.quickphrases.QuickPhraseViewModel
@@ -365,6 +366,10 @@ fun CodexApp(
                         viewModel = viewModel,
                         quickPhraseViewModel = quickPhraseViewModel,
                         rateLimitsState = rateLimitsStates[route.serverId] ?: RateLimitsUiState(),
+                        navigationAttention = navigationAttention(
+                            attentionByThread = homeState.threadAttention,
+                            currentThreadId = route.threadId,
+                        ),
                         navigationOpen = drawerState.isOpen,
                         showNewTaskAction = !isWideLayout,
                         onToggleNavigation = ::toggleDrawer,

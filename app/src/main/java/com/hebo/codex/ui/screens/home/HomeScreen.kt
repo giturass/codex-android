@@ -78,6 +78,8 @@ import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.domain.projectName
 import com.hebo.codex.ui.displayDescriptionRes
 import com.hebo.codex.ui.displayLabelRes
+import com.hebo.codex.ui.components.NavigationAttention
+import com.hebo.codex.ui.components.navigationAttention
 import com.hebo.codex.ui.ratelimits.RateLimitsUiState
 import com.hebo.codex.ui.quickphrases.QuickPhraseViewModel
 import com.hebo.codex.ui.screens.chat.ComposerCommand
@@ -192,6 +194,7 @@ fun HomeScreen(
                 isLoadingResources = newTaskState.isLoadingResources,
                 isCreating = newTaskState.isCreatingConversation || newTaskState.isLoadingDraft,
                 rateLimitsState = rateLimitsState,
+                navigationAttention = navigationAttention(state.threadAttention),
                 navigationOpen = navigationOpen,
                 projectMenuExpanded = showProjectMenu,
                 onToggleNavigation = onToggleNavigation,
@@ -260,6 +263,7 @@ private fun NewTaskContent(
     isLoadingResources: Boolean,
     isCreating: Boolean,
     rateLimitsState: RateLimitsUiState,
+    navigationAttention: NavigationAttention?,
     navigationOpen: Boolean,
     projectMenuExpanded: Boolean,
     onToggleNavigation: () -> Unit,
@@ -327,6 +331,7 @@ private fun NewTaskContent(
             newConversationTitle = "新建任务",
             newConversationSubtitle = if (cwd.isBlank()) "选择项目" else projectName(cwd),
             rateLimitsState = rateLimitsState,
+            navigationAttention = navigationAttention,
             navigationOpen = navigationOpen,
             onToggleNavigation = onToggleNavigation,
             showNewTaskAction = false,
