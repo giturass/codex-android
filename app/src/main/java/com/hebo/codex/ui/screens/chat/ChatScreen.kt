@@ -213,6 +213,8 @@ private val ChatHeaderControlsHeight = ConversationHeaderItemMinHeight + Convers
 private val ChatHeaderContentSpacing = 24.dp
 private val ChatComposerOverlayMinHeight = 116.dp
 private val ChatComposerMaxWidth = 760.dp
+private val ChatChromeBottomDistanceBuffer = 16.dp
+private val ChatCompactStopOverlayHeight = 64.dp
 private const val CHAT_CHROME_SETTLE_DURATION_MILLIS = 160
 
 @Composable
@@ -265,9 +267,23 @@ fun ChatScreen(
         topControlsHeightPx,
         bottomControlsTranslationHeightPx.takeIf { bottomControlsCanHide } ?: 0,
     ).toFloat()
+    val shownBottomOverlayHeightPx = maxOf(
+        bottomControlsHeightPx.toFloat(),
+        with(density) { ChatComposerOverlayMinHeight.toPx() },
+    )
+    val hiddenBottomOverlayHeightPx = if (conversation?.isRunning == true) {
+        with(density) { ChatCompactStopOverlayHeight.toPx() }
+    } else {
+        0f
+    }
+    val chromeHideStartDistancePx =
+        (shownBottomOverlayHeightPx - hiddenBottomOverlayHeightPx).coerceAtLeast(0f) +
+            with(density) { ChatChromeBottomDistanceBuffer.toPx() }
     val userScrollConnection = remember(
         conversation?.threadId,
+        bottomControlsCanHide,
         chromeHideDistancePx,
+        chromeHideStartDistancePx,
     ) {
         object : NestedScrollConnection {
             override fun onPostScroll(
@@ -279,8 +295,17 @@ fun ChatScreen(
                     chromeSettleJob?.cancel()
                     chromeSettleJob = null
                     autoFollow = false
+                    val hideDelta = if (bottomControlsCanHide) {
+                        chromeScrollDelta(
+                            scrollDelta = consumed.y,
+                            distanceToBottom = listState.layoutInfo.distanceToBottom(),
+                            hideStartDistance = chromeHideStartDistancePx,
+                        )
+                    } else {
+                        consumed.y
+                    }
                     chromeScrollState = chromeScrollState.afterUserScroll(
-                        hideDelta = consumed.y,
+                        hideDelta = hideDelta,
                         hideDistance = chromeHideDistancePx,
                     )
                 }
@@ -419,7 +444,7 @@ fun ChatScreen(
     ) + ChatHeaderContentSpacing
     val bottomOverlayMinHeight = when {
         showFullBottomControls -> ChatComposerOverlayMinHeight
-        showCompactStop -> 64.dp
+        showCompactStop -> ChatCompactStopOverlayHeight
         else -> 0.dp
     }
     val bottomContentPadding = if (conversation == null) {
