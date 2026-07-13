@@ -129,16 +129,18 @@ internal fun ActivityGroupCard(
         } else {
             Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
                 if (isSealed) {
-                    Icon(
-                        imageVector = when (status) {
-                            ActivityStatus.FAILED -> Icons.Rounded.ErrorOutline
-                            ActivityStatus.DECLINED -> Icons.Rounded.Block
-                            ActivityStatus.IN_PROGRESS, ActivityStatus.COMPLETED -> Icons.Rounded.AutoAwesome
-                        },
-                        contentDescription = null,
-                        modifier = Modifier.size(22.dp),
-                        tint = contentColor,
-                    )
+                    when (status) {
+                        ActivityStatus.FAILED -> Icons.Rounded.ErrorOutline
+                        ActivityStatus.DECLINED -> Icons.Rounded.Block
+                        ActivityStatus.IN_PROGRESS, ActivityStatus.COMPLETED -> null
+                    }?.let { icon ->
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            modifier = Modifier.size(22.dp),
+                            tint = contentColor,
+                        )
+                    }
                 } else {
                     CircularProgressIndicator(
                         modifier = Modifier.size(18.dp),
