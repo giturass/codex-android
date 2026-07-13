@@ -15,7 +15,7 @@ import com.hebo.codex.domain.DraftTarget
 import com.hebo.codex.domain.ModelOption
 import com.hebo.codex.domain.RecentProject
 import com.hebo.codex.domain.ServerProfile
-import com.hebo.codex.domain.ThreadAttention
+import com.hebo.codex.domain.ThreadAttentionState
 import com.hebo.codex.domain.ThreadSummary
 import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.domain.groupRecentProjects
@@ -41,7 +41,7 @@ data class HomeUiState(
     val recentProjects: List<RecentProject> = emptyList(),
     val models: List<ModelOption> = emptyList(),
     val serverNotices: List<ConversationNotice> = emptyList(),
-    val threadAttention: Map<String, ThreadAttention> = emptyMap(),
+    val threadAttention: Map<String, ThreadAttentionState> = emptyMap(),
     val drafts: List<DraftSummary> = emptyList(),
     val searchTerm: String = "",
     val showArchived: Boolean = false,
@@ -497,7 +497,7 @@ class HomeViewModel(
         val activeServerId: String?,
         val connectionStatuses: Map<String, ConnectionStatus>,
         val notices: List<ConversationNotice>,
-        val threadAttention: Map<String, ThreadAttention>,
+        val threadAttention: Map<String, ThreadAttentionState>,
     )
 
     companion object {

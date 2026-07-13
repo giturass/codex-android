@@ -45,6 +45,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 class CodexRepository(
     private val serverStore: ServerStore,
@@ -65,7 +66,8 @@ class CodexRepository(
     private val mutableFeatureRevisions = MutableStateFlow<Map<String, Long>>(emptyMap())
     private val mutableRateLimitRevisions = MutableStateFlow<Map<String, Long>>(emptyMap())
     private val mutableServerNotices = MutableStateFlow<Map<String, List<ConversationNotice>>>(emptyMap())
-    private val mutableThreadAttention = MutableStateFlow<Map<String, Map<String, ThreadAttention>>>(emptyMap())
+    private val threadAttentionRevision = AtomicLong()
+    private val mutableThreadAttention = MutableStateFlow<Map<String, Map<String, ThreadAttentionState>>>(emptyMap())
 
     val serverSettings: StateFlow<ServerSettings> = serverStore.settings.stateIn(
         scope = applicationScope,
@@ -83,7 +85,7 @@ class CodexRepository(
     val featureRevisions: StateFlow<Map<String, Long>> = mutableFeatureRevisions
     val rateLimitRevisions: StateFlow<Map<String, Long>> = mutableRateLimitRevisions
     val serverNotices: StateFlow<Map<String, List<ConversationNotice>>> = mutableServerNotices
-    val threadAttention: StateFlow<Map<String, Map<String, ThreadAttention>>> = mutableThreadAttention
+    val threadAttention: StateFlow<Map<String, Map<String, ThreadAttentionState>>> = mutableThreadAttention
 
     suspend fun addServer(name: String, endpoint: String, token: String): ServerProfile {
         val normalizedName = name.trim()
@@ -422,7 +424,7 @@ class CodexRepository(
 
     fun clearConversationError(serverId: String, threadId: String) {
         conversations[ConversationKey(serverId, threadId)]?.updateState { it.copy(errorMessage = null) }
-        if (mutableThreadAttention.value[serverId]?.get(threadId) == ThreadAttention.FAILED) {
+        if (mutableThreadAttention.value[serverId]?.get(threadId)?.attention == ThreadAttention.FAILED) {
             setThreadAttention(serverId, threadId, null)
         }
     }
@@ -1271,13 +1273,13 @@ class CodexRepository(
         mutableThreadAttention.update { current ->
             val serverAttention = current[serverId].orEmpty()
             val updated = if (attention == null) serverAttention - threadId
-            else serverAttention + (threadId to attention)
+            else serverAttention + (threadId to ThreadAttentionState(attention, threadAttentionRevision.incrementAndGet()))
             if (updated.isEmpty()) current - serverId else current + (serverId to updated)
         }
     }
 
     private fun markThreadViewed(serverId: String, threadId: String) {
-        val attention = mutableThreadAttention.value[serverId]?.get(threadId)
+        val attention = mutableThreadAttention.value[serverId]?.get(threadId)?.attention
         if (attention == ThreadAttention.READY || attention == ThreadAttention.FAILED) {
             setThreadAttention(serverId, threadId, null)
         }

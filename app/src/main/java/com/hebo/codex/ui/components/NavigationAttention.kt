@@ -1,25 +1,33 @@
 package com.hebo.codex.ui.components
 
 import com.hebo.codex.domain.ThreadAttention
+import com.hebo.codex.domain.ThreadAttentionState
 
 data class NavigationAttention(
     val count: Int,
-    val highestPriority: ThreadAttention,
+    val targetThreadId: String,
+    val targetAttention: ThreadAttention,
 )
 
 internal fun navigationAttention(
-    attentionByThread: Map<String, ThreadAttention>,
+    attentionByThread: Map<String, ThreadAttentionState>,
     currentThreadId: String? = null,
 ): NavigationAttention? {
     val attention = attentionByThread
         .filterKeys { it != currentThreadId }
-        .values
-        .filter { it != ThreadAttention.RUNNING }
+        .filterValues { it.attention != ThreadAttention.RUNNING }
     if (attention.isEmpty()) return null
+    val target = attention.maxWith(
+        compareBy<Map.Entry<String, ThreadAttentionState>>(
+            { it.value.attention.navigationPriority },
+            { it.value.revision },
+        ),
+    )
 
     return NavigationAttention(
         count = attention.size,
-        highestPriority = attention.maxBy(ThreadAttention::navigationPriority),
+        targetThreadId = target.key,
+        targetAttention = target.value.attention,
     )
 }
 

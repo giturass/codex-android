@@ -64,6 +64,11 @@ enum class ThreadAttention {
     FAILED,
 }
 
+data class ThreadAttentionState(
+    val attention: ThreadAttention,
+    val revision: Long,
+)
+
 data class ConversationNotification(
     val serverId: String,
     val threadId: String,

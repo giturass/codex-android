@@ -336,6 +336,9 @@ fun CodexApp(
                         rateLimitsState = homeState.activeServerId?.let(rateLimitsStates::get) ?: RateLimitsUiState(),
                         navigationOpen = drawerState.isOpen,
                         onToggleNavigation = ::toggleDrawer,
+                        onOpenConversation = { threadId ->
+                            homeState.activeServerId?.let { openConversation(it, threadId) }
+                        },
                         onAddServer = { navController.navigate(ServerEditorRoute()) },
                         onRefreshRateLimits = {
                             homeState.activeServerId?.let(rateLimitsViewModel::refresh)

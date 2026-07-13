@@ -97,6 +97,7 @@ import com.hebo.codex.domain.RecentProject
 import com.hebo.codex.domain.ServerProfile
 import com.hebo.codex.domain.ThreadRuntimeStatus
 import com.hebo.codex.domain.ThreadAttention
+import com.hebo.codex.domain.ThreadAttentionState
 import com.hebo.codex.domain.ThreadSummary
 import com.hebo.codex.domain.projectName
 import com.hebo.codex.ui.theme.statusColors
@@ -112,7 +113,7 @@ fun CodexNavigationDrawer(
     threads: List<ThreadSummary>,
     recentThreads: List<ThreadSummary>,
     drafts: List<DraftSummary>,
-    threadAttention: Map<String, ThreadAttention>,
+    threadAttention: Map<String, ThreadAttentionState>,
     searchTerm: String,
     showArchived: Boolean,
     isLoading: Boolean,
@@ -234,7 +235,7 @@ private fun ColumnScope.DrawerContent(
     threads: List<ThreadSummary>,
     recentThreads: List<ThreadSummary>,
     drafts: List<DraftSummary>,
-    threadAttention: Map<String, ThreadAttention>,
+    threadAttention: Map<String, ThreadAttentionState>,
     searchTerm: String,
     showArchived: Boolean,
     isLoading: Boolean,
@@ -359,7 +360,9 @@ private fun ColumnScope.DrawerContent(
                         DrawerDraftItem(
                             draft = draft,
                             thread = (draft.key.target as? DraftTarget.Thread)?.id?.let(recentThreadsById::get),
-                            attention = (draft.key.target as? DraftTarget.Thread)?.id?.let(threadAttention::get),
+                            attention = (draft.key.target as? DraftTarget.Thread)?.id
+                                ?.let(threadAttention::get)
+                                ?.attention,
                             selected = isDraftSelected(draft, activeTarget),
                             onClick = {
                                 leaveTransientPage()
@@ -419,7 +422,7 @@ private fun ColumnScope.DrawerContent(
                         items(threads, key = ThreadSummary::id) { thread ->
                             DrawerThreadItem(
                                 thread = thread,
-                                attention = threadAttention[thread.id],
+                                attention = threadAttention[thread.id]?.attention,
                                 selected = isThreadSelected(activeServer.id, thread.id, activeTarget),
                                 showProject = true,
                                 onClick = {
@@ -468,7 +471,7 @@ private fun ColumnScope.DrawerContent(
                                 project.threads.forEach { thread ->
                                     DrawerThreadItem(
                                         thread = thread,
-                                        attention = threadAttention[thread.id],
+                                        attention = threadAttention[thread.id]?.attention,
                                         selected = isThreadSelected(activeServer.id, thread.id, activeTarget),
                                         showProject = false,
                                         onClick = {
@@ -498,7 +501,7 @@ private fun ColumnScope.DrawerContent(
                     items(visibleRecentThreads, key = ThreadSummary::id) { thread ->
                         DrawerThreadItem(
                             thread = thread,
-                            attention = threadAttention[thread.id],
+                            attention = threadAttention[thread.id]?.attention,
                             selected = isThreadSelected(activeServer.id, thread.id, activeTarget),
                             showProject = true,
                             onClick = { onOpenConversation(thread.id) },

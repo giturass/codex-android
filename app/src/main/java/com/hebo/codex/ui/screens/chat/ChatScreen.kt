@@ -56,10 +56,12 @@ import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Circle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.HourglassTop
@@ -69,6 +71,7 @@ import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.PriorityHigh
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.AlertDialog
@@ -402,6 +405,7 @@ fun ChatScreen(
                 navigationAttention = navigationAttention,
                 navigationOpen = navigationOpen,
                 onToggleNavigation = onToggleNavigation,
+                onOpenAttention = onOpenConversation,
                 showNewTaskAction = showNewTaskAction,
                 actions = ConversationHeaderActions(
                     onNewTask = { conversation?.let { onNewTask(it.cwd) } },
@@ -677,6 +681,7 @@ internal fun ConversationFloatingHeader(
     navigationAttention: NavigationAttention?,
     navigationOpen: Boolean,
     onToggleNavigation: () -> Unit,
+    onOpenAttention: (String) -> Unit,
     showNewTaskAction: Boolean,
     actions: ConversationHeaderActions?,
     onRefreshRateLimits: () -> Unit,
@@ -701,7 +706,7 @@ internal fun ConversationFloatingHeader(
                 shadowElevation = 2.dp,
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    NavigationMenuIcon(navigationOpen, navigationAttention)
+                    NavigationMenuIcon(navigationOpen)
                 }
             }
         } else {
@@ -724,7 +729,7 @@ internal fun ConversationFloatingHeader(
                             .padding(start = 12.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        NavigationMenuIcon(navigationOpen, navigationAttention)
+                        NavigationMenuIcon(navigationOpen)
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
                             Text(
@@ -741,6 +746,12 @@ internal fun ConversationFloatingHeader(
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
+                    }
+                    navigationAttention?.let { attention ->
+                        NavigationAttentionButton(
+                            attention = attention,
+                            onClick = { onOpenAttention(attention.targetThreadId) },
+                        )
                     }
                     RateLimitIndicator(
                         state = rateLimitsState,
@@ -804,30 +815,64 @@ internal fun ConversationFloatingHeader(
 @Composable
 private fun NavigationMenuIcon(
     navigationOpen: Boolean,
-    attention: NavigationAttention?,
 ) {
-    BadgedBox(
-        badge = {
-            if (attention != null) {
-                Badge(
-                    modifier = Modifier.size(8.dp),
-                    containerColor = when (attention.highestPriority) {
-                        ThreadAttention.FAILED -> MaterialTheme.colorScheme.error
-                        ThreadAttention.NEEDS_INPUT -> MaterialTheme.statusColors.warning
-                        ThreadAttention.READY -> MaterialTheme.statusColors.info
-                        ThreadAttention.RUNNING -> MaterialTheme.colorScheme.surface
-                    },
-                )
-            }
-        },
+    Icon(
+        Icons.Rounded.Menu,
+        contentDescription = if (navigationOpen) "收起导航" else "打开导航",
+    )
+}
+
+@Composable
+private fun NavigationAttentionButton(
+    attention: NavigationAttention,
+    onClick: () -> Unit,
+) {
+    val statusLabel = when (attention.targetAttention) {
+        ThreadAttention.FAILED -> "失败"
+        ThreadAttention.NEEDS_INPUT -> "待处理"
+        ThreadAttention.READY -> "可审阅"
+        ThreadAttention.RUNNING -> error("运行中的会话不应显示为待处理")
+    }
+    val statusColor = when (attention.targetAttention) {
+        ThreadAttention.FAILED -> MaterialTheme.colorScheme.error
+        ThreadAttention.NEEDS_INPUT -> MaterialTheme.statusColors.warning
+        ThreadAttention.READY -> MaterialTheme.statusColors.info
+        ThreadAttention.RUNNING -> error("运行中的会话不应显示为待处理")
+    }
+    val badgeContentColor = if (attention.targetAttention == ThreadAttention.FAILED) {
+        MaterialTheme.colorScheme.onError
+    } else {
+        MaterialTheme.colorScheme.surface
+    }
+    IconButton(
+        onClick = onClick,
+        colors = IconButtonDefaults.iconButtonColors(contentColor = statusColor),
     ) {
-        Icon(
-            Icons.Rounded.Menu,
-            contentDescription = buildString {
-                append(if (navigationOpen) "收起导航" else "打开导航")
-                attention?.let { append("，有 ${it.count} 个会话待处理") }
+        BadgedBox(
+            badge = {
+                Badge(
+                    containerColor = statusColor,
+                    contentColor = badgeContentColor,
+                ) {
+                    Text(if (attention.count > 99) "99+" else attention.count.toString())
+                }
             },
-        )
+        ) {
+            Icon(
+                imageVector = when (attention.targetAttention) {
+                    ThreadAttention.FAILED -> Icons.Rounded.ErrorOutline
+                    ThreadAttention.NEEDS_INPUT -> Icons.Rounded.PriorityHigh
+                    ThreadAttention.READY -> Icons.Rounded.Circle
+                    ThreadAttention.RUNNING -> error("运行中的会话不应显示为待处理")
+                },
+                contentDescription = "打开下一个${statusLabel}会话，共 ${attention.count} 个待处理会话",
+                modifier = if (attention.targetAttention == ThreadAttention.READY) {
+                    Modifier.size(12.dp)
+                } else {
+                    Modifier.size(24.dp)
+                },
+            )
+        }
     }
 }
 
