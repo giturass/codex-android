@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -212,6 +211,7 @@ private fun ActivityDetailsSheet(
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+    var expandedItemKeys by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -237,14 +237,30 @@ private fun ActivityDetailsSheet(
                     end = 20.dp,
                     bottom = 32.dp,
                 ),
-                verticalArrangement = Arrangement.spacedBy(22.dp),
             ) {
-                itemsIndexed(items, key = { _, item -> "${item.turnId}:${item.id}" }) { index, item ->
-                    ActivityTimelineItem(
-                        item = item,
-                        isLast = index == items.lastIndex,
-                        onOpenRemotePath = onOpenRemotePath,
-                    )
+                items.forEachIndexed { index, item ->
+                    val itemKey = "${item.turnId}:${item.id}"
+                    val expanded = itemKey in expandedItemKeys
+                    stickyHeader(key = "$itemKey:header") {
+                        ActivityTimelineHeader(
+                            item = item,
+                            isLast = index == items.lastIndex,
+                            expanded = expanded,
+                            onToggle = {
+                                expandedItemKeys = ArrayList(expandedItemKeys).apply {
+                                    if (!remove(itemKey)) add(itemKey)
+                                }
+                            },
+                        )
+                    }
+                    item(key = "$itemKey:body") {
+                        ActivityTimelineBody(
+                            item = item,
+                            isLast = index == items.lastIndex,
+                            expanded = expanded,
+                            onOpenRemotePath = onOpenRemotePath,
+                        )
+                    }
                 }
             }
         }
@@ -252,26 +268,89 @@ private fun ActivityDetailsSheet(
 }
 
 @Composable
-private fun ActivityTimelineItem(
+private fun ActivityTimelineHeader(
     item: ConversationItem,
     isLast: Boolean,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    val hasDetails = activityItemHasDetails(item)
+    val arrowRotation by animateFloatAsState(
+        targetValue = if (hasDetails && expanded) 180f else 0f,
+        animationSpec = tween(EXPANDABLE_CONTENT_FADE_DURATION_MILLIS),
+        label = "处理过程详情展开箭头",
+    )
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min)
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .then(
+                if (hasDetails) {
+                    Modifier
+                        .clickable(role = Role.Button, onClick = onToggle)
+                        .semantics {
+                            stateDescription = if (expanded) "已展开" else "已收起"
+                        }
+                } else {
+                    Modifier
+                },
+            ),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Box(
+            modifier = Modifier
+                .width(28.dp)
+                .fillMaxHeight(),
+            contentAlignment = Alignment.TopCenter,
+        ) {
+            if (!isLast) {
+                ActivityTimelineConnector(Modifier.padding(top = 26.dp))
+            }
+            ActivityTimelineIcon(item)
+        }
+        Spacer(Modifier.width(12.dp))
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = activityItemTitle(item),
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (hasDetails) {
+                Spacer(Modifier.width(8.dp))
+                Icon(
+                    imageVector = Icons.Rounded.KeyboardArrowDown,
+                    contentDescription = null,
+                    modifier = Modifier.size(22.dp).rotate(arrowRotation),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActivityTimelineBody(
+    item: ConversationItem,
+    isLast: Boolean,
+    expanded: Boolean,
     onOpenRemotePath: (String) -> Unit,
 ) {
     val hasDetails = activityItemHasDetails(item)
-    var expanded by rememberSaveable(item.turnId, item.id) { mutableStateOf(false) }
+    val expansionTarget = hasDetails && expanded
     var expansionPhase by remember(item.turnId, item.id) {
         mutableStateOf(ContentExpansionPhase.COLLAPSED)
     }
-    val expansionTarget = hasDetails && expanded
     val bodyAlpha by animateFloatAsState(
         targetValue = if (expansionPhase.bodyVisible) 1f else 0f,
         animationSpec = tween(EXPANDABLE_CONTENT_FADE_DURATION_MILLIS),
         label = "处理过程详情透明度",
-    )
-    val arrowRotation by animateFloatAsState(
-        targetValue = if (expansionTarget) 180f else 0f,
-        animationSpec = tween(EXPANDABLE_CONTENT_FADE_DURATION_MILLIS),
-        label = "处理过程详情展开箭头",
     )
 
     LaunchedEffect(expansionTarget) {
@@ -300,16 +379,7 @@ private fun ActivityTimelineItem(
                 .fillMaxHeight(),
             contentAlignment = Alignment.TopCenter,
         ) {
-            if (!isLast) {
-                Box(
-                    Modifier
-                        .padding(top = 26.dp)
-                        .width(1.dp)
-                        .fillMaxHeight()
-                        .background(MaterialTheme.colorScheme.outlineVariant),
-                )
-            }
-            ActivityTimelineIcon(item)
+            if (!isLast) ActivityTimelineConnector()
         }
         Spacer(Modifier.width(12.dp))
         Column(
@@ -319,39 +389,6 @@ private fun ActivityTimelineItem(
                     animationSpec = tween(EXPANDABLE_CONTENT_SIZE_ANIMATION_DURATION_MILLIS),
                 ),
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .then(
-                        if (hasDetails) {
-                            Modifier
-                                .clickable(role = Role.Button) { expanded = !expanded }
-                                .semantics {
-                                    stateDescription = if (expansionTarget) "已展开" else "已收起"
-                                }
-                        } else {
-                            Modifier
-                        },
-                    ),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = activityItemTitle(item),
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodyLarge,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (hasDetails) {
-                    Spacer(Modifier.width(8.dp))
-                    Icon(
-                        imageVector = Icons.Rounded.KeyboardArrowDown,
-                        contentDescription = null,
-                        modifier = Modifier.size(22.dp).rotate(arrowRotation),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
             if (expansionPhase.bodyIncluded) {
                 Column(
                     modifier = Modifier
@@ -363,8 +400,19 @@ private fun ActivityTimelineItem(
                     ActivityItemDetails(item, onOpenRemotePath)
                 }
             }
+            if (!isLast) Spacer(Modifier.height(22.dp))
         }
     }
+}
+
+@Composable
+private fun ActivityTimelineConnector(modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .width(1.dp)
+            .fillMaxHeight()
+            .background(MaterialTheme.colorScheme.outlineVariant),
+    )
 }
 
 @Composable
