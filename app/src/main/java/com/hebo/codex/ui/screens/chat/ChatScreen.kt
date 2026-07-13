@@ -218,7 +218,6 @@ fun ChatScreen(
     rateLimitsState: RateLimitsUiState,
     navigationAttention: NavigationAttention?,
     navigationOpen: Boolean,
-    showNewTaskAction: Boolean,
     onToggleNavigation: () -> Unit,
     onNewTask: (String) -> Unit,
     onOpenConversation: (String) -> Unit,
@@ -406,7 +405,6 @@ fun ChatScreen(
                 navigationOpen = navigationOpen,
                 onToggleNavigation = onToggleNavigation,
                 onOpenAttention = onOpenConversation,
-                showNewTaskAction = showNewTaskAction,
                 actions = ConversationHeaderActions(
                     onNewTask = { conversation?.let { onNewTask(it.cwd) } },
                     onRename = { dialog = ChatDialog.Rename },
@@ -682,7 +680,6 @@ internal fun ConversationFloatingHeader(
     navigationOpen: Boolean,
     onToggleNavigation: () -> Unit,
     onOpenAttention: (String) -> Unit,
-    showNewTaskAction: Boolean,
     actions: ConversationHeaderActions?,
     onRefreshRateLimits: () -> Unit,
     modifier: Modifier = Modifier,
@@ -757,9 +754,9 @@ internal fun ConversationFloatingHeader(
                         state = rateLimitsState,
                         onRefresh = onRefreshRateLimits,
                     )
-                    if (showNewTaskAction && actions != null) {
+                    if (actions != null) {
                         IconButton(onClick = actions.onNewTask) {
-                            Icon(Icons.Rounded.Edit, contentDescription = "新建任务")
+                            Icon(Icons.Rounded.Add, contentDescription = "新建任务")
                         }
                     }
                     if (actions != null) {

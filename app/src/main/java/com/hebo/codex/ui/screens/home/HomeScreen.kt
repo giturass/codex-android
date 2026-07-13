@@ -363,7 +363,6 @@ private fun NewTaskContent(
             navigationOpen = navigationOpen,
             onToggleNavigation = onToggleNavigation,
             onOpenAttention = onOpenConversation,
-            showNewTaskAction = false,
             actions = null,
             onRefreshRateLimits = onRefreshRateLimits,
             modifier = Modifier.align(Alignment.TopCenter),

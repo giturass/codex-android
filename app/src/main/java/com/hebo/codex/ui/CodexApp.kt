@@ -374,7 +374,6 @@ fun CodexApp(
                             currentThreadId = route.threadId,
                         ),
                         navigationOpen = drawerState.isOpen,
-                        showNewTaskAction = !isWideLayout,
                         onToggleNavigation = ::toggleDrawer,
                         onNewTask = { cwd -> openNewTask(route.serverId, cwd) },
                         onOpenConversation = { openConversation(route.serverId, it) },
