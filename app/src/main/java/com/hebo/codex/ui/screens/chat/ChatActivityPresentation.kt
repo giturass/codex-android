@@ -2,6 +2,9 @@
 
 package com.hebo.codex.ui.screens.chat
 
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -29,6 +32,7 @@ import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.HourglassTop
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -39,15 +43,21 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -55,6 +65,7 @@ import com.hebo.codex.domain.ActivityStatus
 import com.hebo.codex.domain.ChangedFile
 import com.hebo.codex.domain.ConversationItem
 import com.hebo.codex.domain.FileChangeKind
+import kotlinx.coroutines.delay
 
 @Composable
 internal fun ActivityGroupCard(
@@ -246,6 +257,42 @@ private fun ActivityTimelineItem(
     isLast: Boolean,
     onOpenRemotePath: (String) -> Unit,
 ) {
+    val hasDetails = activityItemHasDetails(item)
+    var expanded by rememberSaveable(item.turnId, item.id) { mutableStateOf(false) }
+    var expansionPhase by remember(item.turnId, item.id) {
+        mutableStateOf(ContentExpansionPhase.COLLAPSED)
+    }
+    val expansionTarget = hasDetails && expanded
+    val bodyAlpha by animateFloatAsState(
+        targetValue = if (expansionPhase.bodyVisible) 1f else 0f,
+        animationSpec = tween(EXPANDABLE_CONTENT_FADE_DURATION_MILLIS),
+        label = "处理过程详情透明度",
+    )
+    val arrowRotation by animateFloatAsState(
+        targetValue = if (expansionTarget) 180f else 0f,
+        animationSpec = tween(EXPANDABLE_CONTENT_FADE_DURATION_MILLIS),
+        label = "处理过程详情展开箭头",
+    )
+
+    LaunchedEffect(expansionTarget) {
+        expansionPhase = expansionPhase.startTransition(expansionTarget)
+        when (expansionPhase) {
+            ContentExpansionPhase.EXPANDING -> {
+                delay(EXPANDABLE_CONTENT_SIZE_ANIMATION_DURATION_MILLIS.toLong())
+                expansionPhase = expansionPhase.settle()
+            }
+
+            ContentExpansionPhase.COLLAPSING -> {
+                delay(EXPANDABLE_CONTENT_FADE_DURATION_MILLIS.toLong())
+                expansionPhase = expansionPhase.settle()
+            }
+
+            ContentExpansionPhase.COLLAPSED,
+            ContentExpansionPhase.EXPANDED,
+            -> Unit
+        }
+    }
+
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
         Box(
             modifier = Modifier
@@ -266,11 +313,56 @@ private fun ActivityTimelineItem(
         }
         Spacer(Modifier.width(12.dp))
         Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier
+                .weight(1f)
+                .animateContentSize(
+                    animationSpec = tween(EXPANDABLE_CONTENT_SIZE_ANIMATION_DURATION_MILLIS),
+                ),
         ) {
-            Text(activityItemTitle(item), style = MaterialTheme.typography.bodyLarge)
-            ActivityItemDetails(item, onOpenRemotePath)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (hasDetails) {
+                            Modifier
+                                .clickable(role = Role.Button) { expanded = !expanded }
+                                .semantics {
+                                    stateDescription = if (expansionTarget) "已展开" else "已收起"
+                                }
+                        } else {
+                            Modifier
+                        },
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = activityItemTitle(item),
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (hasDetails) {
+                    Spacer(Modifier.width(8.dp))
+                    Icon(
+                        imageVector = Icons.Rounded.KeyboardArrowDown,
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp).rotate(arrowRotation),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (expansionPhase.bodyIncluded) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp)
+                        .graphicsLayer { alpha = bodyAlpha },
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    ActivityItemDetails(item, onOpenRemotePath)
+                }
+            }
         }
     }
 }
@@ -301,7 +393,7 @@ private fun ActivityTimelineIcon(item: ConversationItem) {
     }
 }
 
-private fun activityItemTitle(item: ConversationItem): String = when (item) {
+internal fun activityItemTitle(item: ConversationItem): String = when (item) {
     is ConversationItem.Reasoning -> when {
         item.isStreaming -> "正在分析"
         item.summary.isNotBlank() -> item.summary
@@ -313,20 +405,37 @@ private fun activityItemTitle(item: ConversationItem): String = when (item) {
     is ConversationItem.CommandExecution -> when (item.status) {
         ActivityStatus.IN_PROGRESS -> "正在执行 ${item.command.commandPreview()}"
         ActivityStatus.COMPLETED -> "执行 ${item.command.commandPreview()}"
-        ActivityStatus.FAILED -> "命令执行失败"
-        ActivityStatus.DECLINED -> "命令未执行"
+        ActivityStatus.FAILED -> "执行失败 · ${item.command.commandPreview()}"
+        ActivityStatus.DECLINED -> "未执行 · ${item.command.commandPreview()}"
     }
 
     is ConversationItem.FileChange -> when (item.status) {
         ActivityStatus.IN_PROGRESS -> "正在修改 ${item.changes.size} 个文件"
         ActivityStatus.COMPLETED -> "修改 ${item.changes.size} 个文件"
-        ActivityStatus.FAILED -> "文件修改失败"
-        ActivityStatus.DECLINED -> "文件修改已取消"
+        ActivityStatus.FAILED -> "修改失败 · ${item.changes.size} 个文件"
+        ActivityStatus.DECLINED -> "修改已取消 · ${item.changes.size} 个文件"
     }
 
     is ConversationItem.Activity -> item.title
     is ConversationItem.UserMessage -> "用户消息"
     is ConversationItem.AgentMessage -> "Codex 回复"
+}
+
+internal fun activityItemHasDetails(item: ConversationItem): Boolean = when (item) {
+    is ConversationItem.Reasoning -> item.details.isNotBlank()
+    is ConversationItem.Plan -> item.text.isNotBlank()
+    is ConversationItem.CommandExecution -> item.command.isNotBlank() ||
+        item.cwd.isNotBlank() ||
+        item.output.isNotBlank() ||
+        item.exitCode != null
+
+    is ConversationItem.FileChange -> item.changes.isNotEmpty()
+    is ConversationItem.Activity -> !item.summary.isNullOrBlank() ||
+        item.details.isNotBlank() ||
+        !item.technicalDetails.isNullOrBlank() ||
+        item.remotePath != null
+
+    is ConversationItem.UserMessage, is ConversationItem.AgentMessage -> false
 }
 
 @Composable

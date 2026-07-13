@@ -1748,35 +1748,35 @@ private fun ActivePlanCard(plan: ActiveTurnPlan) {
         ?: "计划步骤已完成"
     var expanded by remember { mutableStateOf(false) }
     var expansionPhase by remember {
-        mutableStateOf(PlanExpansionPhase.COLLAPSED)
+        mutableStateOf(ContentExpansionPhase.COLLAPSED)
     }
     val expansionTarget = expanded
     val bodyAlpha by animateFloatAsState(
         targetValue = if (expansionPhase.bodyVisible) 1f else 0f,
-        animationSpec = tween(ACTIVE_PLAN_CONTENT_FADE_DURATION_MILLIS),
+        animationSpec = tween(EXPANDABLE_CONTENT_FADE_DURATION_MILLIS),
         label = "工作计划内容透明度",
     )
     val arrowRotation by animateFloatAsState(
         targetValue = if (expansionTarget) 180f else 0f,
-        animationSpec = tween(ACTIVE_PLAN_CONTENT_FADE_DURATION_MILLIS),
+        animationSpec = tween(EXPANDABLE_CONTENT_FADE_DURATION_MILLIS),
         label = "工作计划展开箭头",
     )
 
     LaunchedEffect(expansionTarget) {
         expansionPhase = expansionPhase.startTransition(expansionTarget)
         when (expansionPhase) {
-            PlanExpansionPhase.EXPANDING -> {
-                delay(ACTIVE_PLAN_SIZE_ANIMATION_DURATION_MILLIS.toLong())
+            ContentExpansionPhase.EXPANDING -> {
+                delay(EXPANDABLE_CONTENT_SIZE_ANIMATION_DURATION_MILLIS.toLong())
                 expansionPhase = expansionPhase.settle()
             }
 
-            PlanExpansionPhase.COLLAPSING -> {
-                delay(ACTIVE_PLAN_CONTENT_FADE_DURATION_MILLIS.toLong())
+            ContentExpansionPhase.COLLAPSING -> {
+                delay(EXPANDABLE_CONTENT_FADE_DURATION_MILLIS.toLong())
                 expansionPhase = expansionPhase.settle()
             }
 
-            PlanExpansionPhase.COLLAPSED,
-            PlanExpansionPhase.EXPANDED,
+            ContentExpansionPhase.COLLAPSED,
+            ContentExpansionPhase.EXPANDED,
             -> Unit
         }
     }
@@ -1789,7 +1789,7 @@ private fun ActivePlanCard(plan: ActiveTurnPlan) {
     ) {
         Column(
             modifier = Modifier.animateContentSize(
-                animationSpec = tween(ACTIVE_PLAN_SIZE_ANIMATION_DURATION_MILLIS),
+                animationSpec = tween(EXPANDABLE_CONTENT_SIZE_ANIMATION_DURATION_MILLIS),
             ),
         ) {
             Row(
@@ -1867,9 +1867,6 @@ private fun ActivePlanCard(plan: ActiveTurnPlan) {
         }
     }
 }
-
-private const val ACTIVE_PLAN_SIZE_ANIMATION_DURATION_MILLIS = 220
-private const val ACTIVE_PLAN_CONTENT_FADE_DURATION_MILLIS = 100
 
 @Composable
 private fun ComposerAddMenu(
