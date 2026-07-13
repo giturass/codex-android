@@ -106,6 +106,16 @@ internal fun ActivityGroupCard(
         ActivityStatus.FAILED, ActivityStatus.DECLINED -> MaterialTheme.colorScheme.error
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
+    val sealedGroupStatusIcon = if (singleItem == null && isSealed) {
+        when (status) {
+            ActivityStatus.FAILED -> Icons.Rounded.ErrorOutline
+            ActivityStatus.DECLINED -> Icons.Rounded.Block
+            ActivityStatus.IN_PROGRESS, ActivityStatus.COMPLETED -> null
+        }
+    } else {
+        null
+    }
+    val hasLeadingContent = singleItem != null || !isSealed || sealedGroupStatusIcon != null
 
     Row(
         modifier = Modifier
@@ -126,31 +136,25 @@ internal fun ActivityGroupCard(
     ) {
         if (singleItem != null) {
             ActivityTimelineIcon(singleItem)
-        } else {
+        } else if (!isSealed) {
             Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
-                if (isSealed) {
-                    when (status) {
-                        ActivityStatus.FAILED -> Icons.Rounded.ErrorOutline
-                        ActivityStatus.DECLINED -> Icons.Rounded.Block
-                        ActivityStatus.IN_PROGRESS, ActivityStatus.COMPLETED -> null
-                    }?.let { icon ->
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = null,
-                            modifier = Modifier.size(22.dp),
-                            tint = contentColor,
-                        )
-                    }
-                } else {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        color = contentColor,
-                        strokeWidth = 2.dp,
-                    )
-                }
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    color = contentColor,
+                    strokeWidth = 2.dp,
+                )
+            }
+        } else if (sealedGroupStatusIcon != null) {
+            Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = sealedGroupStatusIcon,
+                    contentDescription = null,
+                    modifier = Modifier.size(22.dp),
+                    tint = contentColor,
+                )
             }
         }
-        Spacer(Modifier.width(10.dp))
+        if (hasLeadingContent) Spacer(Modifier.width(10.dp))
         if (singleItem == null && isSealed) {
             ActivityGroupMetrics(
                 metrics = activityGroupMetrics(items),
