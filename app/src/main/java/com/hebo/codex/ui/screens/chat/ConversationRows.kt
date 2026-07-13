@@ -4,9 +4,11 @@ import com.hebo.codex.domain.ConversationItem
 
 internal sealed interface ConversationRow {
     val key: String
+    val turnId: String
 
     data class Item(val item: ConversationItem) : ConversationRow {
         override val key: String = item.rowKey("item")
+        override val turnId: String = item.turnId
     }
 
     data class ActivityGroup(
@@ -14,6 +16,7 @@ internal sealed interface ConversationRow {
         val isSealed: Boolean,
     ) : ConversationRow {
         override val key: String = items.first().rowKey("activity-group")
+        override val turnId: String = items.first().turnId
     }
 }
 

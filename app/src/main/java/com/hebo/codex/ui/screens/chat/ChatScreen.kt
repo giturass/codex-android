@@ -44,6 +44,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -223,12 +224,13 @@ private val ConversationStatisticsPopupWidth = 300.dp
 fun ChatScreen(
     viewModel: ChatViewModel,
     quickPhraseViewModel: QuickPhraseViewModel,
+    initialAnnouncement: String?,
     rateLimitsState: RateLimitsUiState,
     navigationAttention: NavigationAttention?,
     navigationOpen: Boolean,
     onToggleNavigation: () -> Unit,
     onNewTask: (String) -> Unit,
-    onOpenConversation: (String) -> Unit,
+    onOpenConversation: (String, String?) -> Unit,
     onRefreshRateLimits: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -240,6 +242,13 @@ fun ChatScreen(
             activeTurnId = conversation?.activeTurnId,
         )
     }
+    val forkTurns = remember(conversation?.items, conversation?.activeTurnId) {
+        buildForkTurns(
+            items = conversation?.items.orEmpty(),
+            activeTurnId = conversation?.activeTurnId,
+        )
+    }
+    val forkTurnsById = remember(forkTurns) { forkTurns.associateBy(ForkTurn::turnId) }
     val snackbarHostState = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
     val scrollScope = rememberCoroutineScope()
@@ -251,6 +260,7 @@ fun ChatScreen(
     var showTurnOptions by remember { mutableStateOf(false) }
     var activeRequestKey by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
     var shownNoticeId by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
+    var initialAnnouncementShown by rememberSaveable(initialAnnouncement) { mutableStateOf(false) }
     var technicalError by remember { mutableStateOf<UserFacingError?>(null) }
     var remoteFileTarget by remember(conversation?.threadId) { mutableStateOf<RemoteFileTarget?>(null) }
     val detailsLabel = stringResource(R.string.common_details)
@@ -290,9 +300,18 @@ fun ChatScreen(
     LaunchedEffect(viewModel) {
         viewModel.events.collect { event ->
             when (event) {
-                is ChatEvent.OpenConversation -> onOpenConversation(event.threadId)
+                is ChatEvent.OpenConversation -> {
+                    dialog = null
+                    onOpenConversation(event.threadId, event.announcement)
+                }
             }
         }
+    }
+    LaunchedEffect(initialAnnouncement, initialAnnouncementShown) {
+        val announcement = initialAnnouncement ?: return@LaunchedEffect
+        if (initialAnnouncementShown) return@LaunchedEffect
+        initialAnnouncementShown = true
+        snackbarHostState.showSnackbar(announcement)
     }
     LaunchedEffect(state.screenError, conversation?.errorMessage) {
         val error = state.screenError ?: conversation?.errorMessage
@@ -392,20 +411,30 @@ fun ChatScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
-                items(conversationRows, key = ConversationRow::key) { row ->
-                    when (row) {
-                        is ConversationRow.Item -> ConversationItemView(
-                            item = row.item,
-                            cwd = conversation.cwd,
-                            onOpenRemoteFile = { remoteFileTarget = it },
-                            onLinkError = showLinkError,
-                            onOpenRemotePath = openRemotePath,
-                        )
-                        is ConversationRow.ActivityGroup -> ActivityGroupCard(
-                            items = row.items,
-                            isSealed = row.isSealed,
-                            onOpenRemotePath = openRemotePath,
-                        )
+                itemsIndexed(conversationRows, key = { _, row -> row.key }) { index, row ->
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        when (row) {
+                            is ConversationRow.Item -> ConversationItemView(
+                                item = row.item,
+                                cwd = conversation.cwd,
+                                onOpenRemoteFile = { remoteFileTarget = it },
+                                onLinkError = showLinkError,
+                                onOpenRemotePath = openRemotePath,
+                            )
+                            is ConversationRow.ActivityGroup -> ActivityGroupCard(
+                                items = row.items,
+                                isSealed = row.isSealed,
+                                onOpenRemotePath = openRemotePath,
+                            )
+                        }
+                        val turn = forkTurnsById[row.turnId]
+                        if (turn != null && conversationRows.getOrNull(index + 1)?.turnId != row.turnId) {
+                            ForkFromTurnAction(
+                                turn = turn,
+                                forkRequest = state.forkRequest,
+                                onFork = viewModel::fork,
+                            )
+                        }
                     }
                 }
                 item(CHAT_LIST_END_KEY) {
@@ -427,7 +456,7 @@ fun ChatScreen(
                 navigationAttention = navigationAttention,
                 navigationOpen = navigationOpen,
                 onToggleNavigation = onToggleNavigation,
-                onOpenAttention = onOpenConversation,
+                onOpenAttention = { onOpenConversation(it, null) },
                 actions = ConversationHeaderActions(
                     onNewTask = { conversation?.let { onNewTask(it.cwd) } },
                     onRename = { dialog = ChatDialog.Rename },
@@ -571,11 +600,9 @@ fun ChatScreen(
         )
 
         ChatDialog.Fork -> ForkConversationSheet(
-            turns = conversation?.items.orEmpty()
-                .filter { it.turnId != conversation?.activeTurnId && it.turnId != "pending" }
-                .distinctBy(ConversationItem::turnId)
-                .map { it.turnId },
-            canForkLatest = conversation?.isRunning != true,
+            turns = forkTurns,
+            isRunning = conversation?.isRunning == true,
+            forkRequest = state.forkRequest,
             onDismiss = { dialog = null },
             onFork = { lastTurnId ->
                 viewModel.fork(lastTurnId)
@@ -920,6 +947,33 @@ private fun ChatActionMenuItem(
         onClick = onClick,
         leadingIcon = icon,
     )
+}
+
+@Composable
+private fun ForkFromTurnAction(
+    turn: ForkTurn,
+    forkRequest: ForkRequest?,
+    onFork: (String) -> Unit,
+) {
+    val isCreating = forkRequest?.lastTurnId == turn.turnId
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        TextButton(
+            onClick = { onFork(turn.turnId) },
+            enabled = forkRequest == null,
+        ) {
+            if (isCreating) {
+                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+            } else {
+                Icon(
+                    Icons.AutoMirrored.Rounded.CallSplit,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            Spacer(Modifier.width(6.dp))
+            Text(if (isCreating) "正在创建…" else "从这里继续")
+        }
+    }
 }
 
 @Composable
@@ -2217,12 +2271,16 @@ private fun RenameConversationDialog(
 
 @Composable
 private fun ForkConversationSheet(
-    turns: List<String>,
-    canForkLatest: Boolean,
+    turns: List<ForkTurn>,
+    isRunning: Boolean,
+    forkRequest: ForkRequest?,
     onDismiss: () -> Unit,
     onFork: (String?) -> Unit,
 ) {
-    var lastTurnId by rememberSaveable(turns, canForkLatest) { mutableStateOf<String?>(null) }
+    val canForkLatest = !isRunning
+    var lastTurnId by rememberSaveable(turns, canForkLatest) {
+        mutableStateOf(if (canForkLatest) null else turns.lastOrNull()?.turnId)
+    }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surface,
@@ -2230,37 +2288,109 @@ private fun ForkConversationSheet(
         Column(
             Modifier
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
+                .fillMaxHeight(0.85f)
                 .navigationBarsPadding()
                 .padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text("分叉会话", style = MaterialTheme.typography.titleLarge)
-            if (turns.isNotEmpty()) {
-                Text("选择新会话包含的最后一个回合", style = MaterialTheme.typography.bodyMedium)
-                OptionRow(
-                    values = if (canForkLatest) listOf<String?>(null) + turns else turns,
-                    selected = lastTurnId,
-                    label = { turnId ->
-                        turnId?.let { "第 ${turns.indexOf(it) + 1} 轮" } ?: "最新回合"
-                    },
-                    onSelect = { lastTurnId = it },
+            Text(
+                "选择新会话包含的最后一个回合",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (canForkLatest) {
+                ForkSelectionCard(
+                    title = "从最新状态继续",
+                    supportingText = "包含当前全部 ${turns.size} 个已完成回合",
+                    selected = lastTurnId == null,
+                    onClick = { lastTurnId = null },
                 )
             } else {
                 Text(
-                    if (canForkLatest) "从当前会话的最新状态创建分叉" else "当前没有可分叉的已完成回合",
+                    "当前回合正在执行，仅可选择已完成回合",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            if (turns.isNotEmpty()) {
+                Text("选择历史回合", style = MaterialTheme.typography.titleSmall)
+            }
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(turns.asReversed(), key = ForkTurn::turnId) { turn ->
+                    ForkSelectionCard(
+                        title = turn.title,
+                        supportingText = buildString {
+                            append("第 ${turn.number} 轮")
+                            if (turn.attachmentCount > 0) append(" · ${turn.attachmentCount} 个附件")
+                        },
+                        selected = lastTurnId == turn.turnId,
+                        onClick = { lastTurnId = turn.turnId },
+                    )
+                }
+            }
             Button(
                 onClick = { onFork(lastTurnId) },
-                enabled = lastTurnId != null || canForkLatest,
+                enabled = forkRequest == null && (lastTurnId != null || canForkLatest),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("创建分叉会话")
+                Text("创建并打开")
             }
-            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("取消") }
+            TextButton(
+                onClick = onDismiss,
+                enabled = forkRequest == null,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("取消")
+            }
             Spacer(Modifier.height(12.dp))
+        }
+    }
+}
+
+@Composable
+private fun ForkSelectionCard(
+    title: String,
+    supportingText: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = if (selected) {
+            MaterialTheme.colorScheme.secondaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerLow
+        },
+        border = BorderStroke(
+            if (selected) 2.dp else 1.dp,
+            if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+        ),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    supportingText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            RadioButton(selected = selected, onClick = null)
         }
     }
 }

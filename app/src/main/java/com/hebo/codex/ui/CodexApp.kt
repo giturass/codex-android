@@ -81,7 +81,11 @@ internal data class NewTaskRoute(
 private data class ServerEditorRoute(val serverId: String? = null)
 
 @Serializable
-private data class ChatRoute(val serverId: String, val threadId: String)
+private data class ChatRoute(
+    val serverId: String,
+    val threadId: String,
+    val announcement: String? = null,
+)
 
 @Serializable
 private data class ServerHubRoute(val serverId: String, val cwd: String? = null)
@@ -156,8 +160,8 @@ fun CodexApp(
         }
     }
 
-    fun openConversation(serverId: String, threadId: String) {
-        navController.navigate(ChatRoute(serverId, threadId)) {
+    fun openConversation(serverId: String, threadId: String, announcement: String? = null) {
+        navController.navigate(ChatRoute(serverId, threadId, announcement)) {
             popUpTo<NewTaskRoute> { inclusive = false }
             launchSingleTop = true
         }
@@ -388,6 +392,7 @@ fun CodexApp(
                     ChatScreen(
                         viewModel = viewModel,
                         quickPhraseViewModel = quickPhraseViewModel,
+                        initialAnnouncement = route.announcement,
                         rateLimitsState = rateLimitsStates[route.serverId] ?: RateLimitsUiState(),
                         navigationAttention = navigationAttention(
                             attentionByThread = homeState.threadAttention,
@@ -396,7 +401,9 @@ fun CodexApp(
                         navigationOpen = drawerState.isOpen,
                         onToggleNavigation = ::toggleDrawer,
                         onNewTask = { cwd -> openNewTask(route.serverId, cwd) },
-                        onOpenConversation = { openConversation(route.serverId, it) },
+                        onOpenConversation = { threadId, announcement ->
+                            openConversation(route.serverId, threadId, announcement)
+                        },
                         onRefreshRateLimits = { rateLimitsViewModel.refresh(route.serverId) },
                     )
                 }

@@ -50,6 +50,8 @@ data class ChatDraft(
     val options: TurnOptions = TurnOptions(),
 )
 
+data class ForkRequest(val lastTurnId: String?)
+
 data class ChatUiState(
     val conversation: ConversationState? = null,
     val models: List<ModelOption> = emptyList(),
@@ -60,11 +62,15 @@ data class ChatUiState(
     val isLoading: Boolean = true,
     val isLoadingResources: Boolean = false,
     val isSendingDraft: Boolean = false,
+    val forkRequest: ForkRequest? = null,
     val screenError: UserFacingError? = null,
 )
 
 sealed interface ChatEvent {
-    data class OpenConversation(val threadId: String) : ChatEvent
+    data class OpenConversation(
+        val threadId: String,
+        val announcement: String? = null,
+    ) : ChatEvent
 }
 
 class ChatViewModel(
@@ -267,10 +273,27 @@ class ChatViewModel(
     }
 
     fun fork(lastTurnId: String? = null) {
+        val current = mutableState.value
+        if (current.forkRequest != null) return
+        val conversation = current.conversation ?: return
+        val turn = lastTurnId?.let { requestedTurnId ->
+            requireNotNull(
+                buildForkTurns(conversation.items, conversation.activeTurnId)
+                    .firstOrNull { it.turnId == requestedTurnId },
+            ) { "无法分叉未完成或不存在的回合：$requestedTurnId" }
+        }
+        val announcement = forkAnnouncement(conversation.title, turn)
+        mutableState.update { it.copy(forkRequest = ForkRequest(lastTurnId)) }
         viewModelScope.launch {
             runSuspendCatching { repository.forkConversation(serverId, threadId, lastTurnId) }
-                .onSuccess { mutableEvents.send(ChatEvent.OpenConversation(it)) }
-                .onFailure(::showError)
+                .onSuccess { forkedThreadId ->
+                    mutableState.update { it.copy(forkRequest = null) }
+                    mutableEvents.send(ChatEvent.OpenConversation(forkedThreadId, announcement))
+                }
+                .onFailure { error ->
+                    mutableState.update { it.copy(forkRequest = null) }
+                    showError(error)
+                }
         }
     }
 
