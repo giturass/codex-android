@@ -224,7 +224,7 @@ class AppServerConnection(
         mutableStatus.value = ConnectionStatus.Failed(error.toUserFacingError("连接服务器失败"))
         if (!ready.isCompleted) ready.completeExceptionally(error)
         failPending(error)
-        eventChannel.close(error)
+        eventChannel.close()
         if (::webSocket.isInitialized) webSocket.cancel()
     }
 
@@ -263,7 +263,7 @@ class AppServerConnection(
             }
             if (!ready.isCompleted) ready.completeExceptionally(error)
             failPending(error)
-            eventChannel.close(error)
+            eventChannel.close()
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {

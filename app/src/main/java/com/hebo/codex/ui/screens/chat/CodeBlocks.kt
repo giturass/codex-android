@@ -208,14 +208,17 @@ internal fun buildShellHighlightedText(command: String, darkTheme: Boolean): Ann
     return buildAnnotatedString {
         append(command)
         highlights.forEach { highlight ->
+            val start = highlight.location.start
+            val end = highlight.location.end
+            if (start < 0 || start >= end || end > command.length) return@forEach
             val style = when (highlight) {
                 is ColorHighlight -> SpanStyle(color = Color(highlight.rgb).copy(alpha = 1f))
                 is BoldHighlight -> SpanStyle(fontWeight = FontWeight.Bold)
             }
             addStyle(
                 style = style,
-                start = highlight.location.start,
-                end = highlight.location.end,
+                start = start,
+                end = end,
             )
         }
     }

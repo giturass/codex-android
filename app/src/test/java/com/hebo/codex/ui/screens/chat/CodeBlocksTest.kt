@@ -36,6 +36,20 @@ class CodeBlocksTest {
     }
 
     @Test
+    fun ignoresReversedShellHighlightRanges() {
+        val command = "*/path/*"
+
+        val highlighted = buildShellHighlightedText(command, darkTheme = false)
+
+        assertEquals(command, highlighted.text)
+        assertTrue(
+            highlighted.spanStyles.all { style ->
+                style.start >= 0 && style.start < style.end && style.end <= command.length
+            },
+        )
+    }
+
+    @Test
     fun previewsFirstLinesOfLongText() {
         val preview = AnnotatedString(numberedLines(1..81)).previewLines(maxLines = 80, fromEnd = false)
 
