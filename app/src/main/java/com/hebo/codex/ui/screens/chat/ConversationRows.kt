@@ -9,20 +9,38 @@ internal sealed interface ConversationRow {
         override val key: String = item.rowKey("item")
     }
 
-    data class ActivityGroup(val items: List<ConversationItem>) : ConversationRow {
+    data class ActivityGroup(
+        val items: List<ConversationItem>,
+        val isSealed: Boolean,
+    ) : ConversationRow {
         override val key: String = items.first().rowKey("activity-group")
     }
 }
 
-internal fun buildConversationRows(items: List<ConversationItem>): List<ConversationRow> {
+internal fun buildConversationRows(
+    items: List<ConversationItem>,
+    activeTurnId: String?,
+): List<ConversationRow> {
     val rows = mutableListOf<ConversationRow>()
     var activityItems = mutableListOf<ConversationItem>()
 
     fun flushActivities() {
         if (activityItems.isNotEmpty()) {
-            rows += ConversationRow.ActivityGroup(activityItems.toList())
+            rows += ConversationRow.ActivityGroup(
+                items = activityItems.toList(),
+                isSealed = false,
+            )
         }
         activityItems = mutableListOf()
+    }
+
+    fun sealActivityGroups(turnId: String) {
+        rows.indices.forEach { index ->
+            val row = rows[index] as? ConversationRow.ActivityGroup ?: return@forEach
+            if (!row.isSealed && row.items.first().turnId == turnId) {
+                rows[index] = row.copy(isSealed = true)
+            }
+        }
     }
 
     items.forEach { item ->
@@ -32,11 +50,20 @@ internal fun buildConversationRows(items: List<ConversationItem>): List<Conversa
             activityItems += item
         } else {
             flushActivities()
+            if (item is ConversationItem.AgentMessage && item.text.isNotBlank()) {
+                sealActivityGroups(item.turnId)
+            }
             if (item.isGroupableActivity()) activityItems += item else rows += ConversationRow.Item(item)
         }
     }
     flushActivities()
-    return rows
+    return rows.map { row ->
+        if (row is ConversationRow.ActivityGroup && row.items.first().turnId != activeTurnId) {
+            row.copy(isSealed = true)
+        } else {
+            row
+        }
+    }
 }
 
 private fun ConversationItem.isGroupableActivity(): Boolean =

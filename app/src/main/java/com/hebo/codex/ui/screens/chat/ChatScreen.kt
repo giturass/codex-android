@@ -231,8 +231,11 @@ fun ChatScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val quickPhraseState by quickPhraseViewModel.state.collectAsStateWithLifecycle()
     val conversation = state.conversation
-    val conversationRows = remember(conversation?.items) {
-        buildConversationRows(conversation?.items.orEmpty())
+    val conversationRows = remember(conversation?.items, conversation?.activeTurnId) {
+        buildConversationRows(
+            items = conversation?.items.orEmpty(),
+            activeTurnId = conversation?.activeTurnId,
+        )
     }
     val snackbarHostState = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
@@ -464,7 +467,10 @@ fun ChatScreen(
                 items(conversationRows, key = ConversationRow::key) { row ->
                     when (row) {
                         is ConversationRow.Item -> ConversationItemView(row.item)
-                        is ConversationRow.ActivityGroup -> ActivityGroupCard(row.items)
+                        is ConversationRow.ActivityGroup -> ActivityGroupCard(
+                            items = row.items,
+                            isSealed = row.isSealed,
+                        )
                     }
                 }
                 item(CHAT_LIST_END_KEY) {
@@ -966,7 +972,7 @@ private fun ConversationItemView(item: ConversationItem) {
         is ConversationItem.UserMessage -> UserMessage(item)
         is ConversationItem.AgentMessage -> AgentMessage(item)
         is ConversationItem.Plan -> PlanSnapshot(item)
-        else -> ActivityGroupCard(listOf(item))
+        else -> ActivityGroupCard(items = listOf(item), isSealed = true)
     }
 }
 

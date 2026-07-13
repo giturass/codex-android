@@ -18,7 +18,7 @@ class ConversationRowsTest {
             command("command-3", "turn-2"),
         )
 
-        val rows = buildConversationRows(items)
+        val rows = buildConversationRows(items, activeTurnId = null)
 
         assertEquals(3, rows.size)
         assertTrue(rows[0] is ConversationRow.ActivityGroup)
@@ -30,7 +30,8 @@ class ConversationRowsTest {
     @Test
     fun `不同回合的活动不会合并`() {
         val rows = buildConversationRows(
-            listOf(command("command-1", "turn-1"), command("command-2", "turn-2")),
+            items = listOf(command("command-1", "turn-1"), command("command-2", "turn-2")),
+            activeTurnId = null,
         )
 
         assertEquals(2, rows.size)
@@ -40,10 +41,11 @@ class ConversationRowsTest {
     @Test
     fun `相同条目编号在不同回合中具有不同列表键`() {
         val rows = buildConversationRows(
-            listOf(
+            items = listOf(
                 ConversationItem.AgentMessage("item-1", "turn-1", "第一回合", false),
                 ConversationItem.AgentMessage("item-1", "turn-2", "第二回合", false),
             ),
+            activeTurnId = null,
         )
 
         assertEquals(2, rows.size)
@@ -53,12 +55,13 @@ class ConversationRowsTest {
     @Test
     fun `相同起始条目编号在不同回合中具有不同活动组键`() {
         val rows = buildConversationRows(
-            listOf(
+            items = listOf(
                 command("item-1", "turn-1"),
                 command("item-2", "turn-1"),
                 command("item-1", "turn-2"),
                 command("item-2", "turn-2"),
             ),
+            activeTurnId = null,
         )
 
         assertEquals(2, rows.size)
@@ -76,26 +79,101 @@ class ConversationRowsTest {
             isStreaming = false,
         )
 
-        val rows = buildConversationRows(listOf(reasoning, command("command", "turn-1")))
+        val rows = buildConversationRows(
+            items = listOf(reasoning, command("command", "turn-1")),
+            activeTurnId = null,
+        )
 
         assertEquals(1, rows.size)
         assertEquals(2, (rows.single() as ConversationRow.ActivityGroup).items.size)
         assertEquals(
-            "处理过程 · 思考 · 1 条命令",
-            activityGroupLabel((rows.single() as ConversationRow.ActivityGroup).items),
+            "思考 · 执行 1 条命令",
+            activityGroupLabel(
+                items = (rows.single() as ConversationRow.ActivityGroup).items,
+                isSealed = true,
+            ),
         )
     }
 
     @Test
-    fun `运行中的操作提供明确摘要`() {
+    fun `未封口的操作显示当前命令`() {
         val rows = buildConversationRows(
-            listOf(command("command", "turn-1", ActivityStatus.IN_PROGRESS)),
+            items = listOf(command("command", "turn-1", ActivityStatus.IN_PROGRESS)),
+            activeTurnId = "turn-1",
+        )
+        val group = rows.single() as ConversationRow.ActivityGroup
+
+        assertTrue(!group.isSealed)
+        assertEquals(
+            "pwd",
+            activityGroupLabel(group.items, group.isSealed),
+        )
+    }
+
+    @Test
+    fun `操作完成后正文出现前仍保持未封口`() {
+        val rows = buildConversationRows(
+            items = listOf(command("command", "turn-1")),
+            activeTurnId = "turn-1",
+        )
+        val group = rows.single() as ConversationRow.ActivityGroup
+
+        assertTrue(!group.isSealed)
+        assertEquals("pwd", activityGroupLabel(group.items, group.isSealed))
+    }
+
+    @Test
+    fun `非空正文为此前的活动组封口`() {
+        val rows = buildConversationRows(
+            items = listOf(
+                command("command", "turn-1"),
+                ConversationItem.AgentMessage("answer", "turn-1", "开始回答", true),
+            ),
+            activeTurnId = "turn-1",
+        )
+        val group = rows.first() as ConversationRow.ActivityGroup
+
+        assertTrue(group.isSealed)
+        assertEquals("执行 1 条命令", activityGroupLabel(group.items, group.isSealed))
+    }
+
+    @Test
+    fun `空正文不会为活动组封口`() {
+        val rows = buildConversationRows(
+            items = listOf(
+                command("command", "turn-1"),
+                ConversationItem.AgentMessage("answer", "turn-1", "", true),
+            ),
+            activeTurnId = "turn-1",
         )
 
-        assertEquals(
-            "处理中 · 正在执行 pwd",
-            activityGroupLabel((rows.single() as ConversationRow.ActivityGroup).items),
+        assertTrue(!(rows.first() as ConversationRow.ActivityGroup).isSealed)
+    }
+
+    @Test
+    fun `正文后的新活动形成新的未封口活动组`() {
+        val rows = buildConversationRows(
+            items = listOf(
+                command("command-1", "turn-1"),
+                ConversationItem.AgentMessage("answer", "turn-1", "继续处理", false),
+                command("command-2", "turn-1"),
+            ),
+            activeTurnId = "turn-1",
         )
+        val groups = rows.filterIsInstance<ConversationRow.ActivityGroup>()
+
+        assertTrue(groups[0].isSealed)
+        assertTrue(!groups[1].isSealed)
+    }
+
+    @Test
+    fun `回合结束时为没有正文的活动组封口`() {
+        val rows = buildConversationRows(
+            items = listOf(command("command", "turn-1")),
+            activeTurnId = null,
+        )
+
+        assertTrue((rows.single() as ConversationRow.ActivityGroup).isSealed)
     }
 
     @Test
@@ -110,16 +188,48 @@ class ConversationRowsTest {
         )
 
         assertEquals(
-            "处理过程 · 2 个文件",
-            activityGroupLabel(listOf(firstChange, secondChange)),
+            "改动 2 个文件",
+            activityGroupLabel(listOf(firstChange, secondChange), isSealed = true),
         )
     }
 
     @Test
-    fun `失败摘要保留统一的处理过程名称`() {
+    fun `未封口的文件修改显示文件路径`() {
+        val change = fileChange(
+            id = "change",
+            paths = listOf("src/Main.kt", "src/Theme.kt"),
+        )
+
         assertEquals(
-            "处理过程 · 1 项失败",
-            activityGroupLabel(listOf(command("command", "turn-1", ActivityStatus.FAILED))),
+            "src/Main.kt、src/Theme.kt",
+            activityGroupLabel(listOf(change), isSealed = false),
+        )
+    }
+
+    @Test
+    fun `未封口的思考显示最新摘要`() {
+        val reasoning = ConversationItem.Reasoning(
+            id = "reasoning",
+            turnId = "turn-1",
+            summary = "检查项目\n定位活动组状态",
+            details = "",
+            isStreaming = false,
+        )
+
+        assertEquals(
+            "定位活动组状态",
+            activityGroupLabel(listOf(reasoning), isSealed = false),
+        )
+    }
+
+    @Test
+    fun `失败摘要同时展示状态和活动统计`() {
+        assertEquals(
+            "1 项失败 · 执行 1 条命令",
+            activityGroupLabel(
+                listOf(command("command", "turn-1", ActivityStatus.FAILED)),
+                isSealed = true,
+            ),
         )
     }
 
@@ -132,7 +242,10 @@ class ConversationRowsTest {
             isStreaming = false,
         )
 
-        val rows = buildConversationRows(listOf(command("command", "turn-1"), plan))
+        val rows = buildConversationRows(
+            items = listOf(command("command", "turn-1"), plan),
+            activeTurnId = null,
+        )
 
         assertEquals(2, rows.size)
         assertTrue(rows[0] is ConversationRow.ActivityGroup)

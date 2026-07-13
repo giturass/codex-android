@@ -29,6 +29,7 @@ import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.HourglassTop
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -54,10 +55,13 @@ import com.hebo.codex.domain.ConversationItem
 import com.hebo.codex.domain.FileChangeKind
 
 @Composable
-internal fun ActivityGroupCard(items: List<ConversationItem>) {
+internal fun ActivityGroupCard(
+    items: List<ConversationItem>,
+    isSealed: Boolean,
+) {
     if (items.isEmpty()) return
     var showDetails by rememberSaveable(items.first().turnId) { mutableStateOf(false) }
-    val status = activityGroupStatus(items)
+    val status = activityGroupStatus(items, isSealed)
     val contentColor = when (status) {
         ActivityStatus.FAILED, ActivityStatus.DECLINED -> MaterialTheme.colorScheme.error
         else -> MaterialTheme.colorScheme.onSurfaceVariant
@@ -71,15 +75,25 @@ internal fun ActivityGroupCard(items: List<ConversationItem>) {
             .padding(horizontal = 4.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            Icons.Rounded.AutoAwesome,
-            contentDescription = null,
-            modifier = Modifier.size(22.dp),
-            tint = contentColor,
-        )
+        Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
+            if (isSealed) {
+                Icon(
+                    Icons.Rounded.AutoAwesome,
+                    contentDescription = null,
+                    modifier = Modifier.size(22.dp),
+                    tint = contentColor,
+                )
+            } else {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    color = contentColor,
+                    strokeWidth = 2.dp,
+                )
+            }
+        }
         Spacer(Modifier.width(10.dp))
         Text(
-            text = activityGroupLabel(items),
+            text = activityGroupLabel(items, isSealed),
             modifier = Modifier.weight(1f),
             style = MaterialTheme.typography.bodyLarge,
             color = contentColor,
@@ -99,29 +113,11 @@ internal fun ActivityGroupCard(items: List<ConversationItem>) {
     }
 }
 
-internal fun activityGroupLabel(items: List<ConversationItem>): String {
-    val activeItem = items.lastOrNull { it.activityStatus() == ActivityStatus.IN_PROGRESS }
-    if (activeItem != null) {
-        val activeSummary = when (activeItem) {
-            is ConversationItem.Reasoning -> "正在思考"
-            is ConversationItem.Plan -> "正在制定计划"
-            is ConversationItem.CommandExecution -> "正在执行 ${activeItem.command.commandPreview()}"
-            is ConversationItem.FileChange -> {
-                val fileCount = activeItem.changes.distinctBy(ChangedFile::path).size
-                "正在修改 $fileCount 个文件"
-            }
-            is ConversationItem.Activity -> activeItem.title
-            is ConversationItem.UserMessage, is ConversationItem.AgentMessage -> "正在处理"
-        }
-        return "处理中 · $activeSummary"
-    }
+internal fun activityGroupLabel(items: List<ConversationItem>, isSealed: Boolean): String {
+    if (!isSealed) return activeActivityLabel(items)
 
     val failedCount = items.count { it.activityStatus() == ActivityStatus.FAILED }
-    if (failedCount > 0) return "处理过程 · $failedCount 项失败"
-
     val declinedCount = items.count { it.activityStatus() == ActivityStatus.DECLINED }
-    if (declinedCount > 0) return "处理过程 · $declinedCount 项已取消"
-
     val commandCount = items.count { it is ConversationItem.CommandExecution }
     val changedFileCount = items
         .filterIsInstance<ConversationItem.FileChange>()
@@ -130,18 +126,48 @@ internal fun activityGroupLabel(items: List<ConversationItem>): String {
         .size
     val activityCount = items.count { it is ConversationItem.Activity }
     return buildList {
-        add("处理过程")
+        if (failedCount > 0) add("$failedCount 项失败")
+        if (declinedCount > 0) add("$declinedCount 项已取消")
         if (items.any { it is ConversationItem.Reasoning }) add("思考")
-        if (commandCount > 0) add("$commandCount 条命令")
-        if (changedFileCount > 0) add("$changedFileCount 个文件")
-        if (activityCount > 0) add("$activityCount 项操作")
+        if (commandCount > 0) add("执行 $commandCount 条命令")
+        if (changedFileCount > 0) add("改动 $changedFileCount 个文件")
+        if (activityCount > 0) add("执行 $activityCount 项操作")
     }.joinToString(" · ")
 }
 
-private fun activityGroupStatus(items: List<ConversationItem>): ActivityStatus {
+private fun activeActivityLabel(items: List<ConversationItem>): String {
+    val activeItem = items.lastOrNull { it.activityStatus() == ActivityStatus.IN_PROGRESS }
+        ?: items.last()
+    return when (activeItem) {
+        is ConversationItem.Reasoning -> activeItem.summary
+            .lineSequence()
+            .lastOrNull(String::isNotBlank)
+            ?.trim()
+            ?: "思考中"
+
+        is ConversationItem.Plan -> activeItem.text
+            .lineSequence()
+            .lastOrNull(String::isNotBlank)
+            ?.trim()
+            ?: "制定计划中"
+
+        is ConversationItem.CommandExecution -> activeItem.command.commandPreview()
+        is ConversationItem.FileChange -> activeItem.changes
+            .map(::changedFileLabel)
+            .map(ChangedFileLabel::path)
+            .distinct()
+            .joinToString("、")
+            .ifBlank { "修改文件" }
+
+        is ConversationItem.Activity -> activeItem.title
+        is ConversationItem.UserMessage, is ConversationItem.AgentMessage -> error("活动组包含非活动条目")
+    }
+}
+
+private fun activityGroupStatus(items: List<ConversationItem>, isSealed: Boolean): ActivityStatus {
+    if (!isSealed) return ActivityStatus.IN_PROGRESS
     val statuses = items.map(ConversationItem::activityStatus)
     return when {
-        ActivityStatus.IN_PROGRESS in statuses -> ActivityStatus.IN_PROGRESS
         ActivityStatus.FAILED in statuses -> ActivityStatus.FAILED
         ActivityStatus.DECLINED in statuses -> ActivityStatus.DECLINED
         else -> ActivityStatus.COMPLETED
