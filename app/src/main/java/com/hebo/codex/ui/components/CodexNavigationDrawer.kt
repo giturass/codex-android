@@ -30,7 +30,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Circle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ErrorOutline
@@ -800,6 +799,11 @@ private fun DrawerRecentHeader(
         IconButton(onClick = onNewConversation) {
             Icon(Icons.Rounded.Add, contentDescription = "新建任务")
         }
+        if (groupByProject) {
+            IconButton(onClick = { onGroupByProjectChange(false) }) {
+                Icon(Icons.Rounded.Folder, contentDescription = "关闭按项目分组")
+            }
+        }
         Box {
             IconButton(onClick = { menuExpanded = true }) {
                 Icon(Icons.Rounded.MoreVert, contentDescription = "更多会话操作")
@@ -816,19 +820,16 @@ private fun DrawerRecentHeader(
                         onSearch()
                     },
                 )
-                DropdownMenuItem(
-                    text = { Text("按项目分组") },
-                    leadingIcon = { Icon(Icons.Rounded.Folder, contentDescription = null) },
-                    trailingIcon = {
-                        if (groupByProject) {
-                            Icon(Icons.Rounded.Check, contentDescription = "已启用")
-                        }
-                    },
-                    onClick = {
-                        menuExpanded = false
-                        onGroupByProjectChange(!groupByProject)
-                    },
-                )
+                if (!groupByProject) {
+                    DropdownMenuItem(
+                        text = { Text("按项目分组") },
+                        leadingIcon = { Icon(Icons.Rounded.Folder, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onGroupByProjectChange(true)
+                        },
+                    )
+                }
                 DropdownMenuItem(
                     text = { Text("刷新会话列表") },
                     leadingIcon = { Icon(Icons.Rounded.Refresh, contentDescription = null) },
