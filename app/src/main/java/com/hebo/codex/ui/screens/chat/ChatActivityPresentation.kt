@@ -69,10 +69,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
@@ -115,7 +118,10 @@ internal fun ActivityGroupCard(
                     Modifier
                 },
             )
-            .padding(horizontal = 4.dp, vertical = 10.dp),
+            .padding(horizontal = 4.dp, vertical = 10.dp)
+            .semantics {
+                stateDescription = activityStatusDescription(status)
+            },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (singleItem != null) {
@@ -124,7 +130,11 @@ internal fun ActivityGroupCard(
             Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
                 if (isSealed) {
                     Icon(
-                        Icons.Rounded.AutoAwesome,
+                        imageVector = when (status) {
+                            ActivityStatus.FAILED -> Icons.Rounded.ErrorOutline
+                            ActivityStatus.DECLINED -> Icons.Rounded.Block
+                            ActivityStatus.IN_PROGRESS, ActivityStatus.COMPLETED -> Icons.Rounded.AutoAwesome
+                        },
                         contentDescription = null,
                         modifier = Modifier.size(22.dp),
                         tint = contentColor,
@@ -139,14 +149,22 @@ internal fun ActivityGroupCard(
             }
         }
         Spacer(Modifier.width(10.dp))
-        Text(
-            text = activityGroupLabel(items, isSealed),
-            modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.bodyLarge,
-            color = contentColor,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        if (singleItem == null && isSealed) {
+            ActivityGroupMetrics(
+                metrics = activityGroupMetrics(items),
+                color = contentColor,
+                modifier = Modifier.weight(1f),
+            )
+        } else {
+            Text(
+                text = activityGroupLabel(items, isSealed),
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.bodyLarge,
+                color = contentColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         if (canOpenDetails) {
             Icon(
                 Icons.AutoMirrored.Rounded.KeyboardArrowRight,
@@ -175,12 +193,56 @@ internal fun ActivityGroupCard(
     }
 }
 
-internal fun activityGroupLabel(items: List<ConversationItem>, isSealed: Boolean): String {
-    items.singleOrNull()?.let { return activityItemTitle(it) }
-    if (!isSealed) return activeActivityLabel(items)
+@Composable
+private fun ActivityGroupMetrics(
+    metrics: List<ActivityGroupMetric>,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        metrics.forEach { metric ->
+            Row(
+                modifier = Modifier.clearAndSetSemantics {
+                    contentDescription = metric.contentDescription()
+                },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    imageVector = metric.icon(),
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = color,
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    text = metric.count.toString(),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = color,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
 
-    val failedCount = items.count { it.activityStatus() == ActivityStatus.FAILED }
-    val declinedCount = items.count { it.activityStatus() == ActivityStatus.DECLINED }
+internal enum class ActivityGroupMetricType {
+    REASONING,
+    COMMAND,
+    FILE,
+    ACTIVITY,
+}
+
+internal data class ActivityGroupMetric(
+    val type: ActivityGroupMetricType,
+    val count: Int,
+)
+
+internal fun activityGroupMetrics(items: List<ConversationItem>): List<ActivityGroupMetric> {
+    val reasoningCount = items.count { it is ConversationItem.Reasoning }
     val commandCount = items.count { it is ConversationItem.CommandExecution }
     val changedFileCount = items
         .filterIsInstance<ConversationItem.FileChange>()
@@ -189,13 +251,39 @@ internal fun activityGroupLabel(items: List<ConversationItem>, isSealed: Boolean
         .size
     val activityCount = items.count { it is ConversationItem.Activity }
     return buildList {
-        if (failedCount > 0) add("$failedCount 项失败")
-        if (declinedCount > 0) add("$declinedCount 项已取消")
-        if (items.any { it is ConversationItem.Reasoning }) add("推理")
-        if (commandCount > 0) add("执行 $commandCount 条命令")
-        if (changedFileCount > 0) add("改动 $changedFileCount 个文件")
-        if (activityCount > 0) add("执行 $activityCount 项操作")
-    }.joinToString(" · ")
+        if (reasoningCount > 0) add(ActivityGroupMetric(ActivityGroupMetricType.REASONING, reasoningCount))
+        if (commandCount > 0) add(ActivityGroupMetric(ActivityGroupMetricType.COMMAND, commandCount))
+        if (changedFileCount > 0) add(ActivityGroupMetric(ActivityGroupMetricType.FILE, changedFileCount))
+        if (activityCount > 0) add(ActivityGroupMetric(ActivityGroupMetricType.ACTIVITY, activityCount))
+    }
+}
+
+private fun ActivityGroupMetric.icon(): ImageVector = when (type) {
+    ActivityGroupMetricType.REASONING -> Icons.Rounded.Psychology
+    ActivityGroupMetricType.COMMAND -> Icons.Rounded.Terminal
+    ActivityGroupMetricType.FILE -> Icons.Rounded.EditNote
+    ActivityGroupMetricType.ACTIVITY -> Icons.Rounded.Extension
+}
+
+private fun ActivityGroupMetric.contentDescription(): String = when (type) {
+    ActivityGroupMetricType.REASONING -> "$count 项推理"
+    ActivityGroupMetricType.COMMAND -> "$count 条命令"
+    ActivityGroupMetricType.FILE -> "$count 个文件"
+    ActivityGroupMetricType.ACTIVITY -> "$count 项操作"
+}
+
+internal fun activityGroupLabel(items: List<ConversationItem>, isSealed: Boolean): String {
+    items.singleOrNull()?.let { return activityItemTitle(it) }
+    if (!isSealed) return activeActivityLabel(items)
+
+    return activityGroupMetrics(items).joinToString(" · ") { metric ->
+        when (metric.type) {
+            ActivityGroupMetricType.REASONING -> "推理 ${metric.count}"
+            ActivityGroupMetricType.COMMAND -> "命令 ${metric.count}"
+            ActivityGroupMetricType.FILE -> "文件 ${metric.count}"
+            ActivityGroupMetricType.ACTIVITY -> "操作 ${metric.count}"
+        }
+    }
 }
 
 private fun activeActivityLabel(items: List<ConversationItem>): String {

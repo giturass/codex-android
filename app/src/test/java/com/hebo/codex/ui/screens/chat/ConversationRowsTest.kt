@@ -1,5 +1,6 @@
 package com.hebo.codex.ui.screens.chat
 
+import com.hebo.codex.domain.ActivityKind
 import com.hebo.codex.domain.ActivityStatus
 import com.hebo.codex.domain.ChangedFile
 import com.hebo.codex.domain.ConversationItem
@@ -87,7 +88,7 @@ class ConversationRowsTest {
         assertEquals(1, rows.size)
         assertEquals(2, (rows.single() as ConversationRow.ActivityGroup).items.size)
         assertEquals(
-            "推理 · 执行 1 条命令",
+            "推理 1 · 命令 1",
             activityGroupLabel(
                 items = (rows.single() as ConversationRow.ActivityGroup).items,
                 isSealed = true,
@@ -188,8 +189,40 @@ class ConversationRowsTest {
         )
 
         assertEquals(
-            "改动 2 个文件",
+            "文件 2",
             activityGroupLabel(listOf(firstChange, secondChange), isSealed = true),
+        )
+    }
+
+    @Test
+    fun `活动组汇总全部类型并保持固定顺序`() {
+        val items = listOf(
+            command("command", "turn-1"),
+            ConversationItem.Activity(
+                id = "activity",
+                turnId = "turn-1",
+                kind = ActivityKind.WEB_SEARCH,
+                title = "搜索网页",
+                status = ActivityStatus.COMPLETED,
+            ),
+            fileChange("change", listOf("src/Main.kt", "src/Theme.kt")),
+            ConversationItem.Reasoning(
+                id = "reasoning",
+                turnId = "turn-1",
+                summaryParts = listOf("检查项目"),
+                rawContentParts = emptyList(),
+                isStreaming = false,
+            ),
+        )
+
+        assertEquals(
+            listOf(
+                ActivityGroupMetric(ActivityGroupMetricType.REASONING, 1),
+                ActivityGroupMetric(ActivityGroupMetricType.COMMAND, 1),
+                ActivityGroupMetric(ActivityGroupMetricType.FILE, 2),
+                ActivityGroupMetric(ActivityGroupMetricType.ACTIVITY, 1),
+            ),
+            activityGroupMetrics(items),
         )
     }
 
