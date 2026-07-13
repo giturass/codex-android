@@ -1522,7 +1522,6 @@ internal fun ConversationComposer(
                     expanded = addMenuExpanded,
                     onExpandedChange = {
                         addMenuExpanded = it
-                        if (!it) showQuickPhrases = false
                     },
                     showQuickPhrases = showQuickPhrases,
                     onShowQuickPhrases = { showQuickPhrases = it },
@@ -1537,12 +1536,10 @@ internal fun ConversationComposer(
                     onAddImageAddress = { dialog = ComposerDialog.ImageAddress },
                     onManageQuickPhrases = {
                         addMenuExpanded = false
-                        showQuickPhrases = false
                         showQuickPhraseManager = true
                     },
                     onSelectQuickPhrase = { phrase ->
                         addMenuExpanded = false
-                        showQuickPhrases = false
                         onSendQuickPhrase(phrase.content)
                     },
                     onInsertTrigger = { trigger ->
