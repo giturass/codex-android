@@ -1,4 +1,7 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(
+    androidx.compose.foundation.ExperimentalFoundationApi::class,
+    androidx.compose.material3.ExperimentalMaterial3Api::class,
+)
 
 package com.hebo.codex.ui.screens.chat
 
@@ -261,17 +264,25 @@ private fun ActivityDetailsSheet(
                 items.forEachIndexed { index, item ->
                     val itemKey = "${item.turnId}:${item.id}"
                     val expanded = itemKey in expandedItemKeys
-                    item(key = itemKey) {
-                        ActivityTimelineHeader(
-                            item = item,
-                            isLast = index == items.lastIndex,
-                            expanded = expanded,
-                            onToggle = {
-                                expandedItemKeys = ArrayList(expandedItemKeys).apply {
-                                    if (!remove(itemKey)) add(itemKey)
-                                }
-                            },
-                        )
+                    stickyHeader(key = "$itemKey:header") {
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                        ) {
+                            ActivityTimelineHeader(
+                                item = item,
+                                isLast = index == items.lastIndex,
+                                expanded = expanded,
+                                onToggle = {
+                                    expandedItemKeys = ArrayList(expandedItemKeys).apply {
+                                        if (!remove(itemKey)) add(itemKey)
+                                    }
+                                },
+                            )
+                        }
+                    }
+                    item(key = "$itemKey:body") {
                         ActivityTimelineBody(
                             item = item,
                             isLast = index == items.lastIndex,
