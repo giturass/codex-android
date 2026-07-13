@@ -41,6 +41,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.hebo.codex.domain.ChangedFile
 import com.hebo.codex.domain.FileChangeKind
+import com.hebo.codex.ui.formatCount
 import com.hebo.codex.ui.theme.statusColors
 import dev.snipme.highlights.Highlights
 import dev.snipme.highlights.model.BoldHighlight
@@ -126,7 +127,7 @@ private fun CodeTextSurface(
             }
             if (isTruncated) {
                 TextButton(onClick = { showFullText = true }, modifier = Modifier.fillMaxWidth()) {
-                    Text("查看全部 $lineCount 行")
+                    Text("查看全部 ${formatCount(lineCount.toLong())} 行")
                 }
             }
         }

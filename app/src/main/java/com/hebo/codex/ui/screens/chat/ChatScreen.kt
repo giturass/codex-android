@@ -172,7 +172,6 @@ import com.hebo.codex.domain.projectName
 import com.hebo.codex.ui.displayDescriptionRes
 import com.hebo.codex.ui.displayLabelRes
 import com.hebo.codex.ui.formatCompactCount
-import com.hebo.codex.ui.formatCount
 import com.hebo.codex.ui.formatPercent
 import com.hebo.codex.ui.components.MessageComposer
 import com.hebo.codex.ui.components.MessageComposerAction
@@ -2270,7 +2269,7 @@ private fun TokenUsageSection(
 private fun TokenUsageMetric(label: String, value: Long) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text("${formatCount(value)} Token", style = MaterialTheme.typography.labelLarge)
+        Text("${formatCompactCount(value)} Token", style = MaterialTheme.typography.labelLarge)
     }
 }
 
