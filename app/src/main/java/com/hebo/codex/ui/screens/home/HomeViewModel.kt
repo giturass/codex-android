@@ -50,6 +50,7 @@ data class HomeUiState(
     val isLoading: Boolean = false,
     val isRefreshing: Boolean = false,
     val isLoadingMore: Boolean = false,
+    val isLoadingMoreRecentProjects: Boolean = false,
     val errorMessage: UserFacingError? = null,
 ) {
     val activeServer: ServerProfile?
@@ -72,6 +73,7 @@ class HomeViewModel(
     private val mutableEvents = Channel<HomeEvent>(Channel.BUFFERED)
     private var refreshJob: Job? = null
     private var searchJob: Job? = null
+    private var recentProjectsJob: Job? = null
 
     val state: StateFlow<HomeUiState> = mutableState
     val events = mutableEvents.receiveAsFlow()
@@ -113,6 +115,7 @@ class HomeViewModel(
             repository.activeServerId.collect { serverId ->
                 refreshJob?.cancel()
                 searchJob?.cancel()
+                recentProjectsJob?.cancel()
                 if (serverId == null) {
                     mutableState.update {
                         it.copy(
@@ -126,6 +129,7 @@ class HomeViewModel(
                             isLoading = false,
                             isRefreshing = false,
                             isLoadingMore = false,
+                            isLoadingMoreRecentProjects = false,
                         )
                     }
                 } else {
@@ -142,6 +146,7 @@ class HomeViewModel(
                             recentNextCursor = null,
                             isRefreshing = false,
                             isLoadingMore = false,
+                            isLoadingMoreRecentProjects = false,
                         )
                     }
                     requestLoad(serverId)
@@ -261,7 +266,8 @@ class HomeViewModel(
         val state = mutableState.value
         val serverId = state.activeServerId ?: return
         val cursor = state.nextCursor ?: return
-        if (state.isLoading || state.isLoadingMore) return
+        val recentQuery = !state.showArchived && state.searchTerm.isBlank()
+        if (state.isLoading || state.isLoadingMore || (recentQuery && state.isLoadingMoreRecentProjects)) return
         viewModelScope.launch {
             mutableState.update { it.copy(isLoadingMore = true, errorMessage = null) }
             runSuspendCatching {
@@ -294,6 +300,54 @@ class HomeViewModel(
                 }
             }.onFailure(::showError)
             mutableState.update { it.copy(isLoadingMore = false) }
+        }
+    }
+
+    fun loadMoreRecentProjects() {
+        val state = mutableState.value
+        val serverId = state.activeServerId ?: return
+        val cursor = state.recentNextCursor ?: return
+        val showingRecent = !state.showArchived && state.searchTerm.isBlank()
+        if (
+            state.isLoadingMoreRecentProjects ||
+            (showingRecent && (state.isLoading || state.isLoadingMore))
+        ) {
+            return
+        }
+        recentProjectsJob = viewModelScope.launch {
+            mutableState.update { it.copy(isLoadingMoreRecentProjects = true, errorMessage = null) }
+            try {
+                runSuspendCatching {
+                    repository.threadPage(serverId = serverId, cursor = cursor)
+                }.onSuccess { page ->
+                    mutableState.update { current ->
+                        if (current.activeServerId != serverId || current.recentNextCursor != cursor) {
+                            current
+                        } else {
+                            val recentThreads = (current.recentThreads + page.data)
+                                .distinctBy(ThreadSummary::id)
+                            val recentProjects = groupRecentProjects(recentThreads)
+                            val currentShowsRecent = !current.showArchived && current.searchTerm.isBlank()
+                            current.copy(
+                                threads = if (currentShowsRecent) recentThreads else current.threads,
+                                recentThreads = recentThreads,
+                                projects = if (currentShowsRecent) recentProjects else current.projects,
+                                recentProjects = recentProjects,
+                                nextCursor = if (currentShowsRecent) page.nextCursor else current.nextCursor,
+                                recentNextCursor = page.nextCursor,
+                            )
+                        }
+                    }
+                }.onFailure(::showError)
+            } finally {
+                mutableState.update {
+                    if (it.activeServerId == serverId) {
+                        it.copy(isLoadingMoreRecentProjects = false)
+                    } else {
+                        it
+                    }
+                }
+            }
         }
     }
 

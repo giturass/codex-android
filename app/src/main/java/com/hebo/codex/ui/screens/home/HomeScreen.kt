@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -28,6 +29,7 @@ import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -47,6 +49,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -92,6 +95,15 @@ private val NewTaskComposerCommands = listOf(
     ComposerCommand.SETTINGS,
     ComposerCommand.ATTACH,
 )
+
+internal const val PROJECT_OPTION_PAGE_SIZE = 8
+
+internal fun nextProjectOptionLimit(currentLimit: Int, loadedProjectCount: Int): Int =
+    if (loadedProjectCount > currentLimit) {
+        currentLimit + PROJECT_OPTION_PAGE_SIZE
+    } else {
+        loadedProjectCount + PROJECT_OPTION_PAGE_SIZE
+    }
 
 @Composable
 fun HomeScreen(
@@ -187,6 +199,10 @@ fun HomeScreen(
                 modelLabel = composerModelLabel(newTaskState.options.model, null, state.models),
                 cwd = newTaskState.cwd,
                 projects = state.recentProjects,
+                projectSelectionKey = activeServer.id,
+                hasMoreProjects = state.recentNextCursor != null,
+                isLoadingMoreProjects = state.isLoadingMoreRecentProjects ||
+                    (!state.showArchived && state.searchTerm.isBlank() && (state.isLoading || state.isLoadingMore)),
                 resources = newTaskState.inputResources,
                 quickPhrases = quickPhraseState.phrases,
                 connectionStatus = state.connectionStatuses[state.activeServerId]
@@ -214,6 +230,7 @@ fun HomeScreen(
                     showProjectMenu = false
                     showCustomPathDialog = true
                 },
+                onLoadMoreProjects = viewModel::loadMoreRecentProjects,
                 onOpenOptions = { showOptions = true },
                 onAddQuickPhrase = quickPhraseViewModel::add,
                 onUpdateQuickPhrase = quickPhraseViewModel::update,
@@ -257,6 +274,9 @@ private fun NewTaskContent(
     modelLabel: String,
     cwd: String,
     projects: List<RecentProject>,
+    projectSelectionKey: String,
+    hasMoreProjects: Boolean,
+    isLoadingMoreProjects: Boolean,
     resources: List<FeatureEntry>,
     quickPhrases: List<QuickPhrase>,
     connectionStatus: ConnectionStatus,
@@ -277,6 +297,7 @@ private fun NewTaskContent(
     onDismissProjectMenu: () -> Unit,
     onSelectProject: (String) -> Unit,
     onSelectCustomPath: () -> Unit,
+    onLoadMoreProjects: () -> Unit,
     onOpenOptions: () -> Unit,
     onAddQuickPhrase: (String) -> Unit,
     onUpdateQuickPhrase: (String, String) -> Unit,
@@ -316,12 +337,16 @@ private fun NewTaskContent(
                 ProjectSelector(
                     cwd = cwd,
                     projects = projects,
+                    selectionKey = projectSelectionKey,
+                    hasMoreProjects = hasMoreProjects,
+                    isLoadingMoreProjects = isLoadingMoreProjects,
                     expanded = projectMenuExpanded,
                     enabled = !isCreating,
                     onExpandedChange = onProjectMenuExpandedChange,
                     onDismiss = onDismissProjectMenu,
                     onSelect = onSelectProject,
                     onSelectCustomPath = onSelectCustomPath,
+                    onLoadMore = onLoadMoreProjects,
                 )
             }
         }
@@ -393,13 +418,23 @@ private fun NewTaskContent(
 private fun ProjectSelector(
     cwd: String,
     projects: List<RecentProject>,
+    selectionKey: String,
+    hasMoreProjects: Boolean,
+    isLoadingMoreProjects: Boolean,
     expanded: Boolean,
     enabled: Boolean,
     onExpandedChange: (Boolean) -> Unit,
     onDismiss: () -> Unit,
     onSelect: (String) -> Unit,
     onSelectCustomPath: () -> Unit,
+    onLoadMore: () -> Unit,
 ) {
+    var visibleProjectLimit by rememberSaveable(selectionKey) {
+        mutableIntStateOf(PROJECT_OPTION_PAGE_SIZE)
+    }
+    val hasHiddenProjects = projects.size > visibleProjectLimit
+    val canLoadMoreProjects = hasHiddenProjects || hasMoreProjects
+
     ExposedDropdownMenuBox(
         expanded = expanded,
         onExpandedChange = onExpandedChange,
@@ -445,7 +480,7 @@ private fun ProjectSelector(
             modifier = Modifier.widthIn(min = 280.dp, max = 600.dp),
             matchAnchorWidth = false,
         ) {
-            projects.take(8).forEach { project ->
+            projects.take(visibleProjectLimit).forEach { project ->
                 DropdownMenuItem(
                     text = {
                         Column {
@@ -465,7 +500,25 @@ private fun ProjectSelector(
                     onClick = { onSelect(project.path) },
                 )
             }
-            if (projects.isNotEmpty()) HorizontalDivider()
+            if (canLoadMoreProjects) {
+                DropdownMenuItem(
+                    text = { Text("加载更多项目") },
+                    trailingIcon = {
+                        if (isLoadingMoreProjects) {
+                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        }
+                    },
+                    enabled = !isLoadingMoreProjects,
+                    onClick = {
+                        visibleProjectLimit = nextProjectOptionLimit(
+                            currentLimit = visibleProjectLimit,
+                            loadedProjectCount = projects.size,
+                        )
+                        if (!hasHiddenProjects) onLoadMore()
+                    },
+                )
+            }
+            if (projects.isNotEmpty() || canLoadMoreProjects) HorizontalDivider()
             DropdownMenuItem(
                 text = { Text("输入其他服务端路径") },
                 leadingIcon = { Icon(Icons.Rounded.Add, contentDescription = null) },
