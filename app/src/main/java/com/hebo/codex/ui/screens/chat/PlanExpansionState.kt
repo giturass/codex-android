@@ -13,9 +13,6 @@ internal val PlanExpansionPhase.bodyIncluded: Boolean
 internal val PlanExpansionPhase.bodyVisible: Boolean
     get() = this == PlanExpansionPhase.EXPANDED
 
-internal fun planExpansionTarget(expanded: Boolean, canExpand: Boolean): Boolean =
-    expanded && canExpand
-
 internal fun PlanExpansionPhase.startTransition(expanded: Boolean): PlanExpansionPhase = when {
     expanded -> PlanExpansionPhase.EXPANDING
     this == PlanExpansionPhase.COLLAPSED -> PlanExpansionPhase.COLLAPSED

@@ -1417,8 +1417,10 @@ internal fun ConversationComposer(
         Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 12.dp),
     ) {
         if (isRunning) {
-            key(serverId, conversationId, activeTurnId) {
-                ActivePlanCard(plan = plan)
+            plan?.takeIf { it.steps.isNotEmpty() }?.let { visiblePlan ->
+                key(serverId, conversationId, activeTurnId) {
+                    ActivePlanCard(plan = visiblePlan)
+                }
             }
         }
         if (activeToken != null && (paletteEntries.isNotEmpty() || isLoadingResources)) {
@@ -1601,14 +1603,15 @@ internal fun composerModelLabel(
 }
 
 @Composable
-private fun ActivePlanCard(plan: ActiveTurnPlan?) {
-    val canExpand = plan?.steps?.isNotEmpty() == true
-    val activeStep = plan?.steps?.firstOrNull { it.status == PlanStepStatus.IN_PROGRESS }
+private fun ActivePlanCard(plan: ActiveTurnPlan) {
+    val summary = plan.steps.firstOrNull { it.status == PlanStepStatus.IN_PROGRESS }?.text
+        ?: plan.steps.firstOrNull { it.status == PlanStepStatus.PENDING }?.text
+        ?: "计划步骤已完成"
     var expanded by remember { mutableStateOf(false) }
     var expansionPhase by remember {
         mutableStateOf(PlanExpansionPhase.COLLAPSED)
     }
-    val expansionTarget = planExpansionTarget(expanded = expanded, canExpand = canExpand)
+    val expansionTarget = expanded
     val bodyAlpha by animateFloatAsState(
         targetValue = if (expansionPhase.bodyVisible) 1f else 0f,
         animationSpec = tween(ACTIVE_PLAN_CONTENT_FADE_DURATION_MILLIS),
@@ -1619,10 +1622,6 @@ private fun ActivePlanCard(plan: ActiveTurnPlan?) {
         animationSpec = tween(ACTIVE_PLAN_CONTENT_FADE_DURATION_MILLIS),
         label = "工作计划展开箭头",
     )
-
-    LaunchedEffect(canExpand) {
-        if (!canExpand) expanded = false
-    }
 
     LaunchedEffect(expansionTarget) {
         expansionPhase = expansionPhase.startTransition(expansionTarget)
@@ -1657,9 +1656,9 @@ private fun ActivePlanCard(plan: ActiveTurnPlan?) {
             Row(
                 modifier = Modifier
                     .then(if (expansionPhase.bodyIncluded) Modifier.fillMaxWidth() else Modifier)
-                    .clickable(enabled = canExpand, role = Role.Button) { expanded = !expanded }
+                    .clickable(role = Role.Button) { expanded = !expanded }
                     .semantics {
-                        if (canExpand) stateDescription = if (expansionTarget) "已展开" else "已收起"
+                        stateDescription = if (expansionTarget) "已展开" else "已收起"
                     }
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -1667,25 +1666,23 @@ private fun ActivePlanCard(plan: ActiveTurnPlan?) {
                 CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = activeStep?.text ?: "正在处理",
+                    text = summary,
                     modifier = Modifier.widthIn(max = 400.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (canExpand) {
-                    Spacer(Modifier.width(6.dp))
-                    Icon(
-                        imageVector = Icons.Rounded.KeyboardArrowDown,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp).rotate(arrowRotation),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                Spacer(Modifier.width(6.dp))
+                Icon(
+                    imageVector = Icons.Rounded.KeyboardArrowDown,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp).rotate(arrowRotation),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
 
-            if (expansionPhase.bodyIncluded && plan != null) {
+            if (expansionPhase.bodyIncluded) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()

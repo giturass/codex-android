@@ -7,16 +7,6 @@ import org.junit.Test
 
 class PlanExpansionStateTest {
     @Test
-    fun `没有计划时不允许展开`() {
-        assertFalse(planExpansionTarget(expanded = true, canExpand = false))
-    }
-
-    @Test
-    fun `有计划且请求展开时允许展开`() {
-        assertTrue(planExpansionTarget(expanded = true, canExpand = true))
-    }
-
-    @Test
     fun `展开时先纳入正文布局再显示正文`() {
         val expanding = PlanExpansionPhase.COLLAPSED.startTransition(expanded = true)
 
