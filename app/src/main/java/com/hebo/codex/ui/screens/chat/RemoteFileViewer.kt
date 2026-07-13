@@ -2,12 +2,11 @@
 
 package com.hebo.codex.ui.screens.chat
 
-import android.graphics.BitmapFactory
-import android.webkit.MimeTypeMap
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,13 +23,17 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -41,25 +44,24 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hebo.codex.domain.RemoteFileMetadata
 import com.hebo.codex.util.runSuspendCatching
+import dev.snipme.highlights.model.SyntaxLanguage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.nio.ByteBuffer
-import java.nio.charset.CodingErrorAction
 
 @Composable
 internal fun RemoteFileSheet(
@@ -68,12 +70,14 @@ internal fun RemoteFileSheet(
     onDismiss: () -> Unit,
     getMetadata: suspend (String) -> RemoteFileMetadata,
     readFile: suspend (String) -> ByteArray,
+    onOpenRemoteFile: (RemoteFileTarget) -> Unit,
+    onLinkError: (String) -> Unit,
     onSaved: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val fileName = remember(target.path) { target.path.remoteFileName() }
-    val mimeType = remember(fileName) { fileName.mimeType() }
+    val mimeType = remember(fileName) { remoteFileMimeType(fileName) }
     var metadataState by remember(target.path) {
         mutableStateOf<RemoteLoadState<RemoteFileMetadata>>(RemoteLoadState.Loading)
     }
@@ -82,7 +86,8 @@ internal fun RemoteFileSheet(
     }
     var loadedBytes by remember(target.path) { mutableStateOf<ByteArray?>(null) }
     var isSaving by remember(target.path) { mutableStateOf(false) }
-    var saveError by remember(target.path) { mutableStateOf<String?>(null) }
+    var isOpening by remember(target.path) { mutableStateOf(false) }
+    var actionError by remember(target.path) { mutableStateOf<String?>(null) }
 
     val saveLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument(mimeType),
@@ -90,7 +95,7 @@ internal fun RemoteFileSheet(
         if (destination != null) {
             scope.launch {
                 isSaving = true
-                saveError = null
+                actionError = null
                 runSuspendCatching {
                     val bytes = loadedBytes ?: readFile(target.path).also { loadedBytes = it }
                     withContext(Dispatchers.IO) {
@@ -102,10 +107,27 @@ internal fun RemoteFileSheet(
                 }.onSuccess {
                     onSaved(fileName)
                 }.onFailure { error ->
-                    saveError = error.message ?: "保存文件失败"
+                    actionError = error.message ?: "保存文件失败"
                 }
                 isSaving = false
             }
+        }
+    }
+
+    fun openWithAnotherApp() {
+        scope.launch {
+            isOpening = true
+            actionError = null
+            runSuspendCatching {
+                val bytes = loadedBytes ?: readFile(target.path).also { loadedBytes = it }
+                cacheRemoteFileForOpening(context, fileName, bytes)
+            }.onSuccess { uri ->
+                runCatching { openCachedRemoteFile(context, uri, fileName, mimeType) }
+                    .onFailure { error -> actionError = error.message ?: "没有可打开该文件的应用" }
+            }.onFailure { error ->
+                actionError = error.message ?: "无法准备临时文件"
+            }
+            isOpening = false
         }
     }
 
@@ -179,10 +201,15 @@ internal fun RemoteFileSheet(
                                 RemoteLoadState.Idle -> PreviewHint()
                                 RemoteLoadState.Loading -> LoadingArea("正在读取文件")
                                 is RemoteLoadState.Failed -> ErrorArea(preview.message)
-                                is RemoteLoadState.Ready -> RemotePreviewContent(preview.value, target)
+                                is RemoteLoadState.Ready -> RemotePreviewContent(
+                                    preview = preview.value,
+                                    target = target,
+                                    onOpenRemoteFile = onOpenRemoteFile,
+                                    onLinkError = onLinkError,
+                                )
                             }
                         }
-                        saveError?.let {
+                        actionError?.let {
                             Text(
                                 it,
                                 modifier = Modifier.padding(top = 8.dp),
@@ -190,44 +217,63 @@ internal fun RemoteFileSheet(
                                 color = MaterialTheme.colorScheme.error,
                             )
                         }
-                        Row(
+                        Column(
                             Modifier.fillMaxWidth().padding(vertical = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            OutlinedButton(
-                                onClick = {
-                                    scope.launch {
-                                        previewState = RemoteLoadState.Loading
-                                        previewState = runSuspendCatching {
-                                            val bytes = loadedBytes ?: readFile(target.path).also { loadedBytes = it }
-                                            decodeRemotePreview(bytes)
-                                        }.fold(
-                                            onSuccess = { RemoteLoadState.Ready(it) },
-                                            onFailure = {
-                                                RemoteLoadState.Failed(it.message ?: "无法预览文件")
-                                            },
-                                        )
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        scope.launch {
+                                            previewState = RemoteLoadState.Loading
+                                            previewState = runSuspendCatching {
+                                                val bytes = loadedBytes
+                                                    ?: readFile(target.path).also { loadedBytes = it }
+                                                decodeRemotePreview(bytes, fileName)
+                                            }.fold(
+                                                onSuccess = { RemoteLoadState.Ready(it) },
+                                                onFailure = {
+                                                    RemoteLoadState.Failed(it.message ?: "无法预览文件")
+                                                },
+                                            )
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    enabled = previewState !is RemoteLoadState.Loading && !isSaving && !isOpening,
+                                ) {
+                                    Icon(Icons.Rounded.Visibility, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("预览")
+                                }
+                                Button(
+                                    onClick = { saveLauncher.launch(fileName) },
+                                    modifier = Modifier.weight(1f),
+                                    enabled = !isSaving && !isOpening && previewState !is RemoteLoadState.Loading,
+                                ) {
+                                    if (isSaving) {
+                                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                    } else {
+                                        Icon(Icons.Rounded.Download, contentDescription = null)
                                     }
-                                },
-                                modifier = Modifier.weight(1f),
-                                enabled = previewState !is RemoteLoadState.Loading && !isSaving,
-                            ) {
-                                Icon(Icons.Rounded.Visibility, contentDescription = null)
-                                Spacer(Modifier.width(8.dp))
-                                Text("预览")
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(if (isSaving) "保存中" else "保存")
+                                }
                             }
-                            Button(
-                                onClick = { saveLauncher.launch(fileName) },
-                                modifier = Modifier.weight(1f),
-                                enabled = !isSaving && previewState !is RemoteLoadState.Loading,
+                            OutlinedButton(
+                                onClick = ::openWithAnotherApp,
+                                modifier = Modifier.fillMaxWidth(),
+                                enabled = !isOpening && !isSaving && previewState !is RemoteLoadState.Loading,
                             ) {
-                                if (isSaving) {
+                                if (isOpening) {
                                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                                 } else {
-                                    Icon(Icons.Rounded.Download, contentDescription = null)
+                                    Icon(Icons.AutoMirrored.Rounded.OpenInNew, contentDescription = null)
                                 }
                                 Spacer(Modifier.width(8.dp))
-                                Text(if (isSaving) "保存中" else "保存")
+                                Text(if (isOpening) "正在准备文件" else "使用其他应用打开")
                             }
                         }
                     }
@@ -263,12 +309,17 @@ private fun ErrorArea(message: String) {
 @Composable
 private fun PreviewHint() {
     BoxScopeLoading {
-        Text("选择预览读取文件内容，或直接保存到设备", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("选择预览读取文件内容，也可直接打开或保存", color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
-private fun RemotePreviewContent(preview: RemotePreview, target: RemoteFileTarget) {
+private fun RemotePreviewContent(
+    preview: RemotePreview,
+    target: RemoteFileTarget,
+    onOpenRemoteFile: (RemoteFileTarget) -> Unit,
+    onLinkError: (String) -> Unit,
+) {
     when (preview) {
         is RemotePreview.Image -> Image(
             bitmap = preview.bitmap,
@@ -277,10 +328,17 @@ private fun RemotePreviewContent(preview: RemotePreview, target: RemoteFileTarge
             contentScale = ContentScale.Fit,
         )
 
-        is RemotePreview.Text -> TextFilePreview(preview, target.line)
+        is RemotePreview.Svg -> SvgFilePreview(preview, target.line)
+        is RemotePreview.Text -> TextFilePreview(
+            preview = preview,
+            target = target,
+            onOpenRemoteFile = onOpenRemoteFile,
+            onLinkError = onLinkError,
+        )
+
         RemotePreview.Unsupported -> BoxScopeLoading {
             Text(
-                "该文件不是支持的图片或 UTF-8 文本，可保存后使用其他应用打开",
+                "该文件不支持内置预览，可使用其他应用打开或保存到设备",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -288,11 +346,144 @@ private fun RemotePreviewContent(preview: RemotePreview, target: RemoteFileTarge
 }
 
 @Composable
-private fun TextFilePreview(preview: RemotePreview.Text, targetLine: Int?) {
-    val selectedLine = targetLine?.coerceIn(1, preview.lines.size)
+private fun SvgFilePreview(preview: RemotePreview.Svg, targetLine: Int?) {
+    var showSource by remember(preview, targetLine) { mutableStateOf(targetLine != null) }
+    Column(Modifier.fillMaxSize()) {
+        PreviewModeSelector(
+            options = listOf("图形", "源码"),
+            selectedIndex = if (showSource) 1 else 0,
+            onSelected = { showSource = it == 1 },
+        )
+        if (showSource) {
+            SourceTextPreview(preview.source, targetLine, language = null)
+        } else {
+            Image(
+                bitmap = preview.bitmap,
+                contentDescription = "SVG 预览",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TextFilePreview(
+    preview: RemotePreview.Text,
+    target: RemoteFileTarget,
+    onOpenRemoteFile: (RemoteFileTarget) -> Unit,
+    onLinkError: (String) -> Unit,
+) {
+    when {
+        preview.kind == TextPreviewKind.Markdown -> MarkdownFilePreview(
+            preview = preview,
+            target = target,
+            onOpenRemoteFile = onOpenRemoteFile,
+            onLinkError = onLinkError,
+        )
+
+        preview.formatted != null -> FormattedTextFilePreview(preview, target.line)
+        else -> SourceTextPreview(preview.source, target.line, preview.language)
+    }
+}
+
+@Composable
+private fun MarkdownFilePreview(
+    preview: RemotePreview.Text,
+    target: RemoteFileTarget,
+    onOpenRemoteFile: (RemoteFileTarget) -> Unit,
+    onLinkError: (String) -> Unit,
+) {
+    var showSource by remember(preview, target.line) { mutableStateOf(target.line != null) }
+    Column(Modifier.fillMaxSize()) {
+        PreviewModeSelector(
+            options = listOf("渲染", "源码"),
+            selectedIndex = if (showSource) 1 else 0,
+            onSelected = { showSource = it == 1 },
+        )
+        if (showSource) {
+            SourceTextPreview(preview.source, target.line, preview.language)
+        } else {
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                if (preview.source.truncated) PreviewTruncatedNotice()
+                ChatMarkdown(
+                    content = preview.source.content,
+                    cwd = remoteFileParent(target.path),
+                    onOpenRemoteFile = onOpenRemoteFile,
+                    onLinkError = onLinkError,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FormattedTextFilePreview(preview: RemotePreview.Text, targetLine: Int?) {
+    val formatted = requireNotNull(preview.formatted)
+    var showOriginal by remember(preview, targetLine) { mutableStateOf(targetLine != null) }
+    Column(Modifier.fillMaxSize()) {
+        PreviewModeSelector(
+            options = listOf("格式化", "原文"),
+            selectedIndex = if (showOriginal) 1 else 0,
+            onSelected = { showOriginal = it == 1 },
+        )
+        SourceTextPreview(
+            preview = if (showOriginal) preview.source else formatted,
+            targetLine = targetLine.takeIf { showOriginal },
+            language = if (showOriginal) preview.language else null,
+        )
+    }
+}
+
+@Composable
+private fun PreviewModeSelector(
+    options: List<String>,
+    selectedIndex: Int,
+    onSelected: (Int) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+    ) {
+        options.forEachIndexed { index, option ->
+            FilterChip(
+                selected = selectedIndex == index,
+                onClick = { onSelected(index) },
+                label = { Text(option) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SourceTextPreview(
+    preview: PreviewText,
+    targetLine: Int?,
+    language: SyntaxLanguage?,
+) {
+    val darkTheme = isSystemInDarkTheme()
+    val plainLines = remember(preview.content) { AnnotatedString(preview.content).previewLines() }
+    val highlightedLines by produceState(
+        initialValue = plainLines,
+        key1 = preview.content,
+        key2 = language,
+        key3 = darkTheme,
+    ) {
+        value = if (language == null) {
+            plainLines
+        } else {
+            withContext(Dispatchers.Default) {
+                buildHighlightedText(preview.content, language, darkTheme).previewLines()
+            }
+        }
+    }
+    val selectedLine = targetLine?.coerceIn(1, highlightedLines.size)
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = (selectedLine ?: 1) - 1)
+    LaunchedEffect(selectedLine) {
+        if (selectedLine != null) listState.scrollToItem(selectedLine - 1)
+    }
     LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-        itemsIndexed(preview.lines) { index, line ->
+        itemsIndexed(highlightedLines) { index, line ->
             val lineNumber = index + 1
             Row(
                 Modifier
@@ -311,7 +502,7 @@ private fun TextFilePreview(preview: RemotePreview.Text, targetLine: Int?) {
                 )
                 SelectionContainer(modifier = Modifier.weight(1f)) {
                     Text(
-                        line,
+                        text = line,
                         fontFamily = FontFamily.Monospace,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -331,36 +522,29 @@ private fun TextFilePreview(preview: RemotePreview.Text, targetLine: Int?) {
     }
 }
 
-private suspend fun decodeRemotePreview(bytes: ByteArray): RemotePreview = withContext(Dispatchers.Default) {
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-    if (bounds.outWidth > 0 && bounds.outHeight > 0) {
-        var sampleSize = 1
-        while (bounds.outWidth / sampleSize > MAX_IMAGE_PREVIEW_DIMENSION ||
-            bounds.outHeight / sampleSize > MAX_IMAGE_PREVIEW_DIMENSION
-        ) {
-            sampleSize *= 2
+private fun AnnotatedString.previewLines(): List<AnnotatedString> {
+    val result = mutableListOf<AnnotatedString>()
+    var start = 0
+    while (start <= length) {
+        val newline = text.indexOf('\n', start)
+        val end = if (newline == -1) length else newline
+        result += subSequence(start, end).let { line ->
+            if (line.text.endsWith('\r')) line.subSequence(0, line.length - 1) else line
         }
-        val bitmap = BitmapFactory.decodeByteArray(
-            bytes,
-            0,
-            bytes.size,
-            BitmapFactory.Options().apply { inSampleSize = sampleSize },
-        ) ?: error("无法解码图片")
-        return@withContext RemotePreview.Image(bitmap.asImageBitmap())
+        if (newline == -1) break
+        start = newline + 1
     }
-    if (bytes.any { it == 0.toByte() }) return@withContext RemotePreview.Unsupported
+    return result
+}
 
-    val text = runCatching {
-        Charsets.UTF_8.newDecoder()
-            .onMalformedInput(CodingErrorAction.REPORT)
-            .onUnmappableCharacter(CodingErrorAction.REPORT)
-            .decode(ByteBuffer.wrap(bytes))
-            .toString()
-    }.getOrNull() ?: return@withContext RemotePreview.Unsupported
-    val truncated = text.length > MAX_TEXT_PREVIEW_CHARACTERS
-    val previewText = if (truncated) text.take(MAX_TEXT_PREVIEW_CHARACTERS) else text
-    RemotePreview.Text(previewText.split('\n'), truncated)
+@Composable
+private fun PreviewTruncatedNotice() {
+    Text(
+        "预览内容已截断，保存文件可查看完整内容",
+        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+        color = MaterialTheme.colorScheme.tertiary,
+        style = MaterialTheme.typography.labelMedium,
+    )
 }
 
 private sealed interface RemoteLoadState<out T> {
@@ -373,21 +557,5 @@ private sealed interface RemoteLoadState<out T> {
     data class Failed(val message: String) : RemoteLoadState<Nothing>
 }
 
-private sealed interface RemotePreview {
-    data class Image(val bitmap: ImageBitmap) : RemotePreview
-
-    data class Text(val lines: List<String>, val truncated: Boolean) : RemotePreview
-
-    data object Unsupported : RemotePreview
-}
-
 private fun String.remoteFileName(): String =
     replace('\\', '/').substringAfterLast('/').ifBlank { "download" }
-
-private fun String.mimeType(): String {
-    val extension = substringAfterLast('.', "").lowercase()
-    return MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension) ?: "application/octet-stream"
-}
-
-private const val MAX_IMAGE_PREVIEW_DIMENSION = 2_048
-private const val MAX_TEXT_PREVIEW_CHARACTERS = 1_000_000

@@ -700,6 +700,8 @@ fun ChatScreen(
             onDismiss = { remoteFileTarget = null },
             getMetadata = viewModel::getRemoteFileMetadata,
             readFile = viewModel::readRemoteFile,
+            onOpenRemoteFile = { remoteFileTarget = it },
+            onLinkError = showLinkError,
             onSaved = { fileName ->
                 remoteFileTarget = null
                 scrollScope.launch { snackbarHostState.showSnackbar("已保存 $fileName") }
@@ -1051,7 +1053,7 @@ private fun AgentMessage(
 }
 
 @Composable
-private fun ChatMarkdown(
+internal fun ChatMarkdown(
     content: String,
     cwd: String,
     onOpenRemoteFile: (RemoteFileTarget) -> Unit,

@@ -200,18 +200,26 @@ internal fun AnnotatedString.previewLines(maxLines: Int, fromEnd: Boolean): Anno
 }
 
 internal fun buildShellHighlightedText(command: String, darkTheme: Boolean): AnnotatedString {
+    return buildHighlightedText(command, SyntaxLanguage.SHELL, darkTheme)
+}
+
+internal fun buildHighlightedText(
+    code: String,
+    language: SyntaxLanguage,
+    darkTheme: Boolean,
+): AnnotatedString {
     val highlights = Highlights.Builder()
-        .code(command)
-        .language(SyntaxLanguage.SHELL)
+        .code(code)
+        .language(language)
         .theme(SyntaxThemes.default(darkMode = darkTheme))
         .build()
         .getHighlights()
     return buildAnnotatedString {
-        append(command)
+        append(code)
         highlights.forEach { highlight ->
             val start = highlight.location.start
             val end = highlight.location.end
-            if (start < 0 || start >= end || end > command.length) return@forEach
+            if (start < 0 || start >= end || end > code.length) return@forEach
             val style = when (highlight) {
                 is ColorHighlight -> SpanStyle(color = Color(highlight.rgb).copy(alpha = 1f))
                 is BoldHighlight -> SpanStyle(fontWeight = FontWeight.Bold)

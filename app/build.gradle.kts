@@ -51,6 +51,7 @@ room3 {
 }
 
 dependencies {
+    implementation(libs.android.svg)
     implementation(libs.androidx.core)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime)
