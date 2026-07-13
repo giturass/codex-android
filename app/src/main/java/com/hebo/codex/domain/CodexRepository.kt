@@ -43,6 +43,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
+import java.io.OutputStream
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
@@ -344,8 +345,11 @@ class CodexRepository(
     suspend fun getRemoteFileMetadata(serverId: String, path: String): RemoteFileMetadata =
         api(serverId).getFileMetadata(path)
 
-    suspend fun readRemoteFile(serverId: String, path: String): ByteArray =
-        api(serverId).readFile(path)
+    suspend fun readRemoteFilePreview(serverId: String, path: String): ByteArray =
+        api(serverId).readFilePreview(path)
+
+    suspend fun downloadRemoteFile(serverId: String, path: String, output: OutputStream): Long =
+        api(serverId).downloadFile(path, output)
 
     suspend fun reviewConversation(
         serverId: String,

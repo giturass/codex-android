@@ -9,12 +9,13 @@ import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.OutputStream
 import java.util.UUID
 
 internal suspend fun cacheRemoteFileForOpening(
     context: Context,
     fileName: String,
-    bytes: ByteArray,
+    writeContent: suspend (OutputStream) -> Unit,
 ): Uri = withContext(Dispatchers.IO) {
     val cacheRoot = File(context.cacheDir, REMOTE_FILE_CACHE_DIRECTORY).apply {
         check(mkdirs() || isDirectory) { "无法创建临时文件目录" }
@@ -26,8 +27,13 @@ internal suspend fun cacheRemoteFileForOpening(
         check(mkdirs()) { "无法创建临时文件目录" }
     }
     val cachedFile = File(fileDirectory, fileName)
-    cachedFile.outputStream().use { output -> output.write(bytes) }
-    FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", cachedFile)
+    try {
+        cachedFile.outputStream().use { output -> writeContent(output) }
+        FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", cachedFile)
+    } catch (error: Throwable) {
+        fileDirectory.deleteRecursively()
+        throw error
+    }
 }
 
 internal fun openCachedRemoteFile(

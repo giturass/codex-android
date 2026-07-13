@@ -10,6 +10,8 @@ import com.hebo.codex.domain.ThreadSourceKind
 import com.hebo.codex.domain.ThreadOptions
 import com.hebo.codex.domain.TurnOptions
 import com.hebo.codex.domain.UserInputPart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -18,6 +20,7 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
+import java.io.OutputStream
 import java.util.Base64
 
 enum class StableRpcMethod(val wireName: String) {
@@ -210,13 +213,12 @@ class AppServerApi(
         )
     }
 
-    suspend fun readFile(path: String): ByteArray {
-        val encoded = request(
-            StableRpcMethod.FS_READ_FILE,
-            buildJsonObject { put("path", path) },
-        ).jsonObject.requiredString("dataBase64")
-        if (encoded.length > MAX_REMOTE_FILE_BASE64_LENGTH) {
-            throw ProtocolException("远端文件超过客户端 $MAX_REMOTE_FILE_MEBIBYTES MiB 限制")
+    suspend fun readFilePreview(path: String): ByteArray {
+        val encoded = readFileBase64(path)
+        if (encoded.length > MAX_REMOTE_PREVIEW_BASE64_LENGTH) {
+            throw ProtocolException(
+                "文件超过 $MAX_REMOTE_PREVIEW_MEBIBYTES MiB 内置预览限制，仍可保存或使用其他应用打开",
+            )
         }
         return try {
             Base64.getDecoder().decode(encoded)
@@ -224,6 +226,21 @@ class AppServerApi(
             throw ProtocolException("fs/readFile 返回了无效的 Base64 内容", error)
         }
     }
+
+    suspend fun downloadFile(path: String, output: OutputStream): Long {
+        val encoded = readFileBase64(path)
+        if (encoded.length > MAX_REMOTE_DOWNLOAD_BASE64_LENGTH) {
+            throw ProtocolException(
+                "文件超过客户端 $MAX_REMOTE_DOWNLOAD_MEBIBYTES MiB 保存/打开限制",
+            )
+        }
+        return withContext(Dispatchers.IO) { decodeRemoteFileBase64(encoded, output) }
+    }
+
+    private suspend fun readFileBase64(path: String): String = request(
+        StableRpcMethod.FS_READ_FILE,
+        buildJsonObject { put("path", path) },
+    ).jsonObject.requiredString("dataBase64")
 
     private fun buildTurnParams(
         threadId: String,
@@ -331,8 +348,30 @@ class AppServerApi(
     private companion object {
         const val THREAD_PAGE_LIMIT = 50
         const val CLIENT_NAME = "codex_android"
-        private const val MAX_REMOTE_FILE_MEBIBYTES = 16
-        private const val MAX_REMOTE_FILE_BYTES = MAX_REMOTE_FILE_MEBIBYTES * 1024 * 1024
-        private const val MAX_REMOTE_FILE_BASE64_LENGTH = ((MAX_REMOTE_FILE_BYTES + 2) / 3) * 4
+        private const val MAX_REMOTE_PREVIEW_MEBIBYTES = 16
+        private const val MAX_REMOTE_PREVIEW_BYTES = MAX_REMOTE_PREVIEW_MEBIBYTES * 1024 * 1024
+        private const val MAX_REMOTE_PREVIEW_BASE64_LENGTH = ((MAX_REMOTE_PREVIEW_BYTES + 2) / 3) * 4
+        private const val MAX_REMOTE_DOWNLOAD_MEBIBYTES = 256
+        private const val MAX_REMOTE_DOWNLOAD_BYTES = MAX_REMOTE_DOWNLOAD_MEBIBYTES * 1024 * 1024
+        private const val MAX_REMOTE_DOWNLOAD_BASE64_LENGTH = ((MAX_REMOTE_DOWNLOAD_BYTES + 2) / 3) * 4
     }
 }
+
+internal fun decodeRemoteFileBase64(encoded: String, output: OutputStream): Long {
+    var offset = 0
+    var written = 0L
+    try {
+        while (offset < encoded.length) {
+            val end = minOf(offset + BASE64_DECODE_CHUNK_CHARACTERS, encoded.length)
+            val decoded = Base64.getDecoder().decode(encoded.substring(offset, end))
+            output.write(decoded)
+            written += decoded.size
+            offset = end
+        }
+    } catch (error: IllegalArgumentException) {
+        throw ProtocolException("fs/readFile 返回了无效的 Base64 内容", error)
+    }
+    return written
+}
+
+private const val BASE64_DECODE_CHUNK_CHARACTERS = 32 * 1024

@@ -42,6 +42,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import java.io.OutputStream
 import java.util.UUID
 
 data class ChatDraft(
@@ -253,7 +254,11 @@ class ChatViewModel(
     suspend fun getRemoteFileMetadata(path: String): RemoteFileMetadata =
         repository.getRemoteFileMetadata(serverId, path)
 
-    suspend fun readRemoteFile(path: String): ByteArray = repository.readRemoteFile(serverId, path)
+    suspend fun readRemoteFilePreview(path: String): ByteArray =
+        repository.readRemoteFilePreview(serverId, path)
+
+    suspend fun downloadRemoteFile(path: String, output: OutputStream): Long =
+        repository.downloadRemoteFile(serverId, path, output)
 
     fun compact() {
         viewModelScope.launch {

@@ -699,7 +699,8 @@ fun ChatScreen(
             serverName = conversation?.serverName.orEmpty(),
             onDismiss = { remoteFileTarget = null },
             getMetadata = viewModel::getRemoteFileMetadata,
-            readFile = viewModel::readRemoteFile,
+            readPreview = viewModel::readRemoteFilePreview,
+            downloadFile = viewModel::downloadRemoteFile,
             onOpenRemoteFile = { remoteFileTarget = it },
             onLinkError = showLinkError,
             onSaved = { fileName ->
@@ -1061,6 +1062,7 @@ internal fun ChatMarkdown(
 ) {
     val markdownState = rememberMarkdownState(content = content, retainState = true)
     val externalUriHandler = LocalUriHandler.current
+    var pendingExternalUri by remember { mutableStateOf<String?>(null) }
     val currentOpenRemoteFile by rememberUpdatedState(onOpenRemoteFile)
     val currentLinkError by rememberUpdatedState(onLinkError)
     val uriHandler = remember(cwd, externalUriHandler) {
@@ -1068,11 +1070,7 @@ internal fun ChatMarkdown(
             override fun openUri(uri: String) {
                 when (val destination = resolveChatLink(uri, cwd)) {
                     is ChatLinkDestination.RemoteFile -> currentOpenRemoteFile(destination.target)
-                    is ChatLinkDestination.External -> runCatching {
-                        externalUriHandler.openUri(destination.uri)
-                    }.onFailure { error ->
-                        currentLinkError(error.message ?: "无法打开链接")
-                    }
+                    is ChatLinkDestination.External -> pendingExternalUri = destination.uri
 
                     is ChatLinkDestination.Invalid -> currentLinkError(destination.message)
                 }
@@ -1086,6 +1084,52 @@ internal fun ChatMarkdown(
             modifier = Modifier.fillMaxWidth(),
         )
     }
+    pendingExternalUri?.let { uri ->
+        ExternalLinkConfirmationDialog(
+            uri = uri,
+            onDismiss = { pendingExternalUri = null },
+            onConfirm = {
+                pendingExternalUri = null
+                runCatching { externalUriHandler.openUri(uri) }
+                    .onFailure { error -> currentLinkError(error.message ?: "无法打开链接") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun ExternalLinkConfirmationDialog(
+    uri: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("打开外部链接？") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("即将在浏览器或其他应用中打开以下地址，请确认协议和域名")
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                ) {
+                    SelectionContainer {
+                        Text(
+                            text = uri,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 160.dp)
+                                .verticalScroll(rememberScrollState())
+                                .padding(12.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = { Button(onClick = onConfirm) { Text("继续打开") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
 }
 
 @Composable

@@ -62,6 +62,7 @@ import dev.snipme.highlights.model.SyntaxLanguage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.OutputStream
 
 @Composable
 internal fun RemoteFileSheet(
@@ -69,7 +70,8 @@ internal fun RemoteFileSheet(
     serverName: String,
     onDismiss: () -> Unit,
     getMetadata: suspend (String) -> RemoteFileMetadata,
-    readFile: suspend (String) -> ByteArray,
+    readPreview: suspend (String) -> ByteArray,
+    downloadFile: suspend (String, OutputStream) -> Long,
     onOpenRemoteFile: (RemoteFileTarget) -> Unit,
     onLinkError: (String) -> Unit,
     onSaved: (String) -> Unit,
@@ -97,12 +99,14 @@ internal fun RemoteFileSheet(
                 isSaving = true
                 actionError = null
                 runSuspendCatching {
-                    val bytes = loadedBytes ?: readFile(target.path).also { loadedBytes = it }
+                    val bytes = loadedBytes
                     withContext(Dispatchers.IO) {
                         val output = requireNotNull(context.contentResolver.openOutputStream(destination, "w")) {
                             "无法打开保存位置"
                         }
-                        output.use { it.write(bytes) }
+                        output.use {
+                            if (bytes != null) it.write(bytes) else downloadFile(target.path, it)
+                        }
                     }
                 }.onSuccess {
                     onSaved(fileName)
@@ -119,8 +123,10 @@ internal fun RemoteFileSheet(
             isOpening = true
             actionError = null
             runSuspendCatching {
-                val bytes = loadedBytes ?: readFile(target.path).also { loadedBytes = it }
-                cacheRemoteFileForOpening(context, fileName, bytes)
+                val bytes = loadedBytes
+                cacheRemoteFileForOpening(context, fileName) { output ->
+                    if (bytes != null) output.write(bytes) else downloadFile(target.path, output)
+                }
             }.onSuccess { uri ->
                 runCatching { openCachedRemoteFile(context, uri, fileName, mimeType) }
                     .onFailure { error -> actionError = error.message ?: "没有可打开该文件的应用" }
@@ -231,7 +237,7 @@ internal fun RemoteFileSheet(
                                             previewState = RemoteLoadState.Loading
                                             previewState = runSuspendCatching {
                                                 val bytes = loadedBytes
-                                                    ?: readFile(target.path).also { loadedBytes = it }
+                                                    ?: readPreview(target.path).also { loadedBytes = it }
                                                 decodeRemotePreview(bytes, fileName)
                                             }.fold(
                                                 onSuccess = { RemoteLoadState.Ready(it) },
