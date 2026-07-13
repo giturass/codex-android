@@ -281,6 +281,9 @@ private fun ColumnScope.DrawerContent(
     val currentDraftKeys: Set<DraftKey> = remember(drafts) {
         drafts.mapTo(mutableSetOf()) { it.key }
     }
+    val visibleProjects = remember(projects, drafts) {
+        projectsWithoutDrafts(projects, drafts)
+    }
     var previousDraftKeys by remember(activeServer?.id) { mutableStateOf(currentDraftKeys) }
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -311,20 +314,10 @@ private fun ColumnScope.DrawerContent(
         ?.takeIf { it.serverId == activeServer?.id }
         ?.threadId
 
-    LaunchedEffect(projects, activeThreadId) {
-        val activeProject = projects.firstOrNull { project ->
-            project.threads.any { it.id == activeThreadId }
-        }
-        when {
-            activeProject != null -> {
-                expandedProjects = expandedProjects + activeProject.path
-                expansionInitialized = true
-            }
-
-            !expansionInitialized && projects.isNotEmpty() -> {
-                expandedProjects = setOf(projects.first().path)
-                expansionInitialized = true
-            }
+    LaunchedEffect(activeServer?.id, groupByProject, visibleProjects, activeThreadId) {
+        if (groupByProject && !expansionInitialized && visibleProjects.isNotEmpty()) {
+            expandedProjects = initialExpandedProjectPaths(visibleProjects, activeThreadId)
+            expansionInitialized = true
         }
     }
 
@@ -353,7 +346,6 @@ private fun ColumnScope.DrawerContent(
         ) {
             val visibleDrafts = drafts
             val visibleRecentThreads = threadsWithoutDrafts(recentThreads, visibleDrafts)
-            val visibleProjects = projectsWithoutDrafts(projects, visibleDrafts)
             val recentThreadsById = recentThreads.associateBy(ThreadSummary::id)
             if (activeServer != null && drawerPage == DrawerPage.RECENT) {
                 if (visibleDrafts.isNotEmpty()) {
@@ -389,7 +381,14 @@ private fun ColumnScope.DrawerContent(
                         refreshEnabled = !isLoading && !isLoadingMore,
                         onNewConversation = onNewConversation,
                         onSearch = { drawerPage = DrawerPage.SEARCH },
-                        onGroupByProjectChange = { groupByProject = it },
+                        onGroupByProjectChange = { enabled ->
+                            groupByProject = enabled
+                            expansionInitialized = false
+                            if (enabled) {
+                                expandedProjects = initialExpandedProjectPaths(visibleProjects, activeThreadId)
+                                expansionInitialized = visibleProjects.isNotEmpty()
+                            }
+                        },
                         onRefresh = onRefresh,
                     )
                 }
@@ -968,6 +967,16 @@ internal fun projectsWithoutDrafts(
 ): List<RecentProject> = projects.mapNotNull { project ->
     project.copy(threads = threadsWithoutDrafts(project.threads, drafts))
         .takeIf { it.threads.isNotEmpty() }
+}
+
+internal fun initialExpandedProjectPaths(
+    projects: List<RecentProject>,
+    activeThreadId: String?,
+): Set<String> {
+    val initialProject = projects.firstOrNull { project ->
+        project.threads.any { it.id == activeThreadId }
+    } ?: projects.firstOrNull()
+    return initialProject?.let { setOf(it.path) }.orEmpty()
 }
 
 internal fun hasNewDraft(previousKeys: Set<DraftKey>, drafts: List<DraftSummary>): Boolean =
