@@ -319,7 +319,7 @@ private fun ActivityTimelineHeader(
                 text = activityItemTitle(item),
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodyLarge,
-                maxLines = 2,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             if (hasDetails) {
