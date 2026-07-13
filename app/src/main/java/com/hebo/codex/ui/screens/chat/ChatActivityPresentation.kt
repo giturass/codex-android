@@ -96,7 +96,9 @@ internal fun ActivityGroupCard(
 ) {
     if (items.isEmpty()) return
     var showDetails by rememberSaveable(items.first().turnId) { mutableStateOf(false) }
-    val status = activityGroupStatus(items, isSealed)
+    val singleItem = items.singleOrNull()
+    val canOpenDetails = singleItem == null || activityItemHasDetails(singleItem)
+    val status = singleItem?.activityStatus() ?: activityGroupStatus(items, isSealed)
     val contentColor = when (status) {
         ActivityStatus.FAILED, ActivityStatus.DECLINED -> MaterialTheme.colorScheme.error
         else -> MaterialTheme.colorScheme.onSurfaceVariant
@@ -106,24 +108,34 @@ internal fun ActivityGroupCard(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
-            .clickable(role = Role.Button) { showDetails = true }
+            .then(
+                if (canOpenDetails) {
+                    Modifier.clickable(role = Role.Button) { showDetails = true }
+                } else {
+                    Modifier
+                },
+            )
             .padding(horizontal = 4.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
-            if (isSealed) {
-                Icon(
-                    Icons.Rounded.AutoAwesome,
-                    contentDescription = null,
-                    modifier = Modifier.size(22.dp),
-                    tint = contentColor,
-                )
-            } else {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    color = contentColor,
-                    strokeWidth = 2.dp,
-                )
+        if (singleItem != null) {
+            ActivityTimelineIcon(singleItem)
+        } else {
+            Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
+                if (isSealed) {
+                    Icon(
+                        Icons.Rounded.AutoAwesome,
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp),
+                        tint = contentColor,
+                    )
+                } else {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = contentColor,
+                        strokeWidth = 2.dp,
+                    )
+                }
             }
         }
         Spacer(Modifier.width(10.dp))
@@ -135,12 +147,14 @@ internal fun ActivityGroupCard(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        Icon(
-            Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-            contentDescription = "查看处理过程详情",
-            modifier = Modifier.size(22.dp),
-            tint = contentColor,
-        )
+        if (canOpenDetails) {
+            Icon(
+                Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+                contentDescription = "查看处理过程详情",
+                modifier = Modifier.size(22.dp),
+                tint = contentColor,
+            )
+        }
     }
 
     if (showDetails) {
@@ -162,6 +176,7 @@ internal fun ActivityGroupCard(
 }
 
 internal fun activityGroupLabel(items: List<ConversationItem>, isSealed: Boolean): String {
+    items.singleOrNull()?.let { return activityItemTitle(it) }
     if (!isSealed) return activeActivityLabel(items)
 
     val failedCount = items.count { it.activityStatus() == ActivityStatus.FAILED }
@@ -241,7 +256,15 @@ private fun ActivityDetailsSheet(
         initialValue = SheetValue.Hidden,
         enabledValues = setOf(SheetValue.Hidden, SheetValue.PartiallyExpanded, SheetValue.Expanded),
     )
-    var expandedItemKeys by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
+    var expandedItemKeys by rememberSaveable {
+        mutableStateOf(
+            arrayListOf<String>().apply {
+                items.singleOrNull()
+                    ?.takeIf(::activityItemHasDetails)
+                    ?.let { add("${it.turnId}:${it.id}") }
+            },
+        )
+    }
     val maxSheetHeight = LocalConfiguration.current.screenHeightDp.dp * 0.88f
     ModalBottomSheet(
         onDismissRequest = onDismiss,

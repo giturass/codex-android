@@ -123,7 +123,7 @@ class ConversationRowsTest {
     }
 
     @Test
-    fun `非空正文为此前的活动组封口`() {
+    fun `封口后的单个活动仍显示活动标题`() {
         val rows = buildConversationRows(
             items = listOf(
                 command("command", "turn-1"),
@@ -134,7 +134,7 @@ class ConversationRowsTest {
         val group = rows.first() as ConversationRow.ActivityGroup
 
         assertTrue(group.isSealed)
-        assertEquals("执行 1 条命令", activityGroupLabel(group.items, group.isSealed))
+        assertEquals("pwd", activityGroupLabel(group.items, group.isSealed))
     }
 
     @Test
@@ -194,14 +194,14 @@ class ConversationRowsTest {
     }
 
     @Test
-    fun `未封口的文件修改显示文件路径`() {
+    fun `单次文件修改按一个活动显示标题`() {
         val change = fileChange(
             id = "change",
             paths = listOf("src/Main.kt", "src/Theme.kt"),
         )
 
         assertEquals(
-            "src/Main.kt、src/Theme.kt",
+            "2 个文件",
             activityGroupLabel(listOf(change), isSealed = false),
         )
     }
@@ -223,9 +223,9 @@ class ConversationRowsTest {
     }
 
     @Test
-    fun `失败摘要同时展示状态和活动统计`() {
+    fun `单个失败活动显示活动标题和状态`() {
         assertEquals(
-            "1 项失败 · 执行 1 条命令",
+            "pwd · 失败",
             activityGroupLabel(
                 listOf(command("command", "turn-1", ActivityStatus.FAILED)),
                 isSealed = true,
