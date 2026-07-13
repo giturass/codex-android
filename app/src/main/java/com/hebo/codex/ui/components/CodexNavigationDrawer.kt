@@ -1092,7 +1092,7 @@ private fun ThreadStatusIndicator(attention: ThreadAttention?) {
         when (attention) {
             ThreadAttention.RUNNING -> CircularProgressIndicator(
                 modifier = Modifier.size(18.dp),
-                color = MaterialTheme.statusColors.success,
+                color = MaterialTheme.colorScheme.onSurface,
                 strokeWidth = 2.dp,
             )
 
