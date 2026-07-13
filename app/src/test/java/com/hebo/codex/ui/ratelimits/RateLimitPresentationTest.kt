@@ -1,6 +1,5 @@
 package com.hebo.codex.ui.ratelimits
 
-import androidx.compose.ui.unit.LayoutDirection
 import com.hebo.codex.domain.AccountRateLimit
 import com.hebo.codex.domain.AccountRateLimits
 import com.hebo.codex.domain.RateLimitWindow
@@ -114,28 +113,6 @@ class RateLimitPresentationTest {
         assertEquals("1 分钟后重置", resetCountdownLabel(now + 60, now))
         assertEquals("2 小时 18 分钟后重置", resetCountdownLabel(now + 2 * 3_600 + 17 * 60 + 1, now))
         assertEquals("3 天 6 小时后重置", resetCountdownLabel(now + 3 * 86_400 + 6 * 3_600, now))
-    }
-
-    @Test
-    fun alignsRateLimitPopupToWindowEnd() {
-        assertEquals(
-            684,
-            rateLimitPopupHorizontalPosition(
-                windowWidth = 1_000,
-                popupWidth = 300,
-                layoutDirection = LayoutDirection.Ltr,
-                windowMarginPx = 16,
-            ),
-        )
-        assertEquals(
-            16,
-            rateLimitPopupHorizontalPosition(
-                windowWidth = 1_000,
-                popupWidth = 300,
-                layoutDirection = LayoutDirection.Rtl,
-                windowMarginPx = 16,
-            ),
-        )
     }
 
     private fun window(usedPercent: Double, durationMinutes: Long) = RateLimitWindow(

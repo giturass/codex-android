@@ -2,7 +2,6 @@
 
 package com.hebo.codex.ui.ratelimits
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -24,7 +23,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -40,23 +38,16 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntRect
-import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupPositionProvider
-import androidx.compose.ui.window.PopupProperties
 import com.hebo.codex.domain.AccountRateLimit
 import com.hebo.codex.domain.AccountRateLimits
 import com.hebo.codex.domain.RateLimitWindow
+import com.hebo.codex.ui.components.AnchoredDetailsPopup
 import com.hebo.codex.ui.components.CompactDailyTokenUsageChart
 import com.hebo.codex.ui.components.DAILY_TOKEN_USAGE_DAY_COUNT
 import com.hebo.codex.ui.components.RemainingLinearProgressIndicator
@@ -73,8 +64,6 @@ private val IndicatorTouchSize = 48.dp
 private val IndicatorVisualSize = 36.dp
 private val RingStrokeWidth = 3.dp
 private val DetailsPopupWidth = 300.dp
-private val DetailsPopupGap = 4.dp
-private val DetailsPopupWindowMargin = 8.dp
 private const val FiveHourWindowMinutes = 5L * 60L
 private const val WeeklyWindowMinutes = 7L * 24L * 60L
 private const val MonthlyWindowMinutes = 30L * 24L * 60L
@@ -222,13 +211,6 @@ private fun RateLimitDetailsPopup(
     onDismiss: () -> Unit,
 ) {
     var nowEpochSeconds by remember { mutableLongStateOf(Instant.now().epochSecond) }
-    val density = LocalDensity.current
-    val positionProvider = remember(density) {
-        RateLimitPopupPositionProvider(
-            gapPx = with(density) { DetailsPopupGap.roundToPx() },
-            windowMarginPx = with(density) { DetailsPopupWindowMargin.roundToPx() },
-        )
-    }
     LaunchedEffect(Unit) {
         while (true) {
             delay(60_000)
@@ -236,110 +218,62 @@ private fun RateLimitDetailsPopup(
         }
     }
 
-    Popup(
-        popupPositionProvider = positionProvider,
+    AnchoredDetailsPopup(
         onDismissRequest = onDismiss,
-        properties = PopupProperties(focusable = true),
+        modifier = Modifier.width(DetailsPopupWidth),
     ) {
-        Surface(
-            modifier = Modifier.width(DetailsPopupWidth),
-            shape = MaterialTheme.shapes.extraLarge,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            tonalElevation = 3.dp,
-            shadowElevation = 6.dp,
+        Column(
+            modifier = Modifier
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Column(
-                modifier = Modifier
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                windows.all.forEachIndexed { index, presented ->
-                    if (index > 0) HorizontalDivider()
-                    RateLimitWindowDetails(
-                        label = presented.label,
-                        window = presented.window,
-                        color = rateLimitWindowColor(presented),
-                        nowEpochSeconds = nowEpochSeconds,
-                    )
-                }
-                HorizontalDivider()
-                TokenUsageDetails(state)
-                state.errorMessage?.let { error ->
+            windows.all.forEachIndexed { index, presented ->
+                if (index > 0) HorizontalDivider()
+                RateLimitWindowDetails(
+                    label = presented.label,
+                    window = presented.window,
+                    color = rateLimitWindowColor(presented),
+                    nowEpochSeconds = nowEpochSeconds,
+                )
+            }
+            HorizontalDivider()
+            TokenUsageDetails(state)
+            state.errorMessage?.let { error ->
+                Text(
+                    text = "额度刷新失败：${error.summary}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            state.updatedAt?.let { updatedAt ->
+                val isStale = nowEpochSeconds - updatedAt >= StaleAfterSeconds
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
-                        text = "额度刷新失败：${error.summary}",
+                        text = if (isStale) {
+                            "数据可能已过期 · 更新于 ${relativeTime(updatedAt, Instant.ofEpochSecond(nowEpochSeconds))}"
+                        } else {
+                            "更新于 ${relativeTime(updatedAt, Instant.ofEpochSecond(nowEpochSeconds))}"
+                        },
+                        modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
+                        color = if (isStale) MaterialTheme.statusColors.warning
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                }
-                state.updatedAt?.let { updatedAt ->
-                    val isStale = nowEpochSeconds - updatedAt >= StaleAfterSeconds
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = if (isStale) {
-                                "数据可能已过期 · 更新于 ${relativeTime(updatedAt, Instant.ofEpochSecond(nowEpochSeconds))}"
-                            } else {
-                                "更新于 ${relativeTime(updatedAt, Instant.ofEpochSecond(nowEpochSeconds))}"
-                            },
-                            modifier = Modifier.weight(1f),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (isStale) MaterialTheme.statusColors.warning
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        IconButton(onClick = onRefresh, enabled = !state.isRefreshing) {
-                            if (state.isRefreshing) {
-                                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                            } else {
-                                Icon(Icons.Rounded.Refresh, contentDescription = "刷新额度与 Token 用量")
-                            }
+                    IconButton(onClick = onRefresh, enabled = !state.isRefreshing) {
+                        if (state.isRefreshing) {
+                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Rounded.Refresh, contentDescription = "刷新额度与 Token 用量")
                         }
                     }
                 }
             }
         }
     }
-}
-
-private class RateLimitPopupPositionProvider(
-    private val gapPx: Int,
-    private val windowMarginPx: Int,
-) : PopupPositionProvider {
-    override fun calculatePosition(
-        anchorBounds: IntRect,
-        windowSize: IntSize,
-        layoutDirection: LayoutDirection,
-        popupContentSize: IntSize,
-    ): IntOffset {
-        val x = rateLimitPopupHorizontalPosition(
-            windowWidth = windowSize.width,
-            popupWidth = popupContentSize.width,
-            layoutDirection = layoutDirection,
-            windowMarginPx = windowMarginPx,
-        )
-        val belowY = anchorBounds.bottom + gapPx
-        val maxY = windowSize.height - popupContentSize.height - windowMarginPx
-        val y = if (belowY <= maxY) {
-            belowY
-        } else {
-            (anchorBounds.top - popupContentSize.height - gapPx).coerceAtLeast(windowMarginPx)
-        }
-        return IntOffset(x, y)
-    }
-}
-
-internal fun rateLimitPopupHorizontalPosition(
-    windowWidth: Int,
-    popupWidth: Int,
-    layoutDirection: LayoutDirection,
-    windowMarginPx: Int,
-): Int = when (layoutDirection) {
-    LayoutDirection.Ltr ->
-        (windowWidth - popupWidth - windowMarginPx).coerceAtLeast(windowMarginPx)
-    LayoutDirection.Rtl -> windowMarginPx
 }
 
 @Composable

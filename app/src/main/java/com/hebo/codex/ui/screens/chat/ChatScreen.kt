@@ -14,6 +14,8 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
@@ -118,6 +120,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -129,6 +132,8 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextRange
@@ -162,7 +167,6 @@ import com.hebo.codex.domain.ThreadGoal
 import com.hebo.codex.domain.ThreadGoalStatus
 import com.hebo.codex.domain.ThreadAttention
 import com.hebo.codex.domain.TokenUsage
-import com.hebo.codex.domain.TokenUsageBreakdown
 import com.hebo.codex.domain.ActiveTurnPlan
 import com.hebo.codex.domain.TurnOptions
 import com.hebo.codex.domain.UserInputPart
@@ -175,6 +179,7 @@ import com.hebo.codex.ui.formatPercent
 import com.hebo.codex.ui.components.MessageComposer
 import com.hebo.codex.ui.components.MessageComposerAction
 import com.hebo.codex.ui.components.MessageComposerActionButton
+import com.hebo.codex.ui.components.AnchoredDetailsPopup
 import com.hebo.codex.ui.components.QuickPhraseManagerDialog
 import com.hebo.codex.ui.components.QuickPhraseMenuContent
 import com.hebo.codex.ui.components.NavigationAttention
@@ -209,6 +214,7 @@ private val ChatHeaderControlsHeight = ConversationHeaderItemMinHeight + Convers
 private val ChatHeaderContentSpacing = 24.dp
 private val ChatComposerOverlayMinHeight = 116.dp
 private val ChatComposerMaxWidth = 760.dp
+private val ConversationStatisticsPopupWidth = 300.dp
 
 @Composable
 fun ChatScreen(
@@ -409,7 +415,6 @@ fun ChatScreen(
                     onRename = { dialog = ChatDialog.Rename },
                     onFork = { dialog = ChatDialog.Fork },
                     onOpenGoal = { dialog = ChatDialog.Goal },
-                    onOpenStatistics = { dialog = ChatDialog.Statistics },
                 ),
                 onRefreshRateLimits = onRefreshRateLimits,
                 modifier = Modifier.onSizeChanged { topControlsHeightPx = it.height },
@@ -560,11 +565,6 @@ fun ChatScreen(
             },
         )
 
-        ChatDialog.Statistics -> ConversationStatisticsSheet(
-            usage = conversation?.tokenUsage,
-            onDismiss = { dialog = null },
-        )
-
         ChatDialog.Review -> ReviewDialog(
             onDismiss = { dialog = null },
             onSubmit = { target, delivery ->
@@ -666,7 +666,6 @@ internal data class ConversationHeaderActions(
     val onRename: () -> Unit,
     val onFork: () -> Unit,
     val onOpenGoal: () -> Unit,
-    val onOpenStatistics: () -> Unit,
 )
 
 @Composable
@@ -684,6 +683,7 @@ internal fun ConversationFloatingHeader(
     modifier: Modifier = Modifier,
 ) {
     var actionsExpanded by remember { mutableStateOf(false) }
+    var statisticsExpanded by remember(conversation?.threadId) { mutableStateOf(false) }
     val headerTitle = conversation?.title ?: newConversationTitle
     val headerSubtitle = conversation?.let { projectName(it.cwd) } ?: newConversationSubtitle
     Box(
@@ -796,8 +796,14 @@ internal fun ConversationFloatingHeader(
                                     icon = { Icon(Icons.Rounded.BarChart, contentDescription = null) },
                                     onClick = {
                                         actionsExpanded = false
-                                        actions.onOpenStatistics()
+                                        statisticsExpanded = true
                                     },
+                                )
+                            }
+                            if (statisticsExpanded) {
+                                ConversationStatisticsPopup(
+                                    usage = conversation?.tokenUsage,
+                                    onDismiss = { statisticsExpanded = false },
                                 )
                             }
                         }
@@ -2180,23 +2186,21 @@ private fun ForkConversationSheet(
 }
 
 @Composable
-private fun ConversationStatisticsSheet(
+private fun ConversationStatisticsPopup(
     usage: TokenUsage?,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(
+    AnchoredDetailsPopup(
         onDismissRequest = onDismiss,
-        containerColor = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.width(ConversationStatisticsPopupWidth),
     ) {
         Column(
             Modifier
-                .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .navigationBarsPadding()
-                .padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("对话统计", style = MaterialTheme.typography.titleLarge)
+            Text("对话统计", style = MaterialTheme.typography.titleMedium)
             if (usage == null) {
                 Text(
                     "暂无统计数据",
@@ -2205,20 +2209,8 @@ private fun ConversationStatisticsSheet(
             } else {
                 ContextUsageSection(usage)
                 HorizontalDivider()
-                TokenUsageSection(
-                    title = "会话累计",
-                    description = "本对话所有模型调用累计消耗的 Token",
-                    usage = usage.total,
-                )
-                HorizontalDivider()
-                TokenUsageSection(
-                    title = "最近一次模型调用",
-                    description = "最近一次调用返回的 Token 明细",
-                    usage = usage.last,
-                )
+                TokenUsageComparisonChart(usage)
             }
-            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("关闭") }
-            Spacer(Modifier.height(12.dp))
         }
     }
 }
@@ -2249,31 +2241,121 @@ private fun ContextUsageSection(usage: TokenUsage) {
 }
 
 @Composable
-private fun TokenUsageSection(
-    title: String,
-    description: String,
-    usage: TokenUsageBreakdown,
+private fun TokenUsageComparisonChart(
+    usage: TokenUsage,
 ) {
-    Text(title, style = MaterialTheme.typography.titleMedium)
-    Text(
-        description,
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    TokenUsageMetric("总计", usage.totalTokens)
-    TokenUsageMetric("输入", usage.inputTokens)
-    if (usage.cachedInputTokens > 0) TokenUsageMetric("缓存输入", usage.cachedInputTokens)
-    TokenUsageMetric("输出", usage.outputTokens)
-    if (usage.reasoningOutputTokens > 0) TokenUsageMetric("推理输出", usage.reasoningOutputTokens)
+    val rows = tokenUsageComparisonRows(usage)
+    val axisMaximum = rows.maxOf(TokenUsageComparisonRow::cumulativeTokens)
+    val previousColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+    val latestColor = MaterialTheme.colorScheme.primary
+    val trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+    Text("Token 用量", style = MaterialTheme.typography.titleMedium)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TokenUsageLegend(color = previousColor, label = "此前调用")
+        Spacer(Modifier.width(12.dp))
+        TokenUsageLegend(color = latestColor, label = "最近一次")
+    }
+    rows.forEach { row ->
+        Column(
+            modifier = Modifier.clearAndSetSemantics {
+                contentDescription = "${row.label}，会话累计 ${formatCompactCount(row.cumulativeTokens)} Token，" +
+                    "最近一次 ${formatCompactCount(row.latestTokens)} Token"
+            },
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = if (row.isDetail) 12.dp else 0.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    row.label,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (row.isDetail) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                )
+                Text(
+                    "累计 ${formatCompactCount(row.cumulativeTokens)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "最近 ${formatCompactCount(row.latestTokens)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = latestColor,
+                )
+            }
+            Canvas(Modifier.fillMaxWidth().height(8.dp)) {
+                drawRoundRect(
+                    color = trackColor,
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2f),
+                )
+                if (axisMaximum > 0L && row.cumulativeTokens > 0L) {
+                    val cumulativeWidth = size.width * row.cumulativeTokens.toFloat() / axisMaximum.toFloat()
+                    val previousWidth = size.width * row.previousTokens.toFloat() / axisMaximum.toFloat()
+                    drawRoundRect(
+                        color = previousColor,
+                        size = androidx.compose.ui.geometry.Size(cumulativeWidth, size.height),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2f),
+                    )
+                    if (row.latestTokens > 0L) {
+                        clipRect(left = previousWidth, right = cumulativeWidth) {
+                            drawRoundRect(
+                                color = latestColor,
+                                size = androidx.compose.ui.geometry.Size(cumulativeWidth, size.height),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(size.height / 2f),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
-private fun TokenUsageMetric(label: String, value: Long) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text("${formatCompactCount(value)} Token", style = MaterialTheme.typography.labelLarge)
+private fun TokenUsageLegend(color: androidx.compose.ui.graphics.Color, label: String) {
+    Box(Modifier.size(8.dp).background(color, CircleShape))
+    Spacer(Modifier.width(5.dp))
+    Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+internal data class TokenUsageComparisonRow(
+    val label: String,
+    val cumulativeTokens: Long,
+    val latestTokens: Long,
+    val isDetail: Boolean = false,
+) {
+    val previousTokens: Long = cumulativeTokens - latestTokens
+
+    init {
+        require(latestTokens >= 0L) { "$label 的最近一次 Token 不能为负数" }
+        require(previousTokens >= 0L) { "$label 的最近一次 Token 不能超过会话累计 Token" }
     }
 }
+
+internal fun tokenUsageComparisonRows(usage: TokenUsage): List<TokenUsageComparisonRow> = listOf(
+    TokenUsageComparisonRow("总计", usage.total.totalTokens, usage.last.totalTokens),
+    TokenUsageComparisonRow("输入", usage.total.inputTokens, usage.last.inputTokens),
+    TokenUsageComparisonRow("其中缓存", usage.total.cachedInputTokens, usage.last.cachedInputTokens, isDetail = true),
+    TokenUsageComparisonRow("输出", usage.total.outputTokens, usage.last.outputTokens),
+    TokenUsageComparisonRow(
+        "其中推理",
+        usage.total.reasoningOutputTokens,
+        usage.last.reasoningOutputTokens,
+        isDetail = true,
+    ),
+)
 
 @Composable
 private fun ReviewDialog(
@@ -2380,7 +2462,6 @@ private sealed interface ChatDialog {
     data object Fork : ChatDialog
     data object Review : ChatDialog
     data object Goal : ChatDialog
-    data object Statistics : ChatDialog
 }
 
 private enum class ComposerDialog {
