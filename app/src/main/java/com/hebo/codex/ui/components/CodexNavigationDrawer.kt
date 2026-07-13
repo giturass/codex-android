@@ -104,6 +104,8 @@ import com.hebo.codex.ui.theme.statusColors
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
+internal val CodexNavigationDrawerWidth = 360.dp
+
 @Composable
 fun CodexNavigationDrawer(
     servers: List<ServerProfile>,
@@ -144,7 +146,7 @@ fun CodexNavigationDrawer(
     onOpenSettings: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val sheetModifier = modifier.fillMaxHeight().widthIn(max = 360.dp)
+    val sheetModifier = modifier.fillMaxHeight().widthIn(max = CodexNavigationDrawerWidth)
     val content: @Composable ColumnScope.() -> Unit = {
         DrawerContent(
             servers = servers,

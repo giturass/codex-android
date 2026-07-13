@@ -1,7 +1,11 @@
 package com.hebo.codex.ui
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.DismissibleNavigationDrawer
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ModalNavigationDrawer
@@ -20,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -39,6 +44,7 @@ import com.hebo.codex.domain.DraftTarget
 import com.hebo.codex.domain.QuickPhraseRepository
 import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.ui.components.CodexNavigationDrawer
+import com.hebo.codex.ui.components.CodexNavigationDrawerWidth
 import com.hebo.codex.ui.components.DrawerActiveTarget
 import com.hebo.codex.ui.components.UserFacingErrorDialog
 import com.hebo.codex.ui.components.navigationAttention
@@ -61,7 +67,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.serialization.Serializable
 
-private val PermanentDrawerThreshold = 840.dp
+private val MainContentMinWidth = 600.dp
+private val WideDrawerThreshold = CodexNavigationDrawerWidth + MainContentMinWidth
 
 @Serializable
 internal data class NewTaskRoute(
@@ -100,6 +107,7 @@ fun CodexApp(
     val modalDrawerState = rememberDrawerState(DrawerValue.Closed)
     val wideDrawerState = rememberDrawerState(DrawerValue.Open)
     val focusManager = LocalFocusManager.current
+    val density = LocalDensity.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val snackbarHostState = remember { SnackbarHostState() }
     var technicalError by remember { mutableStateOf<UserFacingError?>(null) }
@@ -200,8 +208,19 @@ fun CodexApp(
     }
 
     BoxWithConstraints {
-        val isWideLayout = maxWidth >= PermanentDrawerThreshold
+        val isWideLayout = maxWidth >= WideDrawerThreshold
         val drawerState = if (isWideLayout) wideDrawerState else modalDrawerState
+        val wideDrawerOffset = wideDrawerState.currentOffset
+        val wideDrawerVisibleWidth = if (wideDrawerOffset.isNaN()) {
+            if (wideDrawerState.isOpen) CodexNavigationDrawerWidth else 0.dp
+        } else {
+            with(density) {
+                val drawerWidthPx = CodexNavigationDrawerWidth.toPx()
+                (drawerWidthPx + wideDrawerOffset)
+                    .coerceIn(0f, drawerWidthPx)
+                    .toDp()
+            }
+        }
 
         fun dismissModalDrawer() {
             if (!isWideLayout) scope.launch { drawerState.close() }
@@ -238,6 +257,7 @@ fun CodexApp(
                 hasMore = homeState.nextCursor != null,
                 activeTarget = activeDrawerTarget,
                 isWideLayout = isWideLayout,
+                modifier = if (isWideLayout) Modifier.width(CodexNavigationDrawerWidth) else Modifier,
                 onNewConversation = {
                     dismissModalDrawer()
                     openNewTask(homeState.activeServerId)
@@ -395,7 +415,15 @@ fun CodexApp(
             DismissibleNavigationDrawer(
                 drawerState = drawerState,
                 drawerContent = drawerContent,
-                content = content,
+                content = {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .padding(end = wideDrawerVisibleWidth),
+                    ) {
+                        content()
+                    }
+                },
             )
         } else {
             ModalNavigationDrawer(
