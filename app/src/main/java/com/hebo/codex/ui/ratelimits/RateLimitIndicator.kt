@@ -77,15 +77,23 @@ private val DetailsPopupGap = 4.dp
 private val DetailsPopupWindowMargin = 8.dp
 private const val FiveHourWindowMinutes = 5L * 60L
 private const val WeeklyWindowMinutes = 7L * 24L * 60L
+private const val MonthlyWindowMinutes = 30L * 24L * 60L
 private const val WindowDurationTolerance = 0.05
 private const val WarningRemainingPercent = 25.0
 private const val CriticalRemainingPercent = 10.0
 private const val StaleAfterSeconds = 15L * 60L
 
+internal data class PresentedRateLimitWindow(
+    val window: RateLimitWindow,
+    val label: String,
+    val indicatorLabel: String?,
+    val isWeekly: Boolean,
+)
+
 internal data class CodexRateLimitWindows(
     val limit: AccountRateLimit,
-    val fiveHour: RateLimitWindow,
-    val weekly: RateLimitWindow?,
+    val featured: PresentedRateLimitWindow,
+    val all: List<PresentedRateLimitWindow>,
 )
 
 @Composable
@@ -95,13 +103,10 @@ fun RateLimitIndicator(
 ) {
     val windows = state.rateLimits?.codexWindows() ?: return
     var showDetails by remember { mutableStateOf(false) }
-    val fiveHourRemaining = windows.fiveHour.remainingPercent()
-    val weeklyRemaining = windows.weekly?.remainingPercent()
-    val fiveHourColor = rateLimitColor(fiveHourRemaining, MaterialTheme.colorScheme.primary)
-    val weeklyColor = weeklyRemaining?.let {
-        rateLimitColor(it, MaterialTheme.statusColors.info)
-    }
-    val description = "5 小时额度剩余 ${formatPercent(fiveHourRemaining)}"
+    val featured = windows.featured
+    val featuredRemaining = featured.window.remainingPercent()
+    val featuredColor = rateLimitWindowColor(featured)
+    val description = "${featured.label}，剩余 ${formatPercent(featuredRemaining)}"
 
     Box {
         IconButton(
@@ -111,8 +116,9 @@ fun RateLimitIndicator(
                 .semantics { contentDescription = description },
         ) {
             RateLimitRing(
-                fiveHourRemaining = fiveHourRemaining,
-                fiveHourColor = fiveHourColor,
+                remaining = featuredRemaining,
+                color = featuredColor,
+                indicatorLabel = featured.indicatorLabel,
             )
         }
 
@@ -120,8 +126,6 @@ fun RateLimitIndicator(
             RateLimitDetailsPopup(
                 state = state,
                 windows = windows,
-                fiveHourColor = fiveHourColor,
-                weeklyColor = weeklyColor,
                 onRefresh = onRefresh,
                 onDismiss = { showDetails = false },
             )
@@ -131,8 +135,9 @@ fun RateLimitIndicator(
 
 @Composable
 private fun RateLimitRing(
-    fiveHourRemaining: Double,
-    fiveHourColor: Color,
+    remaining: Double,
+    color: Color,
+    indicatorLabel: String?,
 ) {
     val trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
     Box(
@@ -143,22 +148,46 @@ private fun RateLimitRing(
             val strokeWidth = RingStrokeWidth.toPx()
             val outerInset = strokeWidth / 2f
             drawRing(
-                progress = fiveHourRemaining / 100.0,
-                color = fiveHourColor,
+                progress = remaining / 100.0,
+                color = color,
                 trackColor = trackColor,
                 inset = outerInset,
                 strokeWidth = strokeWidth,
             )
         }
-        Text(
-            text = fiveHourRemaining.roundToInt().toString(),
-            modifier = Modifier.clearAndSetSemantics {},
-            color = MaterialTheme.colorScheme.onSurface,
-            fontSize = 10.sp,
-            lineHeight = 10.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-        )
+        if (indicatorLabel == null) {
+            Text(
+                text = remaining.roundToInt().toString(),
+                modifier = Modifier.clearAndSetSemantics {},
+                color = color,
+                fontSize = 10.sp,
+                lineHeight = 10.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+            )
+        } else {
+            Column(
+                modifier = Modifier.clearAndSetSemantics {},
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = remaining.roundToInt().toString(),
+                    color = color,
+                    fontSize = 10.sp,
+                    lineHeight = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                )
+                Text(
+                    text = indicatorLabel,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 8.sp,
+                    lineHeight = 8.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                )
+            }
+        }
     }
 }
 
@@ -189,8 +218,6 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawRing(
 private fun RateLimitDetailsPopup(
     state: RateLimitsUiState,
     windows: CodexRateLimitWindows,
-    fiveHourColor: Color,
-    weeklyColor: Color?,
     onRefresh: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -228,18 +255,12 @@ private fun RateLimitDetailsPopup(
                     .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                RateLimitWindowDetails(
-                    label = "5 小时",
-                    window = windows.fiveHour,
-                    color = fiveHourColor,
-                    nowEpochSeconds = nowEpochSeconds,
-                )
-                windows.weekly?.let { weekly ->
-                    HorizontalDivider()
+                windows.all.forEachIndexed { index, presented ->
+                    if (index > 0) HorizontalDivider()
                     RateLimitWindowDetails(
-                        label = "周限额",
-                        window = weekly,
-                        color = requireNotNull(weeklyColor),
+                        label = presented.label,
+                        window = presented.window,
+                        color = rateLimitWindowColor(presented),
                         nowEpochSeconds = nowEpochSeconds,
                     )
                 }
@@ -405,12 +426,27 @@ private fun rateLimitColor(remainingPercent: Double, normalColor: Color): Color 
     else -> normalColor
 }
 
+@Composable
+private fun rateLimitWindowColor(window: PresentedRateLimitWindow): Color = rateLimitColor(
+    remainingPercent = window.window.remainingPercent(),
+    normalColor = if (window.isWeekly) {
+        MaterialTheme.statusColors.info
+    } else {
+        MaterialTheme.colorScheme.primary
+    },
+)
+
 internal fun AccountRateLimits.codexWindows(): CodexRateLimitWindows? {
     val limit = limits.singleOrNull { it.id == "codex" } ?: return null
-    val windows = listOfNotNull(limit.primary, limit.secondary)
-    val fiveHour = windows.singleOrNull { it.hasDuration(FiveHourWindowMinutes) } ?: return null
-    val weekly = windows.singleOrNull { it.hasDuration(WeeklyWindowMinutes) }
-    return CodexRateLimitWindows(limit, fiveHour, weekly)
+    val windows = listOfNotNull(
+        limit.primary?.toPresentedRateLimitWindow(fallbackLabel = "主限额"),
+        limit.secondary?.toPresentedRateLimitWindow(fallbackLabel = "次限额"),
+    ).sortedBy { it.window.windowDurationMinutes ?: Long.MAX_VALUE }
+    return CodexRateLimitWindows(
+        limit = limit,
+        featured = windows.firstOrNull() ?: return null,
+        all = windows,
+    )
 }
 
 internal fun RateLimitWindow.remainingPercent(): Double =
@@ -419,6 +455,29 @@ internal fun RateLimitWindow.remainingPercent(): Double =
 private fun RateLimitWindow.hasDuration(expectedMinutes: Long): Boolean {
     val actualMinutes = windowDurationMinutes ?: return false
     return abs(actualMinutes - expectedMinutes).toDouble() <= expectedMinutes * WindowDurationTolerance
+}
+
+private fun RateLimitWindow.toPresentedRateLimitWindow(
+    fallbackLabel: String,
+): PresentedRateLimitWindow {
+    val isWeekly = hasDuration(WeeklyWindowMinutes)
+    return PresentedRateLimitWindow(
+        window = this,
+        label = when {
+            hasDuration(FiveHourWindowMinutes) -> "5 小时"
+            isWeekly -> "周限额"
+            hasDuration(MonthlyWindowMinutes) -> "月限额"
+            else -> windowDurationMinutes?.toRateLimitLabel() ?: fallbackLabel
+        },
+        indicatorLabel = if (isWeekly) "周" else null,
+        isWeekly = isWeekly,
+    )
+}
+
+private fun Long.toRateLimitLabel(): String = when {
+    this % (24L * 60L) == 0L -> "${this / (24L * 60L)} 天限额"
+    this % 60L == 0L -> "${this / 60L} 小时限额"
+    else -> "$this 分钟限额"
 }
 
 internal fun resetCountdownLabel(resetAt: Long, nowEpochSeconds: Long): String {

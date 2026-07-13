@@ -25,8 +25,9 @@ class RateLimitPresentationTest {
         val windows = requireNotNull(rateLimits.codexWindows())
 
         assertEquals("codex", windows.limit.id)
-        assertSame(fiveHour, windows.fiveHour)
-        assertSame(weekly, windows.weekly)
+        assertSame(fiveHour, windows.featured.window)
+        assertEquals(listOf("5 小时", "周限额"), windows.all.map { it.label })
+        assertEquals(listOf(null, "周"), windows.all.map { it.indicatorLabel })
     }
 
     @Test
@@ -44,8 +45,47 @@ class RateLimitPresentationTest {
 
         val windows = requireNotNull(rateLimits.codexWindows())
 
-        assertEquals(285L, windows.fiveHour.windowDurationMinutes)
-        assertEquals(10_584L, windows.weekly?.windowDurationMinutes)
+        assertEquals(285L, windows.featured.window.windowDurationMinutes)
+        assertEquals(listOf("5 小时", "周限额"), windows.all.map { it.label })
+    }
+
+    @Test
+    fun presentsWeeklyOnlyLimitWithIndicatorLabel() {
+        val weekly = window(usedPercent = 35.0, durationMinutes = 10_080)
+        val rateLimits = AccountRateLimits(
+            limits = listOf(limit(id = "codex", primary = weekly, secondary = null)),
+            resetCredits = null,
+        )
+
+        val windows = requireNotNull(rateLimits.codexWindows())
+
+        assertSame(weekly, windows.featured.window)
+        assertEquals("周限额", windows.featured.label)
+        assertEquals("周", windows.featured.indicatorLabel)
+    }
+
+    @Test
+    fun presentsOtherWindowDurationsWithoutIndicatorLabel() {
+        val monthly = window(usedPercent = 35.0, durationMinutes = 30 * 24 * 60)
+        val rateLimits = AccountRateLimits(
+            limits = listOf(limit(id = "codex", primary = monthly, secondary = null)),
+            resetCredits = null,
+        )
+
+        val windows = requireNotNull(rateLimits.codexWindows())
+
+        assertEquals("月限额", windows.featured.label)
+        assertNull(windows.featured.indicatorLabel)
+    }
+
+    @Test
+    fun doesNotPresentCodexLimitWithoutUsageWindows() {
+        val rateLimits = AccountRateLimits(
+            limits = listOf(limit(id = "codex", primary = null, secondary = null)),
+            resetCredits = null,
+        )
+
+        assertNull(rateLimits.codexWindows())
     }
 
     @Test
