@@ -2,11 +2,13 @@
 
 package com.hebo.codex.ui.screens.chat
 
+import android.content.ClipData
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -23,14 +25,19 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -49,6 +56,7 @@ import dev.snipme.highlights.model.ColorHighlight
 import dev.snipme.highlights.model.SyntaxLanguage
 import dev.snipme.highlights.model.SyntaxThemes
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
@@ -117,10 +125,24 @@ private fun CodeTextSurface(
         contentColor = MaterialTheme.colorScheme.onSurface,
     ) {
         Column {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = title,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                CopyTextIconButton(text.text, "复制$title")
+            }
             SelectionContainer {
                 Text(
                     text = visibleText,
-                    modifier = Modifier.horizontalScroll(rememberScrollState()).padding(12.dp),
+                    modifier = Modifier
+                        .horizontalScroll(rememberScrollState())
+                        .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
                     fontFamily = FontFamily.Monospace,
                     style = MaterialTheme.typography.bodySmall,
                     softWrap = false,
@@ -153,6 +175,9 @@ private fun FullCodeDialog(title: String, text: AnnotatedString, onDismiss: () -
                             Icon(Icons.Rounded.Close, contentDescription = "关闭")
                         }
                     },
+                    actions = {
+                        CopyTextIconButton(text.text, "复制$title")
+                    },
                 )
                 Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
                     SelectionContainer {
@@ -167,6 +192,21 @@ private fun FullCodeDialog(title: String, text: AnnotatedString, onDismiss: () -
                 }
             }
         }
+    }
+}
+
+@Composable
+internal fun CopyTextIconButton(text: String, contentDescription: String) {
+    val clipboard = LocalClipboard.current
+    val scope = rememberCoroutineScope()
+    IconButton(
+        onClick = {
+            scope.launch {
+                clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(contentDescription, text)))
+            }
+        },
+    ) {
+        Icon(Icons.Rounded.ContentCopy, contentDescription = contentDescription)
     }
 }
 

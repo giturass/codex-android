@@ -267,6 +267,38 @@ class ConversationRowsTest {
     }
 
     @Test
+    fun `未封口活动组跟随最后一个进行中活动`() {
+        val items = listOf(
+            command("command-1", "turn-1"),
+            command("command-2", "turn-1", ActivityStatus.IN_PROGRESS),
+            command("command-3", "turn-1", ActivityStatus.IN_PROGRESS),
+        )
+
+        assertEquals(2, activityFollowTargetIndex(items, isSealed = false))
+        assertEquals(4, activityHeaderLazyIndex(2))
+    }
+
+    @Test
+    fun `未封口活动组暂时没有进行中活动时跟随最后一项`() {
+        val items = listOf(
+            command("command-1", "turn-1"),
+            command("command-2", "turn-1"),
+        )
+
+        assertEquals(1, activityFollowTargetIndex(items, isSealed = false))
+    }
+
+    @Test
+    fun `封口活动组不自动定位失败活动`() {
+        val items = listOf(
+            command("command-1", "turn-1"),
+            command("command-2", "turn-1", ActivityStatus.FAILED),
+        )
+
+        assertEquals(null, activityFollowTargetIndex(items, isSealed = true))
+    }
+
+    @Test
     fun `计划作为独立的持久化记录展示`() {
         val plan = ConversationItem.Plan(
             id = "plan-1",

@@ -262,6 +262,7 @@ fun ChatScreen(
     var shownNoticeId by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
     var initialAnnouncementShown by rememberSaveable(initialAnnouncement) { mutableStateOf(false) }
     var technicalError by remember { mutableStateOf<UserFacingError?>(null) }
+    var activityDetailsRowKey by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
     var remoteFileTarget by remember(conversation?.threadId) { mutableStateOf<RemoteFileTarget?>(null) }
     val detailsLabel = stringResource(R.string.common_details)
     val activeRequest = conversation?.pendingRequests?.firstOrNull { it.requestKey == activeRequestKey }
@@ -419,15 +420,12 @@ fun ChatScreen(
                                 cwd = conversation.cwd,
                                 onOpenRemoteFile = { remoteFileTarget = it },
                                 onLinkError = showLinkError,
-                                onOpenRemotePath = openRemotePath,
+                                onOpenActivityDetails = { activityDetailsRowKey = row.key },
                             )
                             is ConversationRow.ActivityGroup -> ActivityGroupCard(
                                 items = row.items,
                                 isSealed = row.isSealed,
-                                cwd = conversation.cwd,
-                                onOpenRemoteFile = { remoteFileTarget = it },
-                                onLinkError = showLinkError,
-                                onOpenRemotePath = openRemotePath,
+                                onOpenDetails = { activityDetailsRowKey = row.key },
                             )
                         }
                         val turn = forkTurnsById[row.turnId]
@@ -635,6 +633,34 @@ fun ChatScreen(
         )
 
         null -> Unit
+    }
+
+    conversationRows.firstOrNull { it.key == activityDetailsRowKey }?.let { row ->
+        val activityItems = when (row) {
+            is ConversationRow.ActivityGroup -> row.items
+            is ConversationRow.Item -> listOf(row.item)
+        }
+        val isSealed = row !is ConversationRow.ActivityGroup || row.isSealed
+        ActivityDetailsSheet(
+            items = activityItems,
+            isSealed = isSealed,
+            activeActions = if (isSealed || conversation == null) {
+                null
+            } else {
+                ActivityDetailsActions(
+                    isRunning = conversation.isRunning,
+                    pendingRequest = conversation.pendingRequests.firstOrNull(),
+                    pendingRequestCount = conversation.pendingRequests.size,
+                    onStop = viewModel::interrupt,
+                    onOpenPendingRequest = { activeRequestKey = it },
+                )
+            },
+            cwd = conversation?.cwd.orEmpty(),
+            onOpenRemoteFile = { remoteFileTarget = it },
+            onLinkError = showLinkError,
+            onOpenRemotePath = openRemotePath,
+            onDismiss = { activityDetailsRowKey = null },
+        )
     }
 
     activeRequest?.let { request ->
@@ -988,7 +1014,7 @@ private fun ConversationItemView(
     cwd: String,
     onOpenRemoteFile: (RemoteFileTarget) -> Unit,
     onLinkError: (String) -> Unit,
-    onOpenRemotePath: (String) -> Unit,
+    onOpenActivityDetails: () -> Unit,
 ) {
     when (item) {
         is ConversationItem.UserMessage -> UserMessage(item)
@@ -997,10 +1023,7 @@ private fun ConversationItemView(
         else -> ActivityGroupCard(
             items = listOf(item),
             isSealed = true,
-            cwd = cwd,
-            onOpenRemoteFile = onOpenRemoteFile,
-            onLinkError = onLinkError,
-            onOpenRemotePath = onOpenRemotePath,
+            onOpenDetails = onOpenActivityDetails,
         )
     }
 }
@@ -1139,7 +1162,7 @@ private fun ExternalLinkConfirmationDialog(
 }
 
 @Composable
-private fun PendingRequestBanner(
+internal fun PendingRequestBanner(
     request: PendingServerRequest,
     requestCount: Int,
     onClick: () -> Unit,

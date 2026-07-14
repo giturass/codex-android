@@ -5,9 +5,15 @@
 
 package com.hebo.codex.ui.screens.chat
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -25,6 +31,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -55,14 +62,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SheetValue
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -72,10 +82,16 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
@@ -86,26 +102,21 @@ import com.hebo.codex.domain.ActivityStatus
 import com.hebo.codex.domain.ChangedFile
 import com.hebo.codex.domain.ConversationItem
 import com.hebo.codex.domain.FileChangeKind
+import com.hebo.codex.domain.PendingServerRequest
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun ActivityGroupCard(
     items: List<ConversationItem>,
     isSealed: Boolean,
-    cwd: String,
-    onOpenRemoteFile: (RemoteFileTarget) -> Unit,
-    onLinkError: (String) -> Unit,
-    onOpenRemotePath: (String) -> Unit,
+    onOpenDetails: () -> Unit,
 ) {
     if (items.isEmpty()) return
-    var showDetails by rememberSaveable(items.first().turnId) { mutableStateOf(false) }
     val singleItem = items.singleOrNull()
     val canOpenDetails = singleItem == null || activityItemHasDetails(singleItem)
     val status = singleItem?.activityStatus() ?: activityGroupStatus(items, isSealed)
-    val contentColor = when (status) {
-        ActivityStatus.FAILED, ActivityStatus.DECLINED -> MaterialTheme.colorScheme.error
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    val contentColor = MaterialTheme.colorScheme.onSurfaceVariant
     val sealedGroupStatusIcon = if (singleItem == null && isSealed) {
         when (status) {
             ActivityStatus.FAILED -> Icons.Rounded.ErrorOutline
@@ -123,7 +134,7 @@ internal fun ActivityGroupCard(
             .clip(RoundedCornerShape(14.dp))
             .then(
                 if (canOpenDetails) {
-                    Modifier.clickable(role = Role.Button) { showDetails = true }
+                    Modifier.clickable(role = Role.Button, onClick = onOpenDetails)
                 } else {
                     Modifier
                 },
@@ -180,24 +191,15 @@ internal fun ActivityGroupCard(
             )
         }
     }
-
-    if (showDetails) {
-        ActivityDetailsSheet(
-            items = items,
-            cwd = cwd,
-            onOpenRemoteFile = { target ->
-                showDetails = false
-                onOpenRemoteFile(target)
-            },
-            onLinkError = onLinkError,
-            onOpenRemotePath = { path ->
-                showDetails = false
-                onOpenRemotePath(path)
-            },
-            onDismiss = { showDetails = false },
-        )
-    }
 }
+
+internal data class ActivityDetailsActions(
+    val isRunning: Boolean,
+    val pendingRequest: PendingServerRequest?,
+    val pendingRequestCount: Int,
+    val onStop: () -> Unit,
+    val onOpenPendingRequest: (String) -> Unit,
+)
 
 @Composable
 private fun ActivityGroupMetrics(
@@ -338,8 +340,10 @@ internal fun ConversationItem.activityStatus(): ActivityStatus = when (this) {
 }
 
 @Composable
-private fun ActivityDetailsSheet(
+internal fun ActivityDetailsSheet(
     items: List<ConversationItem>,
+    isSealed: Boolean,
+    activeActions: ActivityDetailsActions?,
     cwd: String,
     onOpenRemoteFile: (RemoteFileTarget) -> Unit,
     onLinkError: (String) -> Unit,
@@ -359,6 +363,32 @@ private fun ActivityDetailsSheet(
             },
         )
     }
+    val followTargetIndex = activityFollowTargetIndex(items, isSealed)
+    val followTargetKey = followTargetIndex?.let { index -> items[index].activityItemKey() }
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = followTargetIndex?.let(::activityHeaderLazyIndex) ?: 0,
+    )
+    val scrollScope = rememberCoroutineScope()
+    var autoFollow by rememberSaveable(items.first().turnId) { mutableStateOf(true) }
+    val userScrollConnection = remember(items.first().turnId) {
+        object : NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource,
+            ): Offset {
+                if (source == NestedScrollSource.UserInput && consumed.y != 0f) autoFollow = false
+                return Offset.Zero
+            }
+        }
+    }
+    val showReturnToCurrent = followTargetIndex != null && !autoFollow
+
+    LaunchedEffect(followTargetKey, autoFollow) {
+        val targetIndex = followTargetIndex?.let(::activityHeaderLazyIndex) ?: return@LaunchedEffect
+        if (autoFollow) listState.scrollToItem(targetIndex)
+    }
+
     val maxSheetHeight = LocalConfiguration.current.screenHeightDp.dp * 0.88f
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -371,63 +401,135 @@ private fun ActivityDetailsSheet(
                 .heightIn(max = maxSheetHeight)
                 .navigationBarsPadding(),
         ) {
-            Text(
-                text = "处理过程",
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp),
-                style = MaterialTheme.typography.titleMedium,
-                textAlign = TextAlign.Center,
-            )
-            LazyColumn(
-                modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    start = 20.dp,
-                    top = 22.dp,
-                    end = 20.dp,
-                    bottom = 32.dp,
-                ),
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 12.dp, top = 2.dp, bottom = 6.dp),
             ) {
-                items.forEachIndexed { index, item ->
-                    val itemKey = "${item.turnId}:${item.id}"
-                    val expanded = itemKey in expandedItemKeys
-                    stickyHeader(key = "$itemKey:header") {
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .background(MaterialTheme.colorScheme.surfaceContainerLow),
-                        ) {
-                            ActivityTimelineHeader(
+                Text(
+                    text = "处理过程",
+                    modifier = Modifier.align(Alignment.Center),
+                    style = MaterialTheme.typography.titleMedium,
+                    textAlign = TextAlign.Center,
+                )
+                if (activeActions?.isRunning == true) {
+                    TextButton(
+                        onClick = activeActions.onStop,
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                    ) {
+                        Text("停止")
+                    }
+                }
+            }
+            val pendingRequest = activeActions?.pendingRequest
+            if (pendingRequest != null) {
+                PendingRequestBanner(
+                    request = pendingRequest,
+                    requestCount = activeActions.pendingRequestCount,
+                    onClick = { activeActions.onOpenPendingRequest(pendingRequest.requestKey) },
+                )
+            }
+            Box(Modifier.fillMaxWidth().weight(1f, fill = false)) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxWidth().nestedScroll(userScrollConnection),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        start = 20.dp,
+                        top = 22.dp,
+                        end = 20.dp,
+                        bottom = 32.dp,
+                    ),
+                ) {
+                    items.forEachIndexed { index, item ->
+                        val itemKey = item.activityItemKey()
+                        val expanded = itemKey in expandedItemKeys
+                        stickyHeader(key = "$itemKey:header") {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                            ) {
+                                ActivityTimelineHeader(
+                                    item = item,
+                                    isLast = index == items.lastIndex,
+                                    isCurrent = index == followTargetIndex,
+                                    expanded = expanded,
+                                    onToggle = {
+                                        expandedItemKeys = ArrayList(expandedItemKeys).apply {
+                                            if (!remove(itemKey)) add(itemKey)
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                        item(key = "$itemKey:body") {
+                            ActivityTimelineBody(
                                 item = item,
                                 isLast = index == items.lastIndex,
                                 expanded = expanded,
-                                onToggle = {
-                                    expandedItemKeys = ArrayList(expandedItemKeys).apply {
-                                        if (!remove(itemKey)) add(itemKey)
-                                    }
-                                },
+                                cwd = cwd,
+                                onOpenRemoteFile = onOpenRemoteFile,
+                                onLinkError = onLinkError,
+                                onOpenRemotePath = onOpenRemotePath,
                             )
                         }
                     }
-                    item(key = "$itemKey:body") {
-                        ActivityTimelineBody(
-                            item = item,
-                            isLast = index == items.lastIndex,
-                            expanded = expanded,
-                            cwd = cwd,
-                            onOpenRemoteFile = onOpenRemoteFile,
-                            onLinkError = onLinkError,
-                            onOpenRemotePath = onOpenRemotePath,
-                        )
-                    }
                 }
+                ReturnToCurrentStepButton(
+                    visible = showReturnToCurrent,
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
+                    onClick = {
+                        val targetIndex = followTargetIndex?.let(::activityHeaderLazyIndex)
+                            ?: return@ReturnToCurrentStepButton
+                        scrollScope.launch {
+                            listState.animateScrollToItem(targetIndex)
+                            autoFollow = true
+                        }
+                    },
+                )
             }
         }
     }
 }
 
 @Composable
+private fun ReturnToCurrentStepButton(
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier,
+        enter = fadeIn(tween(160)) + scaleIn(tween(160), initialScale = 0.85f),
+        exit = fadeOut(tween(100)) + scaleOut(tween(100), targetScale = 0.9f),
+    ) {
+        SmallFloatingActionButton(
+            onClick = onClick,
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        ) {
+            Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "回到当前步骤")
+        }
+    }
+}
+
+internal fun activityFollowTargetIndex(items: List<ConversationItem>, isSealed: Boolean): Int? {
+    if (isSealed || items.isEmpty()) return null
+    return items.indexOfLast { it.activityStatus() == ActivityStatus.IN_PROGRESS }
+        .takeIf { it >= 0 }
+        ?: items.lastIndex
+}
+
+internal fun activityHeaderLazyIndex(itemIndex: Int): Int = itemIndex * 2
+
+private fun ConversationItem.activityItemKey(): String = "$turnId:$id"
+
+@Composable
 private fun ActivityTimelineHeader(
     item: ConversationItem,
     isLast: Boolean,
+    isCurrent: Boolean,
     expanded: Boolean,
     onToggle: () -> Unit,
 ) {
@@ -457,6 +559,7 @@ private fun ActivityTimelineHeader(
             )
             .semantics(mergeDescendants = true) {
                 stateDescription = statusDescription
+                if (isCurrent) liveRegion = LiveRegionMode.Polite
             },
         verticalAlignment = Alignment.Top,
     ) {
@@ -560,7 +663,11 @@ private fun ActivityTimelineBody(
             modifier = Modifier
                 .weight(1f)
                 .animateContentSize(
-                    animationSpec = tween(EXPANDABLE_CONTENT_SIZE_ANIMATION_DURATION_MILLIS),
+                    animationSpec = if (expansionPhase == ContentExpansionPhase.EXPANDED) {
+                        snap()
+                    } else {
+                        tween(EXPANDABLE_CONTENT_SIZE_ANIMATION_DURATION_MILLIS)
+                    },
                 ),
         ) {
             if (expansionPhase.bodyIncluded) {
@@ -599,11 +706,7 @@ private fun ActivityTimelineConnector(modifier: Modifier = Modifier) {
 private fun ActivityTimelineIcon(item: ConversationItem) {
     val status = item.activityStatus()
     val icon = activityTypeIcon(item)
-    val tint = when (status) {
-        ActivityStatus.IN_PROGRESS -> MaterialTheme.colorScheme.onSurfaceVariant
-        ActivityStatus.COMPLETED -> MaterialTheme.colorScheme.onSurfaceVariant
-        ActivityStatus.FAILED, ActivityStatus.DECLINED -> MaterialTheme.colorScheme.error
-    }
+    val tint = MaterialTheme.colorScheme.onSurfaceVariant
     Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
         Surface(
             modifier = Modifier.size(26.dp),
@@ -630,8 +733,8 @@ private fun ActivityTimelineIcon(item: ConversationItem) {
             Surface(
                 modifier = Modifier.align(Alignment.BottomEnd).size(12.dp),
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.error,
-                contentColor = MaterialTheme.colorScheme.onError,
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
@@ -776,13 +879,19 @@ private fun ActivityItemDetails(
 
         is ConversationItem.CommandExecution -> {
             ShellCommandBlock(item.command)
-            Text(
-                item.cwd,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            if (item.cwd.isNotBlank()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        item.cwd,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    CopyTextIconButton(item.cwd, "复制工作目录")
+                }
+            }
             if (item.output.isNotBlank()) TerminalOutputBlock(item.output)
             item.exitCode?.let { exitCode ->
                 Text(
@@ -815,10 +924,13 @@ private fun ActivityItemDetails(
             }
             item.technicalDetails?.takeIf(String::isNotBlank)?.let { ExpandableTechnicalDetails(it) }
             item.remotePath?.let { path ->
-                OutlinedButton(onClick = { onOpenRemotePath(path) }) {
-                    Icon(Icons.Rounded.Visibility, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("查看文件")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(onClick = { onOpenRemotePath(path) }) {
+                        Icon(Icons.Rounded.Visibility, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("查看文件")
+                    }
+                    CopyTextIconButton(path, "复制文件路径")
                 }
             }
         }
@@ -831,7 +943,7 @@ private fun ActivityItemDetails(
 private fun ChangedFileView(change: ChangedFile) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         val label = changedFileLabel(change)
-        Row(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "${label.action} · ",
                 style = MaterialTheme.typography.labelMedium,
@@ -843,6 +955,7 @@ private fun ChangedFileView(change: ChangedFile) {
                 maxLines = 1,
                 overflow = TextOverflow.StartEllipsis,
             )
+            CopyTextIconButton(label.path, "复制文件路径")
         }
         if (change.diff.isNotBlank()) FileDiffBlock(change)
     }
