@@ -115,6 +115,7 @@ data class ConversationState(
     val title: String,
     val cwd: String,
     val items: List<ConversationItem> = emptyList(),
+    val activeItemKeys: Set<ConversationItemKey> = emptySet(),
     val activeTurnId: String? = null,
     val isRunning: Boolean = false,
     val pendingRequests: List<PendingServerRequest> = emptyList(),
@@ -132,6 +133,11 @@ data class ConversationState(
     val errorMessage: UserFacingError? = null,
 )
 
+data class ConversationItemKey(
+    val turnId: String,
+    val itemId: String,
+)
+
 sealed interface ConversationItem {
     val id: String
     val turnId: String
@@ -146,7 +152,6 @@ sealed interface ConversationItem {
         override val id: String,
         override val turnId: String,
         val text: String,
-        val isStreaming: Boolean,
     ) : ConversationItem
 
     data class Reasoning(
@@ -154,14 +159,12 @@ sealed interface ConversationItem {
         override val turnId: String,
         val summaryParts: List<String>,
         val rawContentParts: List<String>,
-        val isStreaming: Boolean,
     ) : ConversationItem
 
     data class Plan(
         override val id: String,
         override val turnId: String,
         val text: String,
-        val isStreaming: Boolean,
     ) : ConversationItem
 
     data class CommandExecution(

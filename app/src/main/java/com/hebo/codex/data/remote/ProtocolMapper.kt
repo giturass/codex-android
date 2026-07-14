@@ -74,13 +74,12 @@ object ProtocolMapper {
         val items = turns.flatMap { turnElement ->
             val turn = turnElement.jsonObject
             val turnId = turn.requiredString("id")
-            val turnCompleted = when (val status = turn.requiredString("status")) {
-                "inProgress" -> false
-                "completed", "interrupted", "failed" -> true
+            when (val status = turn.requiredString("status")) {
+                "inProgress", "completed", "interrupted", "failed" -> Unit
                 else -> throw ProtocolException("未知 turn 状态：$status")
             }
             turn.requiredArray("items").map { itemElement ->
-                conversationItem(itemElement.jsonObject, turnId, isCompleted = turnCompleted)
+                conversationItem(itemElement.jsonObject, turnId)
             }
         }
         val activeTurnId = turns
@@ -181,7 +180,7 @@ object ProtocolMapper {
         responseJson = value.toString(),
     )
 
-    fun conversationItem(item: JsonObject, turnId: String, isCompleted: Boolean): ConversationItem {
+    fun conversationItem(item: JsonObject, turnId: String): ConversationItem {
         val id = item.requiredString("id")
         return when (val type = item.requiredString("type")) {
             "userMessage" -> ConversationItem.UserMessage(
@@ -194,7 +193,6 @@ object ProtocolMapper {
                 id = id,
                 turnId = turnId,
                 text = item.requiredString("text"),
-                isStreaming = !isCompleted,
             )
 
             "reasoning" -> ConversationItem.Reasoning(
@@ -202,7 +200,6 @@ object ProtocolMapper {
                 turnId = turnId,
                 summaryParts = item.stringArray("summary"),
                 rawContentParts = item.stringArray("content"),
-                isStreaming = !isCompleted,
             )
 
             "commandExecution" -> ConversationItem.CommandExecution(
@@ -212,21 +209,20 @@ object ProtocolMapper {
                 cwd = item.requiredString("cwd"),
                 output = item.optionalString("aggregatedOutput").orEmpty(),
                 exitCode = item["exitCode"]?.takeUnless { it is JsonNull }?.jsonPrimitive?.intOrNull,
-                status = activityStatus(item.optionalString("status"), isCompleted),
+                status = activityStatus(item.optionalString("status")),
             )
 
             "fileChange" -> ConversationItem.FileChange(
                 id = id,
                 turnId = turnId,
                 changes = item.requiredArray("changes").map(::changedFile),
-                status = activityStatus(item.optionalString("status"), isCompleted),
+                status = activityStatus(item.optionalString("status")),
             )
 
             "plan" -> ConversationItem.Plan(
                 id = id,
                 turnId = turnId,
                 text = item.requiredString("text"),
-                isStreaming = !isCompleted,
             )
 
             "mcpToolCall" -> genericActivity(
@@ -237,7 +233,6 @@ object ProtocolMapper {
                 summary = item.requiredString("server"),
                 details = (item["error"] as? JsonObject)?.optionalString("message").orEmpty(),
                 technicalDetails = item.compactText(),
-                isCompleted = isCompleted,
             )
 
             "dynamicToolCall" -> genericActivity(
@@ -248,7 +243,6 @@ object ProtocolMapper {
                 summary = item.optionalString("namespace"),
                 details = item.dynamicToolOutputText(),
                 technicalDetails = item.compactText(),
-                isCompleted = isCompleted,
             )
 
             "collabAgentToolCall" -> genericActivity(
@@ -258,7 +252,6 @@ object ProtocolMapper {
                 title = collabActivityTitle(item.requiredString("tool")),
                 summary = item.optionalString("prompt"),
                 technicalDetails = item.compactText(),
-                isCompleted = isCompleted,
             )
 
             "webSearch" -> genericActivity(
@@ -267,7 +260,6 @@ object ProtocolMapper {
                 kind = ActivityKind.WEB_SEARCH,
                 title = webSearchTitle(item),
                 technicalDetails = item.compactText(),
-                isCompleted = isCompleted,
             )
 
             "contextCompaction" -> ConversationItem.Activity(
@@ -276,7 +268,7 @@ object ProtocolMapper {
                 kind = ActivityKind.CONTEXT_COMPACTION,
                 title = "压缩上下文",
                 details = "",
-                status = if (isCompleted) ActivityStatus.COMPLETED else ActivityStatus.IN_PROGRESS,
+                status = ActivityStatus.COMPLETED,
             )
 
             "enteredReviewMode", "exitedReviewMode" -> ConversationItem.Activity(
@@ -285,7 +277,7 @@ object ProtocolMapper {
                 kind = ActivityKind.REVIEW,
                 title = if (type == "enteredReviewMode") "进入审查" else "完成审查",
                 details = item.optionalString("review").orEmpty(),
-                status = if (isCompleted) ActivityStatus.COMPLETED else ActivityStatus.IN_PROGRESS,
+                status = ActivityStatus.COMPLETED,
             )
 
             "hookPrompt" -> genericActivity(
@@ -297,7 +289,6 @@ object ProtocolMapper {
                     fragment.jsonObject.requiredString("text")
                 },
                 technicalDetails = item.compactText(),
-                isCompleted = isCompleted,
             )
 
             "subAgentActivity" -> genericActivity(
@@ -307,7 +298,6 @@ object ProtocolMapper {
                 title = subAgentActivityTitle(item.requiredString("kind")),
                 summary = item.requiredString("agentPath"),
                 technicalDetails = item.compactText(),
-                isCompleted = isCompleted,
             )
 
             "imageView" -> genericActivity(
@@ -317,7 +307,6 @@ object ProtocolMapper {
                 title = item.requiredString("path").fileName(),
                 details = item.requiredString("path"),
                 remotePath = item.requiredString("path"),
-                isCompleted = isCompleted,
             )
 
             "imageGeneration" -> genericActivity(
@@ -329,7 +318,6 @@ object ProtocolMapper {
                 details = item.optionalString("savedPath").orEmpty(),
                 technicalDetails = item.withoutLargeImageResult(),
                 remotePath = item.optionalString("savedPath"),
-                isCompleted = isCompleted,
                 status = imageGenerationStatus(item.requiredString("status")),
             )
 
@@ -338,7 +326,6 @@ object ProtocolMapper {
                 turnId = turnId,
                 kind = ActivityKind.WAIT,
                 title = formatDurationMillis(item.requiredLong("durationMs")),
-                isCompleted = isCompleted,
             )
 
             else -> genericActivity(
@@ -348,7 +335,6 @@ object ProtocolMapper {
                 title = "未知活动",
                 summary = "客户端尚未支持此类活动",
                 technicalDetails = item.compactText(),
-                isCompleted = isCompleted,
             )
         }
     }
@@ -362,8 +348,7 @@ object ProtocolMapper {
         details: String = "",
         technicalDetails: String? = null,
         remotePath: String? = null,
-        isCompleted: Boolean,
-        status: ActivityStatus = activityStatus(item.optionalString("status"), isCompleted),
+        status: ActivityStatus = activityStatus(item.optionalString("status")),
     ) = ConversationItem.Activity(
         id = item.requiredString("id"),
         turnId = turnId,
@@ -442,12 +427,12 @@ object ProtocolMapper {
             else -> throw ProtocolException("未知特殊文件权限目标：${requiredString("kind")}")
         }
 
-    private fun activityStatus(value: String?, isCompleted: Boolean): ActivityStatus = when (value) {
+    private fun activityStatus(value: String?): ActivityStatus = when (value) {
         "inProgress" -> ActivityStatus.IN_PROGRESS
         "completed" -> ActivityStatus.COMPLETED
         "failed" -> ActivityStatus.FAILED
         "declined" -> ActivityStatus.DECLINED
-        null -> if (isCompleted) ActivityStatus.COMPLETED else ActivityStatus.IN_PROGRESS
+        null -> ActivityStatus.COMPLETED
         else -> throw ProtocolException("未知活动状态：$value")
     }
 

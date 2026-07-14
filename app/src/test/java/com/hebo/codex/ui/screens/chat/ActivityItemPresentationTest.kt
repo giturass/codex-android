@@ -4,6 +4,7 @@ import com.hebo.codex.domain.ActivityKind
 import com.hebo.codex.domain.ActivityStatus
 import com.hebo.codex.domain.ChangedFile
 import com.hebo.codex.domain.ConversationItem
+import com.hebo.codex.domain.ConversationItemKey
 import com.hebo.codex.domain.FileChangeKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -11,6 +12,22 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ActivityItemPresentationTest {
+    @Test
+    fun `思考只有被实时激活时才显示进行中`() {
+        val item = ConversationItem.Reasoning(
+            id = "reasoning",
+            turnId = "turn",
+            summaryParts = listOf("检查实现"),
+            rawContentParts = emptyList(),
+        )
+
+        assertEquals(ActivityStatus.COMPLETED, item.activityStatus())
+        assertEquals(
+            ActivityStatus.IN_PROGRESS,
+            item.activityStatus(setOf(ConversationItemKey("turn", "reasoning"))),
+        )
+    }
+
     @Test
     fun `失败命令标题保留命令预览`() {
         val item = ConversationItem.CommandExecution(
@@ -63,7 +80,6 @@ class ActivityItemPresentationTest {
             turnId = "turn",
             summaryParts = emptyList(),
             rawContentParts = emptyList(),
-            isStreaming = false,
         )
         val summaryItem = emptyItem.copy(
             id = "summary",
@@ -86,7 +102,6 @@ class ActivityItemPresentationTest {
                 "**定位问题**\n\n检查消息渲染",
             ),
             rawContentParts = emptyList(),
-            isStreaming = false,
         )
 
         assertEquals("定位问题", activityItemTitle(item))

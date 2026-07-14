@@ -101,6 +101,7 @@ import com.hebo.codex.domain.ActivityKind
 import com.hebo.codex.domain.ActivityStatus
 import com.hebo.codex.domain.ChangedFile
 import com.hebo.codex.domain.ConversationItem
+import com.hebo.codex.domain.ConversationItemKey
 import com.hebo.codex.domain.FileChangeKind
 import com.hebo.codex.domain.PendingServerRequest
 import kotlinx.coroutines.delay
@@ -110,12 +111,14 @@ import kotlinx.coroutines.launch
 internal fun ActivityGroupCard(
     items: List<ConversationItem>,
     isSealed: Boolean,
+    activeItemKeys: Set<ConversationItemKey>,
     onOpenDetails: () -> Unit,
 ) {
     if (items.isEmpty()) return
     val singleItem = items.singleOrNull()
     val canOpenDetails = singleItem == null || activityItemHasDetails(singleItem)
-    val status = singleItem?.activityStatus() ?: activityGroupStatus(items, isSealed)
+    val status = singleItem?.activityStatus(activeItemKeys)
+        ?: activityGroupStatus(items, isSealed, activeItemKeys)
     val contentColor = MaterialTheme.colorScheme.onSurfaceVariant
     val sealedGroupStatusIcon = if (singleItem == null && isSealed) {
         when (status) {
@@ -146,7 +149,7 @@ internal fun ActivityGroupCard(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (singleItem != null) {
-            ActivityTimelineIcon(singleItem)
+            ActivityTimelineIcon(singleItem, activeItemKeys)
         } else if (!isSealed) {
             Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(
@@ -174,7 +177,7 @@ internal fun ActivityGroupCard(
             )
         } else {
             Text(
-                text = activityGroupLabel(items, isSealed),
+                text = activityGroupLabel(items, isSealed, activeItemKeys),
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodyLarge,
                 color = contentColor,
@@ -280,9 +283,13 @@ private fun ActivityGroupMetric.contentDescription(): String = when (type) {
     ActivityGroupMetricType.ACTIVITY -> "$count 项操作"
 }
 
-internal fun activityGroupLabel(items: List<ConversationItem>, isSealed: Boolean): String {
+internal fun activityGroupLabel(
+    items: List<ConversationItem>,
+    isSealed: Boolean,
+    activeItemKeys: Set<ConversationItemKey> = emptySet(),
+): String {
     items.singleOrNull()?.let { return activityItemTitle(it) }
-    if (!isSealed) return activeActivityLabel(items)
+    if (!isSealed) return activeActivityLabel(items, activeItemKeys)
 
     return activityGroupMetrics(items).joinToString(" · ") { metric ->
         when (metric.type) {
@@ -294,8 +301,11 @@ internal fun activityGroupLabel(items: List<ConversationItem>, isSealed: Boolean
     }
 }
 
-private fun activeActivityLabel(items: List<ConversationItem>): String {
-    val activeItem = items.lastOrNull { it.activityStatus() == ActivityStatus.IN_PROGRESS }
+private fun activeActivityLabel(
+    items: List<ConversationItem>,
+    activeItemKeys: Set<ConversationItemKey>,
+): String {
+    val activeItem = items.lastOrNull { it.activityStatus(activeItemKeys) == ActivityStatus.IN_PROGRESS }
         ?: items.last()
     return when (activeItem) {
         is ConversationItem.Reasoning -> reasoningSummaryTitle(activeItem.summaryParts) ?: "推理中"
@@ -319,9 +329,13 @@ private fun activeActivityLabel(items: List<ConversationItem>): String {
     }
 }
 
-private fun activityGroupStatus(items: List<ConversationItem>, isSealed: Boolean): ActivityStatus {
+private fun activityGroupStatus(
+    items: List<ConversationItem>,
+    isSealed: Boolean,
+    activeItemKeys: Set<ConversationItemKey>,
+): ActivityStatus {
     if (!isSealed) return ActivityStatus.IN_PROGRESS
-    val statuses = items.map(ConversationItem::activityStatus)
+    val statuses = items.map { item -> item.activityStatus(activeItemKeys) }
     return when {
         ActivityStatus.FAILED in statuses -> ActivityStatus.FAILED
         ActivityStatus.DECLINED in statuses -> ActivityStatus.DECLINED
@@ -329,20 +343,27 @@ private fun activityGroupStatus(items: List<ConversationItem>, isSealed: Boolean
     }
 }
 
-internal fun ConversationItem.activityStatus(): ActivityStatus = when (this) {
-    is ConversationItem.Reasoning -> if (isStreaming) ActivityStatus.IN_PROGRESS else ActivityStatus.COMPLETED
-    is ConversationItem.Plan -> if (isStreaming) ActivityStatus.IN_PROGRESS else ActivityStatus.COMPLETED
-    is ConversationItem.CommandExecution -> status
-    is ConversationItem.FileChange -> status
-    is ConversationItem.Activity -> status
-    is ConversationItem.AgentMessage -> if (isStreaming) ActivityStatus.IN_PROGRESS else ActivityStatus.COMPLETED
-    is ConversationItem.UserMessage -> ActivityStatus.COMPLETED
+internal fun ConversationItem.activityStatus(
+    activeItemKeys: Set<ConversationItemKey> = emptySet(),
+): ActivityStatus {
+    if (ConversationItemKey(turnId, id) in activeItemKeys) return ActivityStatus.IN_PROGRESS
+    return when (this) {
+        is ConversationItem.CommandExecution -> status
+        is ConversationItem.FileChange -> status
+        is ConversationItem.Activity -> status
+        is ConversationItem.Reasoning,
+        is ConversationItem.Plan,
+        is ConversationItem.AgentMessage,
+        is ConversationItem.UserMessage,
+        -> ActivityStatus.COMPLETED
+    }
 }
 
 @Composable
 internal fun ActivityDetailsSheet(
     items: List<ConversationItem>,
     isSealed: Boolean,
+    activeItemKeys: Set<ConversationItemKey>,
     activeActions: ActivityDetailsActions?,
     cwd: String,
     onOpenRemoteFile: (RemoteFileTarget) -> Unit,
@@ -363,7 +384,7 @@ internal fun ActivityDetailsSheet(
             },
         )
     }
-    val followTargetIndex = activityFollowTargetIndex(items, isSealed)
+    val followTargetIndex = activityFollowTargetIndex(items, isSealed, activeItemKeys)
     val followTargetKey = followTargetIndex?.let { index -> items[index].activityItemKey() }
     val listState = rememberLazyListState(
         initialFirstVisibleItemIndex = followTargetIndex?.let(::activityHeaderLazyIndex) ?: 0,
@@ -453,6 +474,7 @@ internal fun ActivityDetailsSheet(
                                     item = item,
                                     isLast = index == items.lastIndex,
                                     isCurrent = index == followTargetIndex,
+                                    activeItemKeys = activeItemKeys,
                                     expanded = expanded,
                                     onToggle = {
                                         expandedItemKeys = ArrayList(expandedItemKeys).apply {
@@ -514,9 +536,13 @@ private fun ReturnToCurrentStepButton(
     }
 }
 
-internal fun activityFollowTargetIndex(items: List<ConversationItem>, isSealed: Boolean): Int? {
+internal fun activityFollowTargetIndex(
+    items: List<ConversationItem>,
+    isSealed: Boolean,
+    activeItemKeys: Set<ConversationItemKey> = emptySet(),
+): Int? {
     if (isSealed || items.isEmpty()) return null
-    return items.indexOfLast { it.activityStatus() == ActivityStatus.IN_PROGRESS }
+    return items.indexOfLast { it.activityStatus(activeItemKeys) == ActivityStatus.IN_PROGRESS }
         .takeIf { it >= 0 }
         ?: items.lastIndex
 }
@@ -530,6 +556,7 @@ private fun ActivityTimelineHeader(
     item: ConversationItem,
     isLast: Boolean,
     isCurrent: Boolean,
+    activeItemKeys: Set<ConversationItemKey>,
     expanded: Boolean,
     onToggle: () -> Unit,
 ) {
@@ -540,7 +567,7 @@ private fun ActivityTimelineHeader(
         label = "处理过程详情展开箭头",
     )
     val statusDescription = buildString {
-        append(activityStatusDescription(item.activityStatus()))
+        append(activityStatusDescription(item.activityStatus(activeItemKeys)))
         if (hasDetails) append(if (expanded) "，已展开" else "，已收起")
     }
 
@@ -572,7 +599,7 @@ private fun ActivityTimelineHeader(
             if (!isLast) {
                 ActivityTimelineConnector(Modifier.padding(top = 30.dp))
             }
-            ActivityTimelineIcon(item)
+            ActivityTimelineIcon(item, activeItemKeys)
         }
         Spacer(Modifier.width(12.dp))
         Row(
@@ -703,8 +730,11 @@ private fun ActivityTimelineConnector(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ActivityTimelineIcon(item: ConversationItem) {
-    val status = item.activityStatus()
+private fun ActivityTimelineIcon(
+    item: ConversationItem,
+    activeItemKeys: Set<ConversationItemKey>,
+) {
+    val status = item.activityStatus(activeItemKeys)
     val icon = activityTypeIcon(item)
     val tint = MaterialTheme.colorScheme.onSurfaceVariant
     Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {

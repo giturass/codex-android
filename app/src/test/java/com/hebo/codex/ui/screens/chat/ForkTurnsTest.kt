@@ -11,7 +11,7 @@ class ForkTurnsTest {
         val turns = buildForkTurns(
             items = listOf(
                 userMessage("message-1", "turn-1", UserMessagePart.Text("  第一行\n第二行  ")),
-                ConversationItem.AgentMessage("answer-1", "turn-1", "回答", false),
+                ConversationItem.AgentMessage("answer-1", "turn-1", "回答"),
                 userMessage("message-2", "turn-2", UserMessagePart.Text("执行中")),
                 userMessage("pending", "pending", UserMessagePart.Text("待发送")),
             ),

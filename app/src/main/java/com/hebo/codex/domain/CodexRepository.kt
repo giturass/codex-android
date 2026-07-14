@@ -668,7 +668,11 @@ class CodexRepository(
                     .onFailure { error ->
                         pendingResumeGoalSnapshots.remove(key)
                         state.updateState {
-                            it.copy(isRunning = false, errorMessage = error.toUserFacingError("恢复会话失败"))
+                            it.copy(
+                                activeItemKeys = emptySet(),
+                                isRunning = false,
+                                errorMessage = error.toUserFacingError("恢复会话失败"),
+                            )
                         }
                     }
             }
@@ -864,10 +868,14 @@ class CodexRepository(
         if (threadId == null) return
         val key = ConversationKey(serverId, threadId)
         val state = conversations[key]
-        fun updateNotifiedItem(transform: (ConversationItem) -> ConversationItem) {
+        fun updateNotifiedItem(
+            markActive: Boolean = false,
+            transform: (ConversationItem) -> ConversationItem,
+        ) {
             state?.updateItem(
                 turnId = params.requiredString("turnId"),
                 itemId = params.requiredString("itemId"),
+                markActive = markActive,
                 transform = transform,
             )
         }
@@ -876,7 +884,11 @@ class CodexRepository(
 
             "thread/status/changed" -> state?.updateState { current ->
                 val status = params.requiredObject("status").requiredString("type")
-                current.copy(isRunning = status == "active")
+                val isActive = status == "active"
+                current.copy(
+                    activeItemKeys = if (isActive) current.activeItemKeys else emptySet(),
+                    isRunning = isActive,
+                )
             }.also {
                 val status = params.requiredObject("status").requiredString("type")
                 when (status) {
@@ -899,6 +911,7 @@ class CodexRepository(
                         else -> "服务端已关闭会话"
                     }
                     current.copy(
+                        activeItemKeys = emptySet(),
                         isRunning = false,
                         notices = (current.notices + ConversationNotice(
                             UUID.randomUUID().toString(),
@@ -932,6 +945,7 @@ class CodexRepository(
                 val turn = params.requiredObject("turn")
                 state.updateState {
                     it.copy(
+                        activeItemKeys = emptySet(),
                         activeTurnId = turn.requiredString("id"),
                         isRunning = true,
                         plan = null,
@@ -944,6 +958,7 @@ class CodexRepository(
             "turn/completed" -> {
                 if (state == null) return
                 val turn = params.requiredObject("turn")
+                val completedTurnId = turn.requiredString("id")
                 val errorMessage = (turn["error"] as? JsonObject)?.optionalString("message")
                     ?.let { serverError("任务执行失败", it) }
                 state.updateState {
@@ -953,7 +968,7 @@ class CodexRepository(
                         pendingRequests = emptyList(),
                         plan = null,
                         errorMessage = errorMessage,
-                    )
+                    ).withoutActiveItems(completedTurnId)
                 }
                 val completionAttention = if (errorMessage == null) ThreadAttention.READY else ThreadAttention.FAILED
                 setThreadAttention(
@@ -1020,18 +1035,19 @@ class CodexRepository(
                 val item = ProtocolMapper.conversationItem(
                     item = itemPayload,
                     turnId = params.requiredString("turnId"),
-                    isCompleted = method == "item/completed",
                 )
-                state.updateState { current -> current.copy(items = current.items.upsertConversationItem(item)) }
+                state.updateState { current ->
+                    current.withConversationItem(item, isActive = method == "item/started")
+                }
             }
 
-            "item/agentMessage/delta" -> updateNotifiedItem { item ->
+            "item/agentMessage/delta" -> updateNotifiedItem(markActive = true) { item ->
                 val message = item as? ConversationItem.AgentMessage
                     ?: throw ProtocolException("agentMessage delta 的目标类型不正确")
                 message.copy(text = message.text + params.requiredString("delta"))
             }
 
-            "item/reasoning/summaryTextDelta" -> updateNotifiedItem { item ->
+            "item/reasoning/summaryTextDelta" -> updateNotifiedItem(markActive = true) { item ->
                 val reasoning = item as? ConversationItem.Reasoning
                     ?: throw ProtocolException("reasoning summary delta 的目标类型不正确")
                 reasoning.appendSummaryDelta(
@@ -1040,13 +1056,13 @@ class CodexRepository(
                 )
             }
 
-            "item/reasoning/summaryPartAdded" -> updateNotifiedItem { item ->
+            "item/reasoning/summaryPartAdded" -> updateNotifiedItem(markActive = true) { item ->
                 val reasoning = item as? ConversationItem.Reasoning
                     ?: throw ProtocolException("reasoning summary part 的目标类型不正确")
                 reasoning.addSummaryPart(params.requiredInt("summaryIndex"))
             }
 
-            "item/reasoning/textDelta" -> updateNotifiedItem { item ->
+            "item/reasoning/textDelta" -> updateNotifiedItem(markActive = true) { item ->
                 val reasoning = item as? ConversationItem.Reasoning
                     ?: throw ProtocolException("reasoning delta 的目标类型不正确")
                 reasoning.appendRawContentDelta(
@@ -1078,12 +1094,11 @@ class CodexRepository(
                         put("status", "inProgress")
                     },
                     turnId = fileChange.turnId,
-                    isCompleted = false,
                 )
                 replacement
             }
 
-            "item/plan/delta" -> updateNotifiedItem { item ->
+            "item/plan/delta" -> updateNotifiedItem(markActive = true) { item ->
                 val plan = item as? ConversationItem.Plan
                     ?: throw ProtocolException("plan delta 的目标类型不正确")
                 plan.copy(text = plan.text + params.requiredString("delta"))
@@ -1174,12 +1189,12 @@ class CodexRepository(
     private fun MutableStateFlow<ConversationState>.updateItem(
         turnId: String,
         itemId: String,
+        markActive: Boolean = false,
         transform: (ConversationItem) -> ConversationItem,
     ) {
         updateState { current ->
-            val items = current.items.replaceConversationItem(turnId, itemId, transform)
+            current.withUpdatedConversationItem(turnId, itemId, markActive, transform)
                 ?: throw ProtocolException("流式事件引用了不存在的条目：$turnId/$itemId")
-            current.copy(items = items)
         }
     }
 

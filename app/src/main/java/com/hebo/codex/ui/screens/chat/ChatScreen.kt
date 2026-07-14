@@ -154,6 +154,7 @@ import com.hebo.codex.domain.ApprovalReviewer
 import com.hebo.codex.domain.ApprovalType
 import com.hebo.codex.domain.ConnectionStatus
 import com.hebo.codex.domain.ConversationItem
+import com.hebo.codex.domain.ConversationItemKey
 import com.hebo.codex.domain.ConversationState
 import com.hebo.codex.domain.DraftAttachment
 import com.hebo.codex.domain.FeatureEntry
@@ -417,6 +418,7 @@ fun ChatScreen(
                         when (row) {
                             is ConversationRow.Item -> ConversationItemView(
                                 item = row.item,
+                                activeItemKeys = conversation.activeItemKeys,
                                 cwd = conversation.cwd,
                                 onOpenRemoteFile = { remoteFileTarget = it },
                                 onLinkError = showLinkError,
@@ -425,6 +427,7 @@ fun ChatScreen(
                             is ConversationRow.ActivityGroup -> ActivityGroupCard(
                                 items = row.items,
                                 isSealed = row.isSealed,
+                                activeItemKeys = conversation.activeItemKeys,
                                 onOpenDetails = { activityDetailsRowKey = row.key },
                             )
                         }
@@ -644,6 +647,7 @@ fun ChatScreen(
         ActivityDetailsSheet(
             items = activityItems,
             isSealed = isSealed,
+            activeItemKeys = conversation?.activeItemKeys.orEmpty(),
             activeActions = if (isSealed || conversation == null) {
                 null
             } else {
@@ -1011,6 +1015,7 @@ private fun ForkFromTurnAction(
 @Composable
 private fun ConversationItemView(
     item: ConversationItem,
+    activeItemKeys: Set<ConversationItemKey>,
     cwd: String,
     onOpenRemoteFile: (RemoteFileTarget) -> Unit,
     onLinkError: (String) -> Unit,
@@ -1019,10 +1024,17 @@ private fun ConversationItemView(
     when (item) {
         is ConversationItem.UserMessage -> UserMessage(item)
         is ConversationItem.AgentMessage -> AgentMessage(item, cwd, onOpenRemoteFile, onLinkError)
-        is ConversationItem.Plan -> PlanSnapshot(item, cwd, onOpenRemoteFile, onLinkError)
+        is ConversationItem.Plan -> PlanSnapshot(
+            item = item,
+            isActive = ConversationItemKey(item.turnId, item.id) in activeItemKeys,
+            cwd = cwd,
+            onOpenRemoteFile = onOpenRemoteFile,
+            onLinkError = onLinkError,
+        )
         else -> ActivityGroupCard(
             items = listOf(item),
             isSealed = true,
+            activeItemKeys = activeItemKeys,
             onOpenDetails = onOpenActivityDetails,
         )
     }
@@ -1031,6 +1043,7 @@ private fun ConversationItemView(
 @Composable
 private fun PlanSnapshot(
     item: ConversationItem.Plan,
+    isActive: Boolean,
     cwd: String,
     onOpenRemoteFile: (RemoteFileTarget) -> Unit,
     onLinkError: (String) -> Unit,
@@ -1047,7 +1060,7 @@ private fun PlanSnapshot(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("执行计划", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
-                if (item.isStreaming) {
+                if (isActive) {
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                 }
             }

@@ -44,6 +44,5 @@ class ReasoningStreamTest {
         turnId = "turn",
         summaryParts = emptyList(),
         rawContentParts = emptyList(),
-        isStreaming = true,
     )
 }

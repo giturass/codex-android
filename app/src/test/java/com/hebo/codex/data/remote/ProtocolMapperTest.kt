@@ -114,12 +114,11 @@ class ProtocolMapperTest {
             """{"type":"plan","id":"plan-1","text":"1. 定位问题\n2. 修改实现"}""",
         ).jsonObject
 
-        val mapped = ProtocolMapper.conversationItem(item, "turn-1", isCompleted = true)
+        val mapped = ProtocolMapper.conversationItem(item, "turn-1")
             as ConversationItem.Plan
 
         assertEquals("plan-1", mapped.id)
         assertEquals("1. 定位问题\n2. 修改实现", mapped.text)
-        assertFalse(mapped.isStreaming)
     }
 
     @Test
@@ -133,12 +132,11 @@ class ProtocolMapperTest {
             }""",
         ).jsonObject
 
-        val mapped = ProtocolMapper.conversationItem(item, "turn-1", isCompleted = true)
+        val mapped = ProtocolMapper.conversationItem(item, "turn-1")
             as ConversationItem.Reasoning
 
         assertEquals(listOf("第一段", "第二段"), mapped.summaryParts)
         assertEquals(listOf("原始一", "原始二"), mapped.rawContentParts)
-        assertFalse(mapped.isStreaming)
     }
 
     @Test
@@ -170,7 +168,7 @@ class ProtocolMapperTest {
             """.trimIndent(),
         ).jsonObject
 
-        val mapped = ProtocolMapper.conversationItem(item, "turn-1", isCompleted = false)
+        val mapped = ProtocolMapper.conversationItem(item, "turn-1")
 
         assertTrue(mapped is ConversationItem.FileChange)
         mapped as ConversationItem.FileChange
@@ -202,7 +200,7 @@ class ProtocolMapperTest {
             """.trimIndent(),
         ).jsonObject
 
-        val mapped = ProtocolMapper.conversationItem(item, "turn-1", isCompleted = true)
+        val mapped = ProtocolMapper.conversationItem(item, "turn-1")
             as ConversationItem.UserMessage
 
         assertEquals(UserMessagePart.Text("分析截图"), mapped.content[0])
@@ -223,7 +221,7 @@ class ProtocolMapperTest {
             }""",
         ).jsonObject
 
-        val mapped = ProtocolMapper.conversationItem(item, "turn-1", isCompleted = true)
+        val mapped = ProtocolMapper.conversationItem(item, "turn-1")
             as ConversationItem.Activity
 
         assertEquals(ActivityKind.WEB_SEARCH, mapped.kind)
@@ -239,14 +237,12 @@ class ProtocolMapperTest {
                 """{"type":"imageView","id":"view-1","path":"/workspace/chart.png"}""",
             ).jsonObject,
             "turn-1",
-            isCompleted = true,
         ) as ConversationItem.Activity
         val imageGeneration = ProtocolMapper.conversationItem(
             json.parseToJsonElement(
                 """{"type":"imageGeneration","id":"generate-1","status":"completed","revisedPrompt":null,"result":"data:image/png;base64,AAAA","savedPath":"/workspace/generated.png"}""",
             ).jsonObject,
             "turn-1",
-            isCompleted = true,
         ) as ConversationItem.Activity
 
         assertEquals("/workspace/chart.png", imageView.remotePath)
@@ -271,7 +267,6 @@ class ProtocolMapperTest {
             val mapped = ProtocolMapper.conversationItem(
                 item,
                 "turn-1",
-                isCompleted = status != "in_progress",
             ) as ConversationItem.Activity
 
             assertEquals(expected, mapped.status)
@@ -299,7 +294,6 @@ class ProtocolMapperTest {
             val mapped = ProtocolMapper.conversationItem(
                 item = json.parseToJsonElement(payload).jsonObject,
                 turnId = "turn-1",
-                isCompleted = true,
             ) as ConversationItem.Activity
 
             assertEquals(expectedSummary, mapped.title)

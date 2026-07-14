@@ -15,7 +15,7 @@ class ConversationRowsTest {
         val items = listOf(
             command("command-1", "turn-1"),
             command("command-2", "turn-1"),
-            ConversationItem.AgentMessage("answer", "turn-1", "完成", false),
+            ConversationItem.AgentMessage("answer", "turn-1", "完成"),
             command("command-3", "turn-2"),
         )
 
@@ -43,8 +43,8 @@ class ConversationRowsTest {
     fun `相同条目编号在不同回合中具有不同列表键`() {
         val rows = buildConversationRows(
             items = listOf(
-                ConversationItem.AgentMessage("item-1", "turn-1", "第一回合", false),
-                ConversationItem.AgentMessage("item-1", "turn-2", "第二回合", false),
+                ConversationItem.AgentMessage("item-1", "turn-1", "第一回合"),
+                ConversationItem.AgentMessage("item-1", "turn-2", "第二回合"),
             ),
             activeTurnId = null,
         )
@@ -77,7 +77,6 @@ class ConversationRowsTest {
             turnId = "turn-1",
             summaryParts = listOf("分析项目"),
             rawContentParts = listOf("先检查目录"),
-            isStreaming = false,
         )
 
         val rows = buildConversationRows(
@@ -128,7 +127,7 @@ class ConversationRowsTest {
         val rows = buildConversationRows(
             items = listOf(
                 command("command", "turn-1"),
-                ConversationItem.AgentMessage("answer", "turn-1", "开始回答", true),
+                ConversationItem.AgentMessage("answer", "turn-1", "开始回答"),
             ),
             activeTurnId = "turn-1",
         )
@@ -143,7 +142,7 @@ class ConversationRowsTest {
         val rows = buildConversationRows(
             items = listOf(
                 command("command", "turn-1"),
-                ConversationItem.AgentMessage("answer", "turn-1", "", true),
+                ConversationItem.AgentMessage("answer", "turn-1", ""),
             ),
             activeTurnId = "turn-1",
         )
@@ -156,7 +155,7 @@ class ConversationRowsTest {
         val rows = buildConversationRows(
             items = listOf(
                 command("command-1", "turn-1"),
-                ConversationItem.AgentMessage("answer", "turn-1", "继续处理", false),
+                ConversationItem.AgentMessage("answer", "turn-1", "继续处理"),
                 command("command-2", "turn-1"),
             ),
             activeTurnId = "turn-1",
@@ -211,7 +210,6 @@ class ConversationRowsTest {
                 turnId = "turn-1",
                 summaryParts = listOf("检查项目"),
                 rawContentParts = emptyList(),
-                isStreaming = false,
             ),
         )
 
@@ -246,7 +244,6 @@ class ConversationRowsTest {
             turnId = "turn-1",
             summaryParts = listOf("检查项目", "定位活动组状态"),
             rawContentParts = emptyList(),
-            isStreaming = false,
         )
 
         assertEquals(
@@ -304,7 +301,6 @@ class ConversationRowsTest {
             id = "plan-1",
             turnId = "turn-1",
             text = "1. 检查实现",
-            isStreaming = false,
         )
 
         val rows = buildConversationRows(
