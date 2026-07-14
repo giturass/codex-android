@@ -119,7 +119,10 @@ internal fun ActivityGroupCard(
     val canOpenDetails = singleItem == null || activityItemHasDetails(singleItem)
     val status = singleItem?.activityStatus(activeItemKeys)
         ?: activityGroupStatus(items, isSealed, activeItemKeys)
-    val contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val contentColor = when (status) {
+        ActivityStatus.FAILED, ActivityStatus.DECLINED -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
     val sealedGroupStatusIcon = if (singleItem == null && isSealed) {
         when (status) {
             ActivityStatus.FAILED -> Icons.Rounded.ErrorOutline
@@ -736,7 +739,11 @@ private fun ActivityTimelineIcon(
 ) {
     val status = item.activityStatus(activeItemKeys)
     val icon = activityTypeIcon(item)
-    val tint = MaterialTheme.colorScheme.onSurfaceVariant
+    val tint = when (status) {
+        ActivityStatus.IN_PROGRESS -> MaterialTheme.colorScheme.onSurfaceVariant
+        ActivityStatus.COMPLETED -> MaterialTheme.colorScheme.onSurfaceVariant
+        ActivityStatus.FAILED, ActivityStatus.DECLINED -> MaterialTheme.colorScheme.error
+    }
     Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
         Surface(
             modifier = Modifier.size(26.dp),
@@ -763,8 +770,8 @@ private fun ActivityTimelineIcon(
             Surface(
                 modifier = Modifier.align(Alignment.BottomEnd).size(12.dp),
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.error,
+                contentColor = MaterialTheme.colorScheme.onError,
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
