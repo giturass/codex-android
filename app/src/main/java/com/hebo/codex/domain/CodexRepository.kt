@@ -1,5 +1,6 @@
 package com.hebo.codex.domain
 
+import android.util.Log
 import com.hebo.codex.data.local.ServerSettings
 import com.hebo.codex.data.local.ServerStore
 import com.hebo.codex.data.remote.AppServerApi
@@ -65,6 +66,7 @@ class CodexRepository(
     private val conversations = ConcurrentHashMap<ConversationKey, MutableStateFlow<ConversationState>>()
     private val conversationLeases = ConversationLeaseRegistry<ConversationKey>()
     private val pendingResumeGoalSnapshots = ConcurrentHashMap.newKeySet<ConversationKey>()
+    private val pendingItemUpdates = ConcurrentHashMap<ItemRoute, MutableList<PendingItemUpdate>>()
     private val pendingRequestRoutes = ConcurrentHashMap<String, PendingRequestRoute>()
     private val mutableConnectionStatuses = MutableStateFlow<Map<String, ConnectionStatus>>(emptyMap())
     private val mutableThreadRevisions = MutableStateFlow<Map<String, Long>>(emptyMap())
@@ -162,6 +164,7 @@ class CodexRepository(
         }
         mutableConnectionStatuses.updateValue(serverId, ConnectionStatus.Disconnected)
         conversations.keys.filter { it.serverId == serverId }.forEach { conversations.remove(it) }
+        pendingItemUpdates.keys.removeIf { it.serverId == serverId }
         serverStore.removeServer(serverId)
     }
 
@@ -212,22 +215,22 @@ class CodexRepository(
 
     suspend fun openConversation(serverId: String, threadId: String): StateFlow<ConversationState> {
         val key = ConversationKey(serverId, threadId)
-        conversationLeases.acquire(key)
-        return try {
-            val conversation = conversations[key] ?: conversationMutex.withLock {
+        val conversation = conversationMutex.withLock {
+            conversationLeases.acquire(key)
+            try {
                 conversations[key] ?: run {
                     val snapshot = resumeConversation(key)
                     MutableStateFlow(snapshot.toConversationState(awaitServer(serverId))).also {
                         conversations[key] = it
                     }
                 }
+            } catch (error: Throwable) {
+                conversationLeases.release(key)
+                throw error
             }
-            markThreadViewed(serverId, threadId)
-            conversation
-        } catch (error: Throwable) {
-            conversationLeases.release(key)
-            throw error
         }
+        markThreadViewed(serverId, threadId)
+        return conversation
     }
 
     suspend fun sendMessage(
@@ -317,7 +320,9 @@ class CodexRepository(
             StableRpcMethod.THREAD_ARCHIVE,
             buildJsonObject { put("threadId", threadId) },
         )
-        conversations.remove(ConversationKey(serverId, threadId))
+        val key = ConversationKey(serverId, threadId)
+        conversations.remove(key)
+        removePendingItemUpdates(key)
         bumpThreadRevision(serverId)
     }
 
@@ -334,7 +339,9 @@ class CodexRepository(
             StableRpcMethod.THREAD_DELETE,
             buildJsonObject { put("threadId", threadId) },
         )
-        conversations.remove(ConversationKey(serverId, threadId))
+        val key = ConversationKey(serverId, threadId)
+        conversations.remove(key)
+        removePendingItemUpdates(key)
         removePendingRequests(serverId, threadId)
         bumpThreadRevision(serverId)
     }
@@ -413,27 +420,36 @@ class CodexRepository(
 
     fun releaseConversation(serverId: String, threadId: String) {
         val key = ConversationKey(serverId, threadId)
-        conversationLeases.release(key)
-        releaseConversationIfUnused(key)
+        applicationScope.launch {
+            conversationMutex.withLock {
+                conversationLeases.release(key)
+                releaseConversationIfUnusedLocked(key)
+            }
+        }
     }
 
     private fun releaseConversationIfUnused(key: ConversationKey) {
         applicationScope.launch {
             conversationMutex.withLock {
-                if (conversationLeases.isHeld(key)) return@withLock
-                val conversation = conversations[key] ?: return@withLock
-                if (conversation.value.requiresRuntimeRetention) return@withLock
-                runSuspendCatching {
-                    api(key.serverId).request(
-                        StableRpcMethod.THREAD_UNSUBSCRIBE,
-                        buildJsonObject { put("threadId", key.threadId) },
-                    )
-                }
-                conversations.remove(key, conversation)
-                pendingResumeGoalSnapshots.remove(key)
-                removePendingRequests(key.serverId, key.threadId)
+                releaseConversationIfUnusedLocked(key)
             }
         }
+    }
+
+    private suspend fun releaseConversationIfUnusedLocked(key: ConversationKey) {
+        if (conversationLeases.isHeld(key)) return
+        val conversation = conversations[key] ?: return
+        if (conversation.value.requiresRuntimeRetention) return
+        runSuspendCatching {
+            api(key.serverId).request(
+                StableRpcMethod.THREAD_UNSUBSCRIBE,
+                buildJsonObject { put("threadId", key.threadId) },
+            )
+        }
+        conversations.remove(key, conversation)
+        pendingResumeGoalSnapshots.remove(key)
+        removePendingItemUpdates(key)
+        removePendingRequests(key.serverId, key.threadId)
     }
 
     fun clearConversationError(serverId: String, threadId: String) {
@@ -663,7 +679,10 @@ class CodexRepository(
                 pendingResumeGoalSnapshots.add(key)
                 runSuspendCatching { ProtocolMapper.threadSnapshot(api.resumeThread(key.threadId)) }
                     .onSuccess { snapshot ->
-                        state.value = snapshot.toConversationState(server)
+                        state.updateState { current ->
+                            current.withRestoredConversation(snapshot.toConversationState(server))
+                        }
+                        removeRestoredItemUpdates(key, state.value)
                     }
                     .onFailure { error ->
                         pendingResumeGoalSnapshots.remove(key)
@@ -872,12 +891,26 @@ class CodexRepository(
             markActive: Boolean = false,
             transform: (ConversationItem) -> ConversationItem,
         ) {
-            state?.updateItem(
-                turnId = params.requiredString("turnId"),
-                itemId = params.requiredString("itemId"),
-                markActive = markActive,
-                transform = transform,
-            )
+            if (state == null) return
+            val turnId = params.requiredString("turnId")
+            val itemId = params.requiredString("itemId")
+            val update = PendingItemUpdate(method, markActive, transform)
+            if (!state.updateItem(turnId, itemId, markActive, transform)) {
+                val route = ItemRoute(serverId, threadId, turnId, itemId)
+                var firstPendingUpdate = false
+                pendingItemUpdates.compute(route) { _, current ->
+                    firstPendingUpdate = current == null
+                    current.orEmpty().toMutableList().apply { add(update) }
+                }
+                if (firstPendingUpdate) {
+                    val current = state.value
+                    Log.w(
+                        LOG_TAG,
+                        "暂存缺少基础条目的流式事件：method=$method, turnId=$turnId, itemId=$itemId, " +
+                            "activeTurnId=${current.activeTurnId}, itemCount=${current.items.size}",
+                    )
+                }
+            }
         }
         when (method) {
             "thread/started" -> bumpThreadRevision(serverId)
@@ -920,6 +953,7 @@ class CodexRepository(
                     )
                 }
                 pendingResumeGoalSnapshots.remove(key)
+                removePendingItemUpdates(key)
                 conversations.remove(key)
             }
 
@@ -989,6 +1023,7 @@ class CodexRepository(
                     ),
                 )
                 removePendingRequests(serverId, threadId)
+                removePendingItemUpdates(key, completedTurnId)
                 bumpThreadRevision(serverId)
                 releaseConversationIfUnused(key)
             }
@@ -1039,6 +1074,9 @@ class CodexRepository(
                 state.updateState { current ->
                     current.withConversationItem(item, isActive = method == "item/started")
                 }
+                val route = ItemRoute(serverId, threadId, item.turnId, item.id)
+                if (method == "item/started") replayPendingItemUpdates(state, route)
+                else pendingItemUpdates.remove(route)
             }
 
             "item/agentMessage/delta" -> updateNotifiedItem(markActive = true) { item ->
@@ -1169,32 +1207,68 @@ class CodexRepository(
 
     private fun com.hebo.codex.data.remote.ThreadSnapshot.toConversationState(
         profile: ServerProfile,
-    ): ConversationState = ConversationState(
-        serverId = profile.id,
-        serverName = profile.name,
-        threadId = summary.id,
-        title = summary.title,
-        cwd = summary.cwd,
-        items = items,
-        activeTurnId = activeTurnId,
-        isRunning = summary.status == ThreadRuntimeStatus.ACTIVE,
-        model = model,
-        serviceTier = serviceTier,
-        reasoningEffort = reasoningEffort,
-        approvalPolicy = approvalPolicy,
-        approvalsReviewer = approvalsReviewer,
-        sandbox = sandbox,
-    )
+    ): ConversationState {
+        val activeItemKeys = activeTurnId?.let { turnId ->
+            items.filter { item -> item.turnId == turnId && item.isExplicitlyInProgress }
+                .mapTo(mutableSetOf(), ConversationItem::key)
+        }.orEmpty()
+        return ConversationState(
+            serverId = profile.id,
+            serverName = profile.name,
+            threadId = summary.id,
+            title = summary.title,
+            cwd = summary.cwd,
+            items = items,
+            activeItemKeys = activeItemKeys,
+            activeTurnId = activeTurnId,
+            isRunning = summary.status == ThreadRuntimeStatus.ACTIVE,
+            model = model,
+            serviceTier = serviceTier,
+            reasoningEffort = reasoningEffort,
+            approvalPolicy = approvalPolicy,
+            approvalsReviewer = approvalsReviewer,
+            sandbox = sandbox,
+        )
+    }
 
     private fun MutableStateFlow<ConversationState>.updateItem(
         turnId: String,
         itemId: String,
         markActive: Boolean = false,
         transform: (ConversationItem) -> ConversationItem,
-    ) {
+    ): Boolean {
+        var found = false
         updateState { current ->
-            current.withUpdatedConversationItem(turnId, itemId, markActive, transform)
-                ?: throw ProtocolException("流式事件引用了不存在的条目：$turnId/$itemId")
+            val updated = current.withUpdatedConversationItem(turnId, itemId, markActive, transform)
+            found = updated != null
+            updated ?: current
+        }
+        return found
+    }
+
+    private fun replayPendingItemUpdates(
+        state: MutableStateFlow<ConversationState>,
+        route: ItemRoute,
+    ) {
+        pendingItemUpdates.remove(route)?.forEach { update ->
+            check(state.updateItem(route.turnId, route.itemId, update.markActive, update.transform)) {
+                "无法重放流式事件：${update.method} ${route.turnId}/${route.itemId}"
+            }
+        }
+    }
+
+    private fun removeRestoredItemUpdates(key: ConversationKey, state: ConversationState) {
+        val restoredKeys = state.items.mapTo(mutableSetOf(), ConversationItem::key)
+        pendingItemUpdates.keys.removeIf { route ->
+            route.serverId == key.serverId && route.threadId == key.threadId &&
+                ConversationItemKey(route.turnId, route.itemId) in restoredKeys
+        }
+    }
+
+    private fun removePendingItemUpdates(key: ConversationKey, turnId: String? = null) {
+        pendingItemUpdates.keys.removeIf { route ->
+            route.serverId == key.serverId && route.threadId == key.threadId &&
+                (turnId == null || route.turnId == turnId)
         }
     }
 
@@ -1334,9 +1408,23 @@ class CodexRepository(
 
     private data class ConversationKey(val serverId: String, val threadId: String)
 
+    private data class ItemRoute(
+        val serverId: String,
+        val threadId: String,
+        val turnId: String,
+        val itemId: String,
+    )
+
+    private data class PendingItemUpdate(
+        val method: String,
+        val markActive: Boolean,
+        val transform: (ConversationItem) -> ConversationItem,
+    )
+
     private data class PendingRequestRoute(val id: JsonPrimitive, val threadId: String)
 
     private companion object {
+        const val LOG_TAG = "CodexRepository"
         const val METHOD_NOT_FOUND = -32601
         const val INVALID_REQUEST = -32600
         const val SERVER_LOAD_TIMEOUT_MILLIS = 5_000L
