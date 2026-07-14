@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.text.selection.SelectionState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.AutoAwesome
@@ -22,10 +23,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -54,9 +58,7 @@ internal fun UserMessage(item: ConversationItem.UserMessage) {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (text.isNotBlank()) {
-                    SelectionContainer {
-                        Text(text, color = MaterialTheme.colorScheme.onSurface)
-                    }
+                    SelectableUserMessageText(text)
                 }
                 if (attachments.isNotEmpty()) {
                     FlowRow(
@@ -68,6 +70,25 @@ internal fun UserMessage(item: ConversationItem.UserMessage) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SelectableUserMessageText(text: String) {
+    val selectionState = remember { SelectionState() }
+    LaunchedEffect(selectionState) {
+        var initialSelectionExpanded = false
+        snapshotFlow { selectionState.selectedTexts }.collect { selectedTexts ->
+            if (selectedTexts.isEmpty()) {
+                initialSelectionExpanded = false
+            } else if (!initialSelectionExpanded) {
+                initialSelectionExpanded = true
+                selectionState.selectAll()
+            }
+        }
+    }
+    SelectionContainer(state = selectionState) {
+        Text(text, color = MaterialTheme.colorScheme.onSurface)
     }
 }
 
