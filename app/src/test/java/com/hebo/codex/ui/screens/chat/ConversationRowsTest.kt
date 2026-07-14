@@ -177,10 +177,10 @@ class ConversationRowsTest {
     }
 
     @Test
-    fun `文件摘要按不同路径计数`() {
+    fun `文件摘要按修改过程计数`() {
         val firstChange = fileChange(
             id = "change-1",
-            paths = listOf("src/Main.kt", "src/Theme.kt"),
+            paths = listOf("src/Main.kt"),
         )
         val secondChange = fileChange(
             id = "change-2",
@@ -217,8 +217,35 @@ class ConversationRowsTest {
             listOf(
                 ActivityGroupMetric(ActivityGroupMetricType.REASONING, 1),
                 ActivityGroupMetric(ActivityGroupMetricType.COMMAND, 1),
-                ActivityGroupMetric(ActivityGroupMetricType.FILE, 2),
+                ActivityGroupMetric(ActivityGroupMetricType.FILE, 1),
                 ActivityGroupMetric(ActivityGroupMetricType.ACTIVITY, 1),
+            ),
+            activityGroupMetrics(items),
+        )
+    }
+
+    @Test
+    fun `活动组汇总各类型的失败过程数`() {
+        val items = listOf(
+            command("command-completed", "turn-1"),
+            command("command-failed", "turn-1", ActivityStatus.FAILED),
+            command("command-declined", "turn-1", ActivityStatus.DECLINED),
+            fileChange("change-completed", listOf("src/Main.kt")),
+            fileChange("change-failed", listOf("src/Main.kt"), ActivityStatus.FAILED),
+            ConversationItem.Activity(
+                id = "activity-failed",
+                turnId = "turn-1",
+                kind = ActivityKind.WEB_SEARCH,
+                title = "搜索网页",
+                status = ActivityStatus.FAILED,
+            ),
+        )
+
+        assertEquals(
+            listOf(
+                ActivityGroupMetric(ActivityGroupMetricType.COMMAND, count = 3, failedCount = 1),
+                ActivityGroupMetric(ActivityGroupMetricType.FILE, count = 2, failedCount = 1),
+                ActivityGroupMetric(ActivityGroupMetricType.ACTIVITY, count = 1, failedCount = 1),
             ),
             activityGroupMetrics(items),
         )
@@ -330,12 +357,13 @@ class ConversationRowsTest {
     private fun fileChange(
         id: String,
         paths: List<String>,
+        status: ActivityStatus = ActivityStatus.COMPLETED,
     ) = ConversationItem.FileChange(
         id = id,
         turnId = "turn-1",
         changes = paths.map { path ->
             ChangedFile(path = path, kind = FileChangeKind.Update(movePath = null), diff = "")
         },
-        status = ActivityStatus.COMPLETED,
+        status = status,
     )
 }

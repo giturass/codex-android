@@ -56,6 +56,8 @@ import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material.icons.rounded.TravelExplore
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.Webhook
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -119,15 +121,16 @@ internal fun ActivityGroupCard(
     val canOpenDetails = singleItem == null || activityItemHasDetails(singleItem)
     val status = singleItem?.activityStatus(activeItemKeys)
         ?: activityGroupStatus(items, isSealed, activeItemKeys)
+    val isSealedGroup = singleItem == null && isSealed
     val contentColor = when (status) {
         ActivityStatus.FAILED, ActivityStatus.DECLINED -> MaterialTheme.colorScheme.error
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
-    val sealedGroupStatusIcon = if (singleItem == null && isSealed) {
+    val aggregateColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val sealedGroupStatusIcon = if (isSealedGroup) {
         when (status) {
-            ActivityStatus.FAILED -> Icons.Rounded.ErrorOutline
             ActivityStatus.DECLINED -> Icons.Rounded.Block
-            ActivityStatus.IN_PROGRESS, ActivityStatus.COMPLETED -> null
+            ActivityStatus.IN_PROGRESS, ActivityStatus.COMPLETED, ActivityStatus.FAILED -> null
         }
     } else {
         null
@@ -175,7 +178,7 @@ internal fun ActivityGroupCard(
         if (singleItem == null && isSealed) {
             ActivityGroupMetrics(
                 metrics = activityGroupMetrics(items),
-                color = contentColor,
+                color = aggregateColor,
                 modifier = Modifier.weight(1f),
             )
         } else {
@@ -193,7 +196,7 @@ internal fun ActivityGroupCard(
                 Icons.AutoMirrored.Rounded.KeyboardArrowRight,
                 contentDescription = "查看处理过程详情",
                 modifier = Modifier.size(22.dp),
-                tint = contentColor,
+                tint = if (isSealedGroup && status == ActivityStatus.FAILED) aggregateColor else contentColor,
             )
         }
     }
@@ -225,13 +228,26 @@ private fun ActivityGroupMetrics(
                 },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    imageVector = metric.icon(),
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp),
-                    tint = color,
-                )
-                Spacer(Modifier.width(4.dp))
+                BadgedBox(
+                    badge = {
+                        if (metric.failedCount > 0) {
+                            Badge(
+                                containerColor = MaterialTheme.colorScheme.error,
+                                contentColor = MaterialTheme.colorScheme.onError,
+                            ) {
+                                Text(metric.failedCount.badgeLabel())
+                            }
+                        }
+                    },
+                ) {
+                    Icon(
+                        imageVector = metric.icon(),
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = color,
+                    )
+                }
+                Spacer(Modifier.width(metric.iconTextSpacing()))
                 Text(
                     text = metric.count.toString(),
                     style = MaterialTheme.typography.labelLarge,
@@ -253,23 +269,53 @@ internal enum class ActivityGroupMetricType {
 internal data class ActivityGroupMetric(
     val type: ActivityGroupMetricType,
     val count: Int,
+    val failedCount: Int = 0,
 )
 
 internal fun activityGroupMetrics(items: List<ConversationItem>): List<ActivityGroupMetric> {
     val reasoningCount = items.count { it is ConversationItem.Reasoning }
-    val commandCount = items.count { it is ConversationItem.CommandExecution }
-    val changedFileCount = items
-        .filterIsInstance<ConversationItem.FileChange>()
-        .flatMap(ConversationItem.FileChange::changes)
-        .distinctBy(ChangedFile::path)
-        .size
-    val activityCount = items.count { it is ConversationItem.Activity }
+    val commands = items.filterIsInstance<ConversationItem.CommandExecution>()
+    val fileChanges = items.filterIsInstance<ConversationItem.FileChange>()
+    val activities = items.filterIsInstance<ConversationItem.Activity>()
     return buildList {
         if (reasoningCount > 0) add(ActivityGroupMetric(ActivityGroupMetricType.REASONING, reasoningCount))
-        if (commandCount > 0) add(ActivityGroupMetric(ActivityGroupMetricType.COMMAND, commandCount))
-        if (changedFileCount > 0) add(ActivityGroupMetric(ActivityGroupMetricType.FILE, changedFileCount))
-        if (activityCount > 0) add(ActivityGroupMetric(ActivityGroupMetricType.ACTIVITY, activityCount))
+        if (commands.isNotEmpty()) {
+            add(
+                ActivityGroupMetric(
+                    type = ActivityGroupMetricType.COMMAND,
+                    count = commands.size,
+                    failedCount = commands.count { it.status == ActivityStatus.FAILED },
+                ),
+            )
+        }
+        if (fileChanges.isNotEmpty()) {
+            add(
+                ActivityGroupMetric(
+                    type = ActivityGroupMetricType.FILE,
+                    count = fileChanges.size,
+                    failedCount = fileChanges.count { it.status == ActivityStatus.FAILED },
+                ),
+            )
+        }
+        if (activities.isNotEmpty()) {
+            add(
+                ActivityGroupMetric(
+                    type = ActivityGroupMetricType.ACTIVITY,
+                    count = activities.size,
+                    failedCount = activities.count { it.status == ActivityStatus.FAILED },
+                ),
+            )
+        }
     }
+}
+
+private fun Int.badgeLabel(): String = if (this > 99) "99+" else toString()
+
+private fun ActivityGroupMetric.iconTextSpacing() = when {
+    failedCount > 99 -> 18.dp
+    failedCount > 9 -> 14.dp
+    failedCount > 0 -> 10.dp
+    else -> 4.dp
 }
 
 private fun ActivityGroupMetric.icon(): ImageVector = when (type) {
@@ -279,11 +325,21 @@ private fun ActivityGroupMetric.icon(): ImageVector = when (type) {
     ActivityGroupMetricType.ACTIVITY -> Icons.Rounded.Extension
 }
 
-private fun ActivityGroupMetric.contentDescription(): String = when (type) {
-    ActivityGroupMetricType.REASONING -> "$count 项推理"
-    ActivityGroupMetricType.COMMAND -> "$count 条命令"
-    ActivityGroupMetricType.FILE -> "$count 个文件"
-    ActivityGroupMetricType.ACTIVITY -> "$count 项操作"
+private fun ActivityGroupMetric.contentDescription(): String {
+    val description = when (type) {
+        ActivityGroupMetricType.REASONING -> "$count 项推理"
+        ActivityGroupMetricType.COMMAND -> "$count 条命令"
+        ActivityGroupMetricType.FILE -> "$count 次文件修改"
+        ActivityGroupMetricType.ACTIVITY -> "$count 项操作"
+    }
+    if (failedCount == 0) return description
+
+    val failedUnit = when (type) {
+        ActivityGroupMetricType.COMMAND -> "条"
+        ActivityGroupMetricType.FILE -> "次"
+        ActivityGroupMetricType.REASONING, ActivityGroupMetricType.ACTIVITY -> "项"
+    }
+    return "$description，其中 $failedCount ${failedUnit}失败"
 }
 
 internal fun activityGroupLabel(
