@@ -53,9 +53,19 @@ data class ChatDraft(
 
 data class ForkRequest(val lastTurnId: String?)
 
+sealed interface ModelListState {
+    data object Idle : ModelListState
+
+    data object Loading : ModelListState
+
+    data class Ready(val models: List<ModelOption>) : ModelListState
+
+    data class Failed(val error: UserFacingError) : ModelListState
+}
+
 data class ChatUiState(
     val conversation: ConversationState? = null,
-    val models: List<ModelOption> = emptyList(),
+    val modelListState: ModelListState = ModelListState.Idle,
     val inputResources: List<FeatureEntry> = emptyList(),
     val goal: ThreadGoal? = null,
     val draft: ChatDraft = ChatDraft(),
@@ -86,6 +96,7 @@ class ChatViewModel(
     val events = mutableEvents.receiveAsFlow()
     private var draftInitialized = false
     private var conversationJob: Job? = null
+    private var modelListJob: Job? = null
     private val draftKey = DraftKey(serverId, DraftTarget.Thread(threadId))
 
     init {
@@ -113,6 +124,7 @@ class ChatViewModel(
 
     fun resumeConversation() {
         if (conversationJob != null) return
+        loadModels()
         conversationJob = viewModelScope.launch {
             val restoredResult = if (draftInitialized) {
                 Result.success<ConversationDraft?>(null)
@@ -333,7 +345,6 @@ class ChatViewModel(
         if (mutableState.value.isLoadingResources) return
         viewModelScope.launch {
             mutableState.update { it.copy(isLoadingResources = true) }
-            val modelsDeferred = async { runSuspendCatching { repository.models(serverId) } }
             val skillsDeferred = async {
                 runSuspendCatching {
                     repository.featureCatalog(serverId, FeatureArea.SKILLS, conversation.cwd, threadId, forceRefresh)
@@ -349,17 +360,14 @@ class ChatViewModel(
                     repository.featureCatalog(serverId, FeatureArea.PLUGINS, conversation.cwd, threadId, forceRefresh)
                 }
             }
-            val models = modelsDeferred.await()
             val skills = skillsDeferred.await()
             val apps = appsDeferred.await()
             val plugins = pluginsDeferred.await()
-            val failure = models.exceptionOrNull()
-                ?: skills.exceptionOrNull()
+            val failure = skills.exceptionOrNull()
                 ?: apps.exceptionOrNull()
                 ?: plugins.exceptionOrNull()
             mutableState.update {
                 it.copy(
-                    models = models.getOrDefault(emptyList()),
                     inputResources = availableInputResources(
                         skills = skills.getOrNull()?.entries.orEmpty(),
                         apps = apps.getOrNull()?.entries.orEmpty(),
@@ -369,6 +377,31 @@ class ChatViewModel(
                     screenError = failure?.toUserFacingError("无法加载输入资源"),
                 )
             }
+        }
+    }
+
+    fun loadModels(forceRefresh: Boolean = false) {
+        if (modelListJob?.isActive == true) return
+        val current = mutableState.value.modelListState
+        if (!forceRefresh && current is ModelListState.Ready) return
+        modelListJob = viewModelScope.launch {
+            val previous = (current as? ModelListState.Ready)?.models
+            if (previous == null) {
+                mutableState.update { it.copy(modelListState = ModelListState.Loading) }
+            }
+            runSuspendCatching { repository.models(serverId) }
+                .onSuccess { models ->
+                    mutableState.update { it.copy(modelListState = ModelListState.Ready(models)) }
+                }
+                .onFailure { error ->
+                    mutableState.update {
+                        it.copy(
+                            modelListState = previous
+                                ?.let(ModelListState::Ready)
+                                ?: ModelListState.Failed(error.toUserFacingError("无法加载模型")),
+                        )
+                    }
+                }
         }
     }
 

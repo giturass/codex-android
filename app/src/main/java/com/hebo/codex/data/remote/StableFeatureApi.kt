@@ -719,16 +719,6 @@ class StableFeatureApi(
         else -> throw ProtocolException("未知 MCP 认证状态：$this")
     }
 
-    private fun String.toReasoningEffortLabel(): String = when (this) {
-        "none" -> "不使用推理"
-        "minimal" -> "最少"
-        "low" -> "较低"
-        "medium" -> "中等"
-        "high" -> "较高"
-        "xhigh" -> "最高"
-        else -> "自定义强度"
-    }
-
     private suspend fun optionalRequest(method: StableRpcMethod): JsonElement? = try {
         api.request(method)
     } catch (_: RpcException) {
@@ -747,7 +737,7 @@ class StableFeatureApi(
         reasoningEfforts = array("supportedReasoningEfforts").map { element ->
             val value = element.jsonObject
             val effort = value.requiredString("reasoningEffort")
-            OptionValue(effort, effort.toReasoningEffortLabel(), value.requiredString("description"))
+            OptionValue(effort, effort, value.requiredString("description"))
         },
         defaultReasoningEffort = requiredString("defaultReasoningEffort"),
         serviceTiers = array("serviceTiers").map { element ->

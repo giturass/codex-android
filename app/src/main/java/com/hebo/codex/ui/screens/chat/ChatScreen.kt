@@ -185,6 +185,7 @@ import com.hebo.codex.ui.components.MessageComposer
 import com.hebo.codex.ui.components.MessageComposerAction
 import com.hebo.codex.ui.components.MessageComposerActionButton
 import com.hebo.codex.ui.components.AnchoredDetailsPopup
+import com.hebo.codex.ui.components.ExpandableErrorDetails
 import com.hebo.codex.ui.components.QuickPhraseManagerDialog
 import com.hebo.codex.ui.components.QuickPhraseMenuContent
 import com.hebo.codex.ui.components.NavigationAttention
@@ -237,6 +238,7 @@ fun ChatScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val quickPhraseState by quickPhraseViewModel.state.collectAsStateWithLifecycle()
     val conversation = state.conversation
+    val models = (state.modelListState as? ModelListState.Ready)?.models.orEmpty()
     val conversationRows = remember(conversation?.items, conversation?.activeTurnId) {
         buildConversationRows(
             items = conversation?.items.orEmpty(),
@@ -505,7 +507,7 @@ fun ChatScreen(
                         modelLabel = composerModelLabel(
                             model = state.draft.options.model,
                             reasoningEffort = state.draft.options.reasoningEffort,
-                            models = state.models,
+                            models = models,
                         ),
                         resources = state.inputResources,
                         quickPhrases = quickPhraseState.phrases,
@@ -528,7 +530,10 @@ fun ChatScreen(
                         onAddAttachment = viewModel::addDraftAttachment,
                         onRemoveAttachment = viewModel::removeDraftAttachment,
                         onInputError = viewModel::reportInputError,
-                        onOpenOptions = { showTurnOptions = true },
+                        onOpenOptions = {
+                            viewModel.loadModels()
+                            showTurnOptions = true
+                        },
                         onCommand = { command ->
                             when (command) {
                                 ComposerCommand.GOAL -> dialog = ChatDialog.Goal
@@ -745,8 +750,9 @@ fun ChatScreen(
     if (showTurnOptions) {
         TurnOptionsSheet(
             value = state.draft.options,
-            models = state.models,
+            modelListState = state.modelListState,
             onDismiss = { showTurnOptions = false },
+            onRetryModels = { viewModel.loadModels(forceRefresh = true) },
             onSave = {
                 viewModel.updateDraftOptions(it)
                 showTurnOptions = false
@@ -1670,7 +1676,6 @@ internal fun ConversationComposer(
                                 addMenuExpanded = true
                             }
                             ComposerCommand.SETTINGS -> {
-                                onLoadResources(false)
                                 onOpenOptions()
                             }
                             ComposerCommand.ATTACH -> addMenuExpanded = true
@@ -1820,12 +1825,9 @@ internal fun composerModelLabel(
     models: List<ModelOption>,
 ): String {
     val selectedModel = models.firstOrNull { it.model == model }
-    val effortLabel = reasoningEffort?.let { effort ->
-        selectedModel?.reasoningEfforts?.firstOrNull { it.value == effort }?.label ?: effort
-    }
     return listOfNotNull(
         selectedModel?.displayName ?: model ?: "默认模型",
-        effortLabel,
+        reasoningEffort,
     ).joinToString(" · ")
 }
 
@@ -2101,13 +2103,15 @@ private fun ImageAddressDialog(
 @Composable
 private fun TurnOptionsSheet(
     value: TurnOptions,
-    models: List<ModelOption>,
+    modelListState: ModelListState,
     onDismiss: () -> Unit,
+    onRetryModels: () -> Unit,
     onSave: (TurnOptions) -> Unit,
 ) {
     var options by remember(value) { mutableStateOf(value) }
     var writableRoots by remember(value) { mutableStateOf(value.sandboxWritableRoots.joinToString("\n")) }
     var showAdvanced by rememberSaveable(value) { mutableStateOf(false) }
+    val models = (modelListState as? ModelListState.Ready)?.models.orEmpty()
     val selectableModels = models.filterNot(ModelOption::hidden)
     val model = selectableModels.firstOrNull { it.model == options.model }
     ModalBottomSheet(
@@ -2129,27 +2133,46 @@ private fun TurnOptionsSheet(
                 "设置仅用于下一次发送，服务端确认接收后恢复会话默认值",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (selectableModels.isNotEmpty()) {
-                Text("模型", style = MaterialTheme.typography.labelLarge)
-                OptionRow(
-                    values = listOf<ModelOption?>(null) + selectableModels,
-                    selected = model,
-                    label = { it?.displayName ?: "会话默认" },
-                    onSelect = { selected ->
-                        options = options.copy(
-                            model = selected?.model,
-                            serviceTier = selected?.defaultServiceTier,
-                            reasoningEffort = selected?.defaultReasoningEffort,
-                        )
-                    },
-                )
+            Text("模型", style = MaterialTheme.typography.labelLarge)
+            when (modelListState) {
+                ModelListState.Idle,
+                ModelListState.Loading,
+                -> Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Text("正在加载模型", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+
+                is ModelListState.Failed -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    ExpandableErrorDetails(modelListState.error)
+                    TextButton(onClick = onRetryModels) { Text("重试") }
+                }
+
+                is ModelListState.Ready -> if (selectableModels.isEmpty()) {
+                    Text("当前服务端没有可选模型", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    OptionRow(
+                        values = listOf<ModelOption?>(null) + selectableModels,
+                        selected = model,
+                        label = { it?.displayName ?: "会话默认" },
+                        onSelect = { selected ->
+                            options = options.copy(
+                                model = selected?.model,
+                                serviceTier = selected?.defaultServiceTier,
+                                reasoningEffort = selected?.defaultReasoningEffort,
+                            )
+                        },
+                    )
+                }
             }
             model?.reasoningEfforts?.takeIf(List<*>::isNotEmpty)?.let { efforts ->
                 Text("推理强度", style = MaterialTheme.typography.labelLarge)
                 OptionRow(
                     values = listOf<String?>(null) + efforts.map { it.value },
                     selected = options.reasoningEffort,
-                    label = { effort -> efforts.firstOrNull { it.value == effort }?.label ?: "默认" },
+                    label = { effort -> effort ?: "默认" },
                     onSelect = { options = options.copy(reasoningEffort = it) },
                 )
             }
