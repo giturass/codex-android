@@ -127,6 +127,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.focus.FocusRequester
@@ -149,8 +151,9 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Velocity
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.hebo.codex.R
@@ -202,6 +205,11 @@ import com.hebo.codex.ui.quickphrases.QuickPhraseViewModel
 import com.hebo.codex.ui.ratelimits.RateLimitIndicator
 import com.hebo.codex.ui.ratelimits.RateLimitsUiState
 import com.hebo.codex.ui.theme.statusColors
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.HazeTint
+import dev.chrisbanes.haze.hazeEffect
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 import com.mikepenz.markdown.compose.components.markdownComponents
 import com.mikepenz.markdown.compose.elements.highlightedCodeBlock
 import com.mikepenz.markdown.compose.elements.highlightedCodeFence
@@ -226,7 +234,10 @@ private val ChatPageOverlap = 64.dp
 private val ConversationHeaderItemMinHeight = 48.dp
 private val ConversationHeaderVerticalPadding = 8.dp
 private val ChatHeaderControlsHeight = ConversationHeaderItemMinHeight + ConversationHeaderVerticalPadding * 2
-private val ChatHeaderContentSpacing = 24.dp
+private val ChatTopHazeFadeHeight = 48.dp
+private val ChatBottomHazeFadeHeight = 64.dp
+private val ChatHazeBlurRadius = 22.dp
+private val ChatHeaderContentSpacing = ChatTopHazeFadeHeight
 private val ChatComposerOverlayMinHeight = 116.dp
 private val ChatComposerMaxWidth = 760.dp
 private val ConversationStatisticsPopupWidth = 300.dp
@@ -263,6 +274,7 @@ fun ChatScreen(
     val forkTurnsById = remember(forkTurns) { forkTurns.associateBy(ForkTurn::turnId) }
     val snackbarHostState = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
+    val hazeState = rememberHazeState()
     val scrollScope = rememberCoroutineScope()
     var autoFollow by rememberSaveable(conversation?.threadId) { mutableStateOf(true) }
     var initialListPositioned by remember(conversation?.threadId) { mutableStateOf(false) }
@@ -373,7 +385,33 @@ fun ChatScreen(
     val bottomContentPadding = if (conversation == null) {
         bottomSystemPadding + 16.dp
     } else {
-        maxOf(bottomControlsHeight, ChatComposerOverlayMinHeight) + bottomSystemPadding
+        maxOf(bottomControlsHeight, ChatComposerOverlayMinHeight) +
+            bottomSystemPadding + ChatBottomHazeFadeHeight
+    }
+    val topHazeHeight = topControlsHeight + ChatTopHazeFadeHeight
+    val bottomHazeHeight = bottomControlsHeight + bottomSystemPadding + ChatBottomHazeFadeHeight
+    val hazeBackgroundColor = MaterialTheme.colorScheme.background
+    val hazeStyle = remember(hazeBackgroundColor) {
+        HazeStyle(
+            backgroundColor = hazeBackgroundColor,
+            tint = HazeTint(hazeBackgroundColor.copy(alpha = 0.74f)),
+            blurRadius = ChatHazeBlurRadius,
+            noiseFactor = 0f,
+        )
+    }
+    val topHazeMask = remember(density, topControlsHeightPx) {
+        val fadeHeightPx = with(density) { ChatTopHazeFadeHeight.toPx() }
+        Brush.verticalGradient(
+            colors = listOf(Color.Black, Color.Transparent),
+            startY = topControlsHeightPx.toFloat(),
+            endY = topControlsHeightPx + fadeHeightPx,
+        )
+    }
+    val bottomHazeMask = remember(density) {
+        Brush.verticalGradient(
+            colors = listOf(Color.Transparent, Color.Black),
+            endY = with(density) { ChatBottomHazeFadeHeight.toPx() },
+        )
     }
     val topContentPaddingPx = with(density) { topContentPadding.roundToPx() }
     val bottomContentPaddingPx = with(density) { bottomContentPadding.roundToPx() }
@@ -585,6 +623,7 @@ fun ChatScreen(
                 state = listState,
                 modifier = Modifier
                     .fillMaxSize()
+                    .hazeSource(hazeState)
                     .onSizeChanged { listViewportHeightPx = it.height }
                     .nestedScroll(userScrollConnection),
                 contentPadding = PaddingValues(
@@ -635,6 +674,30 @@ fun ChatScreen(
             }
         }
 
+        if (conversation != null && topControlsHeightPx > 0) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .height(topHazeHeight)
+                    .hazeEffect(state = hazeState, style = hazeStyle) {
+                        mask = topHazeMask
+                    },
+            )
+        }
+
+        if (conversation != null && bottomControlsHeightPx > 0) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(bottomHazeHeight)
+                    .hazeEffect(state = hazeState, style = hazeStyle) {
+                        mask = bottomHazeMask
+                    },
+            )
+        }
+
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -656,6 +719,7 @@ fun ChatScreen(
                     onOpenGoal = { dialog = ChatDialog.Goal },
                 ),
                 onRefreshRateLimits = onRefreshRateLimits,
+                shadowElevation = 1.dp,
                 modifier = Modifier.onSizeChanged { topControlsHeightPx = it.height },
             )
         }
@@ -975,6 +1039,7 @@ internal fun ConversationFloatingHeader(
     onOpenAttention: (String) -> Unit,
     actions: ConversationHeaderActions?,
     onRefreshRateLimits: () -> Unit,
+    shadowElevation: Dp = 2.dp,
     modifier: Modifier = Modifier,
 ) {
     var actionsExpanded by remember { mutableStateOf(false) }
@@ -994,7 +1059,7 @@ internal fun ConversationFloatingHeader(
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                shadowElevation = 2.dp,
+                shadowElevation = shadowElevation,
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     NavigationMenuIcon(navigationOpen)
@@ -1008,7 +1073,7 @@ internal fun ConversationFloatingHeader(
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                shadowElevation = 2.dp,
+                shadowElevation = shadowElevation,
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -2132,7 +2197,7 @@ internal fun ConversationComposer(
                     },
                 )
             },
-            shadowElevation = 6.dp,
+            shadowElevation = 1.dp,
             focusRequester = focusRequester,
         )
     }
