@@ -17,6 +17,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -43,6 +44,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListLayoutInfo
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -111,6 +113,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -201,7 +204,6 @@ import com.mikepenz.markdown.compose.elements.highlightedCodeFence
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.model.rememberMarkdownState
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -213,7 +215,10 @@ private val highlightedMarkdownComponents = markdownComponents(
 )
 
 private const val CHAT_LIST_END_KEY = "chat-list-end"
+private const val CHAT_LIST_PAGE_RUNWAY_KEY = "chat-list-page-runway"
 private const val SCROLL_TO_BOTTOM_BUTTON_DELAY_MILLIS = 500L
+private const val PAGE_SCROLL_ANIMATION_DURATION_MILLIS = 180
+private val ChatPageOverlap = 64.dp
 private val ConversationHeaderItemMinHeight = 48.dp
 private val ConversationHeaderVerticalPadding = 8.dp
 private val ChatHeaderControlsHeight = ConversationHeaderItemMinHeight + ConversationHeaderVerticalPadding * 2
@@ -256,7 +261,14 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     val scrollScope = rememberCoroutineScope()
     var autoFollow by rememberSaveable(conversation?.threadId) { mutableStateOf(true) }
+    var initialListPositioned by remember(conversation?.threadId) { mutableStateOf(false) }
+    var retainPageRunway by remember(conversation?.threadId) {
+        mutableStateOf(conversation?.isRunning == true)
+    }
     var showScrollToBottomButton by remember(conversation?.threadId) { mutableStateOf(false) }
+    var listViewportHeightPx by remember { mutableIntStateOf(0) }
+    var currentOutputRequest by remember(conversation?.threadId) { mutableIntStateOf(0) }
+    var handledCurrentOutputRequest by remember(conversation?.threadId) { mutableIntStateOf(0) }
     var topControlsHeightPx by remember { mutableStateOf(0) }
     var bottomControlsHeightPx by remember { mutableStateOf(0) }
     var dialog by remember { mutableStateOf<ChatDialog?>(null) }
@@ -345,30 +357,8 @@ fun ChatScreen(
             activeRequestKey = conversation?.pendingRequests?.firstOrNull()?.requestKey
         }
     }
-    LaunchedEffect(listState, autoFollow) {
-        if (autoFollow) {
-            snapshotFlow {
-                val lastIndex = listState.layoutInfo.totalItemsCount - 1
-                lastIndex.takeIf { autoFollow && it >= 0 && listState.canScrollForward }
-            }.filterNotNull().collectLatest { lastIndex ->
-                listState.scrollToItem(lastIndex)
-            }
-        } else {
-            snapshotFlow {
-                !listState.isScrollInProgress && !listState.canScrollForward
-            }.first { it }
-            autoFollow = true
-        }
-    }
-    LaunchedEffect(listState, autoFollow) {
-        snapshotFlow {
-            !autoFollow && !listState.isScrollInProgress && listState.canScrollForward
-        }.collectLatest { shouldShow ->
-            if (shouldShow) {
-                delay(SCROLL_TO_BOTTOM_BUTTON_DELAY_MILLIS)
-            }
-            showScrollToBottomButton = shouldShow
-        }
+    LaunchedEffect(conversation?.isRunning) {
+        if (conversation?.isRunning == true) retainPageRunway = true
     }
 
     val statusBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
@@ -386,6 +376,97 @@ fun ChatScreen(
         bottomSystemPadding + 16.dp
     } else {
         maxOf(bottomControlsHeight, ChatComposerOverlayMinHeight) + bottomSystemPadding
+    }
+    val topContentPaddingPx = with(density) { topContentPadding.roundToPx() }
+    val bottomContentPaddingPx = with(density) { bottomContentPadding.roundToPx() }
+    val pageOverlapPx = with(density) { ChatPageOverlap.roundToPx() }
+    val liveEdgeHeightPx = with(density) { 1.dp.roundToPx() }
+    val readingViewportHeightPx = (
+        listViewportHeightPx - topContentPaddingPx - bottomContentPaddingPx
+    ).coerceAtLeast(0)
+    val pageRunwayHeightPx = (readingViewportHeightPx - pageOverlapPx).coerceAtLeast(0)
+    val pageRunwayHeight = with(density) { pageRunwayHeightPx.toDp() }
+    val liveEdgeIndex = conversationRows.size
+
+    LaunchedEffect(
+        conversation?.threadId,
+        initialListPositioned,
+        listViewportHeightPx,
+        retainPageRunway,
+        liveEdgeIndex,
+        liveEdgeHeightPx,
+    ) {
+        if (initialListPositioned || listViewportHeightPx <= 0) return@LaunchedEffect
+        snapshotFlow { listState.layoutInfo.totalItemsCount }.first { it > liveEdgeIndex }
+        val readingEndOffset = listState.layoutInfo.readingEndOffset()
+        val scrollOffset = if (retainPageRunway) {
+            -(readingEndOffset - liveEdgeHeightPx).coerceAtLeast(0)
+        } else {
+            0
+        }
+        listState.scrollToItem(liveEdgeIndex, scrollOffset)
+        initialListPositioned = true
+    }
+    LaunchedEffect(
+        listState,
+        autoFollow,
+        initialListPositioned,
+        retainPageRunway,
+        liveEdgeIndex,
+        pageOverlapPx,
+    ) {
+        if (!autoFollow || !initialListPositioned || !retainPageRunway) return@LaunchedEffect
+        while (true) {
+            val position = snapshotFlow {
+                listState.layoutInfo.chatPagingPosition(liveEdgeIndex)
+            }.first(::shouldAdvanceChatPage)
+            val distance = chatPageAdvanceDistance(position, pageOverlapPx)
+            if (distance > 0) {
+                listState.animateScrollBy(
+                    value = distance.toFloat(),
+                    animationSpec = tween(PAGE_SCROLL_ANIMATION_DURATION_MILLIS),
+                )
+            }
+        }
+    }
+    LaunchedEffect(
+        currentOutputRequest,
+        initialListPositioned,
+        liveEdgeIndex,
+        pageOverlapPx,
+    ) {
+        if (!initialListPositioned || currentOutputRequest == handledCurrentOutputRequest) {
+            return@LaunchedEffect
+        }
+        showScrollToBottomButton = false
+        listState.animateScrollToItem(
+            index = liveEdgeIndex,
+            scrollOffset = -pageOverlapPx,
+        )
+        handledCurrentOutputRequest = currentOutputRequest
+        autoFollow = true
+    }
+    LaunchedEffect(listState, autoFollow, initialListPositioned, liveEdgeIndex, pageOverlapPx) {
+        if (autoFollow || !initialListPositioned) return@LaunchedEffect
+        snapshotFlow {
+            !listState.isScrollInProgress && hasReachedChatCurrentOutput(
+                position = listState.layoutInfo.chatPagingPosition(liveEdgeIndex),
+                pageOverlap = pageOverlapPx,
+            )
+        }.first { it }
+        autoFollow = true
+    }
+    LaunchedEffect(listState, autoFollow, initialListPositioned, liveEdgeIndex, pageOverlapPx) {
+        snapshotFlow {
+            !autoFollow && initialListPositioned && !listState.isScrollInProgress &&
+                !hasReachedChatCurrentOutput(
+                    position = listState.layoutInfo.chatPagingPosition(liveEdgeIndex),
+                    pageOverlap = pageOverlapPx,
+                )
+        }.collectLatest { shouldShow ->
+            if (shouldShow) delay(SCROLL_TO_BOTTOM_BUTTON_DELAY_MILLIS)
+            showScrollToBottomButton = shouldShow
+        }
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -406,7 +487,10 @@ fun ChatScreen(
 
             else -> LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize().nestedScroll(userScrollConnection),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .onSizeChanged { listViewportHeightPx = it.height }
+                    .nestedScroll(userScrollConnection),
                 contentPadding = PaddingValues(
                     start = 20.dp,
                     top = topContentPadding,
@@ -445,6 +529,11 @@ fun ChatScreen(
                 }
                 item(CHAT_LIST_END_KEY) {
                     Spacer(Modifier.height(1.dp))
+                }
+                if (retainPageRunway && pageRunwayHeightPx > 0) {
+                    item(CHAT_LIST_PAGE_RUNWAY_KEY) {
+                        Spacer(Modifier.height(pageRunwayHeight))
+                    }
                 }
             }
         }
@@ -543,11 +632,11 @@ fun ChatScreen(
                             }
                         },
                         onSend = {
-                            autoFollow = true
+                            if (!autoFollow) currentOutputRequest += 1
                             viewModel.sendDraft()
                         },
                         onSendQuickPhrase = { content ->
-                            autoFollow = true
+                            if (!autoFollow) currentOutputRequest += 1
                             viewModel.sendQuickPhrase(content)
                         },
                         onStop = viewModel::interrupt,
@@ -570,19 +659,12 @@ fun ChatScreen(
                 modifier = Modifier.size(46.dp),
                 shape = CircleShape,
                 onClick = {
-                    showScrollToBottomButton = false
-                    scrollScope.launch {
-                        val lastIndex = listState.layoutInfo.totalItemsCount - 1
-                        if (lastIndex >= 0) {
-                            listState.animateScrollToItem(lastIndex)
-                            autoFollow = true
-                        }
-                    }
+                    currentOutputRequest += 1
                 },
                 containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                 contentColor = MaterialTheme.colorScheme.onSurface,
             ) {
-                Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "回到底部")
+                Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "回到当前输出")
             }
         }
 
@@ -759,6 +841,19 @@ fun ChatScreen(
             },
         )
     }
+}
+
+private fun LazyListLayoutInfo.readingEndOffset(): Int =
+    (viewportEndOffset - afterContentPadding).coerceAtLeast(0)
+
+private fun LazyListLayoutInfo.chatPagingPosition(liveEdgeIndex: Int): ChatPagingPosition {
+    return ChatPagingPosition(
+        liveEdgeIndex = liveEdgeIndex,
+        liveEdgeOffset = visibleItemsInfo.firstOrNull { it.index == liveEdgeIndex }?.offset,
+        firstVisibleItemIndex = visibleItemsInfo.firstOrNull()?.index,
+        lastVisibleItemIndex = visibleItemsInfo.lastOrNull()?.index,
+        readingEndOffset = readingEndOffset(),
+    )
 }
 
 internal data class ConversationHeaderActions(
