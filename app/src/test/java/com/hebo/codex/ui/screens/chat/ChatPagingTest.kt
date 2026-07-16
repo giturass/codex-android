@@ -44,8 +44,8 @@ class ChatPagingTest {
 
     @Test
     fun `当前输出位于页面锚点时视为已跟上`() {
-        assertTrue(hasReachedChatCurrentOutput(position(liveEdgeOffset = 64), pageOverlap = 64))
-        assertFalse(hasReachedChatCurrentOutput(position(liveEdgeOffset = 65), pageOverlap = 64))
+        assertTrue(hasReachedChatCurrentOutput(position(liveEdgeOffset = 64), anchorOffset = 64))
+        assertFalse(hasReachedChatCurrentOutput(position(liveEdgeOffset = 65), anchorOffset = 64))
     }
 
     @Test
@@ -57,7 +57,68 @@ class ChatPagingTest {
                     firstVisibleItemIndex = 6,
                     lastVisibleItemIndex = 6,
                 ),
-                pageOverlap = 64,
+                anchorOffset = 64,
+            ),
+        )
+    }
+
+    @Test
+    fun `当前输出已到窗口底部时阻止用户继续向前滚动`() {
+        assertTrue(shouldStopForwardUserScroll(position(liveEdgeOffset = 600)))
+        assertFalse(shouldStopForwardUserScroll(position(liveEdgeOffset = 601)))
+    }
+
+    @Test
+    fun `当前输出已滚过窗口时阻止用户继续向前滚动`() {
+        assertTrue(
+            shouldStopForwardUserScroll(
+                position(
+                    liveEdgeOffset = null,
+                    firstVisibleItemIndex = 6,
+                    lastVisibleItemIndex = 6,
+                ),
+            ),
+        )
+    }
+
+    @Test
+    fun `当前输出回到底部后可以安全移除分页跑道`() {
+        assertTrue(canReleaseChatPageRunway(position(liveEdgeOffset = 599), liveEdgeHeight = 1))
+        assertFalse(canReleaseChatPageRunway(position(liveEdgeOffset = 598), liveEdgeHeight = 1))
+    }
+
+    @Test
+    fun `当前输出位于可视条目之后时可以安全移除分页跑道`() {
+        assertTrue(
+            canReleaseChatPageRunway(
+                position = position(
+                    liveEdgeOffset = null,
+                    firstVisibleItemIndex = 2,
+                    lastVisibleItemIndex = 4,
+                ),
+                liveEdgeHeight = 1,
+            ),
+        )
+    }
+
+    @Test
+    fun `阅读区因输入法缩小时按缩小量补偿滚动`() {
+        assertEquals(
+            240,
+            chatViewportShrinkCompensation(
+                previousReadingEndOffset = 600,
+                readingEndOffset = 360,
+            ),
+        )
+    }
+
+    @Test
+    fun `阅读区扩大时不反向补偿滚动`() {
+        assertEquals(
+            0,
+            chatViewportShrinkCompensation(
+                previousReadingEndOffset = 360,
+                readingEndOffset = 600,
             ),
         )
     }

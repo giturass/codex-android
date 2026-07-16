@@ -17,10 +17,30 @@ internal fun shouldAdvanceChatPage(position: ChatPagingPosition): Boolean {
 
 internal fun hasReachedChatCurrentOutput(
     position: ChatPagingPosition,
-    pageOverlap: Int,
-): Boolean = position.liveEdgeOffset?.let { it <= pageOverlap }
+    anchorOffset: Int,
+): Boolean = position.liveEdgeOffset?.let { it <= anchorOffset }
     ?: position.firstVisibleItemIndex?.let { it > position.liveEdgeIndex }
     ?: false
+
+internal fun shouldStopForwardUserScroll(position: ChatPagingPosition): Boolean =
+    position.liveEdgeOffset?.let { it <= position.readingEndOffset }
+        ?: position.firstVisibleItemIndex?.let { it > position.liveEdgeIndex }
+        ?: false
+
+internal fun canReleaseChatPageRunway(
+    position: ChatPagingPosition,
+    liveEdgeHeight: Int,
+): Boolean {
+    val naturalLiveEdgeOffset = (position.readingEndOffset - liveEdgeHeight).coerceAtLeast(0)
+    return position.liveEdgeOffset?.let { it >= naturalLiveEdgeOffset }
+        ?: position.lastVisibleItemIndex?.let { it < position.liveEdgeIndex }
+        ?: false
+}
+
+internal fun chatViewportShrinkCompensation(
+    previousReadingEndOffset: Int,
+    readingEndOffset: Int,
+): Int = (previousReadingEndOffset - readingEndOffset).coerceAtLeast(0)
 
 internal fun chatPageAdvanceDistance(
     position: ChatPagingPosition,
