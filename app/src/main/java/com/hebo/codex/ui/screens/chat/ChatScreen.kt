@@ -505,7 +505,7 @@ fun ChatScreen(
                 (position.readingEndOffset - liveEdgeHeightPx).coerceAtLeast(0)
             }
             !listState.isScrollInProgress &&
-                hasReachedChatCurrentOutput(position, anchorOffset)
+                hasReachedChatPageAnchor(position, anchorOffset)
         }.first { it }
         autoFollow = true
     }
@@ -513,23 +513,12 @@ fun ChatScreen(
         listState,
         autoFollow,
         initialListPositioned,
-        pageRunwayEnabled,
         liveEdgeIndex,
-        liveEdgeHeightPx,
-        pageOverlapPx,
     ) {
         snapshotFlow {
             val position = listState.layoutInfo.chatPagingPosition(liveEdgeIndex)
-            val anchorOffset = if (pageRunwayEnabled) {
-                pageOverlapPx
-            } else {
-                (position.readingEndOffset - liveEdgeHeightPx).coerceAtLeast(0)
-            }
             !autoFollow && initialListPositioned && !listState.isScrollInProgress &&
-                !hasReachedChatCurrentOutput(
-                    position = position,
-                    anchorOffset = anchorOffset,
-                )
+                !hasReachedChatOutputEnd(position)
         }.collectLatest { shouldShow ->
             if (shouldShow) delay(SCROLL_TO_BOTTOM_BUTTON_DELAY_MILLIS)
             showScrollToBottomButton = shouldShow
@@ -950,9 +939,11 @@ private fun LazyListLayoutInfo.readingEndOffset(): Int =
     (viewportEndOffset - afterContentPadding).coerceAtLeast(0)
 
 private fun LazyListLayoutInfo.chatPagingPosition(liveEdgeIndex: Int): ChatPagingPosition {
+    val outputEndItem = visibleItemsInfo.firstOrNull { it.index == liveEdgeIndex - 1 }
     return ChatPagingPosition(
         liveEdgeIndex = liveEdgeIndex,
         liveEdgeOffset = visibleItemsInfo.firstOrNull { it.index == liveEdgeIndex }?.offset,
+        outputEndOffset = outputEndItem?.let { it.offset + it.size },
         firstVisibleItemIndex = visibleItemsInfo.firstOrNull()?.index,
         lastVisibleItemIndex = visibleItemsInfo.lastOrNull()?.index,
         readingEndOffset = readingEndOffset(),

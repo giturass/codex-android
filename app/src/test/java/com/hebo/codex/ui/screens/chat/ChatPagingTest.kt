@@ -44,20 +44,46 @@ class ChatPagingTest {
 
     @Test
     fun `当前输出位于页面锚点时视为已跟上`() {
-        assertTrue(hasReachedChatCurrentOutput(position(liveEdgeOffset = 64), anchorOffset = 64))
-        assertFalse(hasReachedChatCurrentOutput(position(liveEdgeOffset = 65), anchorOffset = 64))
+        assertTrue(hasReachedChatPageAnchor(position(liveEdgeOffset = 64), anchorOffset = 64))
+        assertFalse(hasReachedChatPageAnchor(position(liveEdgeOffset = 65), anchorOffset = 64))
     }
 
     @Test
     fun `当前输出已滚过可视条目时视为已跟上`() {
         assertTrue(
-            hasReachedChatCurrentOutput(
+            hasReachedChatPageAnchor(
                 position(
                     liveEdgeOffset = null,
                     firstVisibleItemIndex = 6,
                     lastVisibleItemIndex = 6,
                 ),
                 anchorOffset = 64,
+            ),
+        )
+    }
+
+    @Test
+    fun `分页锚点轻微下移但末尾内容仍可见时视为已到末尾`() {
+        val position = position(liveEdgeOffset = 65, outputEndOffset = 47)
+
+        assertFalse(hasReachedChatPageAnchor(position, anchorOffset = 64))
+        assertTrue(hasReachedChatOutputEnd(position))
+    }
+
+    @Test
+    fun `末尾内容位于阅读区下方时视为未到末尾`() {
+        assertFalse(hasReachedChatOutputEnd(position(outputEndOffset = 601)))
+    }
+
+    @Test
+    fun `末尾内容已滚过阅读区时视为已到末尾`() {
+        assertTrue(
+            hasReachedChatOutputEnd(
+                position(
+                    outputEndOffset = null,
+                    firstVisibleItemIndex = 5,
+                    lastVisibleItemIndex = 6,
+                ),
             ),
         )
     }
@@ -130,11 +156,13 @@ class ChatPagingTest {
 
     private fun position(
         liveEdgeOffset: Int? = 600,
+        outputEndOffset: Int? = 582,
         firstVisibleItemIndex: Int? = 2,
         lastVisibleItemIndex: Int? = 5,
     ) = ChatPagingPosition(
         liveEdgeIndex = 5,
         liveEdgeOffset = liveEdgeOffset,
+        outputEndOffset = outputEndOffset,
         firstVisibleItemIndex = firstVisibleItemIndex,
         lastVisibleItemIndex = lastVisibleItemIndex,
         readingEndOffset = 600,

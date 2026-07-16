@@ -3,6 +3,7 @@ package com.hebo.codex.ui.screens.chat
 internal data class ChatPagingPosition(
     val liveEdgeIndex: Int,
     val liveEdgeOffset: Int?,
+    val outputEndOffset: Int?,
     val firstVisibleItemIndex: Int?,
     val lastVisibleItemIndex: Int?,
     val readingEndOffset: Int,
@@ -15,12 +16,20 @@ internal fun shouldAdvanceChatPage(position: ChatPagingPosition): Boolean {
         ?: false
 }
 
-internal fun hasReachedChatCurrentOutput(
+internal fun hasReachedChatPageAnchor(
     position: ChatPagingPosition,
     anchorOffset: Int,
 ): Boolean = position.liveEdgeOffset?.let { it <= anchorOffset }
     ?: position.firstVisibleItemIndex?.let { it > position.liveEdgeIndex }
     ?: false
+
+internal fun hasReachedChatOutputEnd(position: ChatPagingPosition): Boolean {
+    val outputEndIndex = position.liveEdgeIndex - 1
+    if (outputEndIndex < 0) return true
+    return position.outputEndOffset?.let { it <= position.readingEndOffset }
+        ?: position.firstVisibleItemIndex?.let { it > outputEndIndex }
+        ?: false
+}
 
 internal fun shouldStopForwardUserScroll(position: ChatPagingPosition): Boolean =
     position.liveEdgeOffset?.let { it <= position.readingEndOffset }
