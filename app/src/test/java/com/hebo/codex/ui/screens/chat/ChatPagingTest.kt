@@ -89,6 +89,36 @@ class ChatPagingTest {
     }
 
     @Test
+    fun `无分页跑道时末尾内容二次布局到阅读区下方后继续跟随`() {
+        assertTrue(
+            shouldFollowChatOutput(
+                position = position(outputEndOffset = 601),
+                pageRunwayEnabled = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `无分页跑道时末尾内容仍在阅读区内不重复跟随`() {
+        assertFalse(
+            shouldFollowChatOutput(
+                position = position(outputEndOffset = 600),
+                pageRunwayEnabled = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `分页跑道启用时仍按分页锚点跟随`() {
+        assertTrue(
+            shouldFollowChatOutput(
+                position = position(liveEdgeOffset = 601, outputEndOffset = 47),
+                pageRunwayEnabled = true,
+            ),
+        )
+    }
+
+    @Test
     fun `当前输出已到窗口底部时阻止用户继续向前滚动`() {
         assertTrue(shouldStopForwardUserScroll(position(liveEdgeOffset = 600)))
         assertFalse(shouldStopForwardUserScroll(position(liveEdgeOffset = 601)))

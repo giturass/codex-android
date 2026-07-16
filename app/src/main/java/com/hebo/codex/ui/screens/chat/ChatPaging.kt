@@ -31,6 +31,15 @@ internal fun hasReachedChatOutputEnd(position: ChatPagingPosition): Boolean {
         ?: false
 }
 
+internal fun shouldFollowChatOutput(
+    position: ChatPagingPosition,
+    pageRunwayEnabled: Boolean,
+): Boolean = if (pageRunwayEnabled) {
+    shouldAdvanceChatPage(position)
+} else {
+    !hasReachedChatOutputEnd(position)
+}
+
 internal fun shouldStopForwardUserScroll(position: ChatPagingPosition): Boolean =
     position.liveEdgeOffset?.let { it <= position.readingEndOffset }
         ?: position.firstVisibleItemIndex?.let { it > position.liveEdgeIndex }

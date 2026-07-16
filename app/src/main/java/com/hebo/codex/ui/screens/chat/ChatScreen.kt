@@ -427,7 +427,7 @@ fun ChatScreen(
                 listState.layoutInfo.chatPagingPosition(liveEdgeIndex)
             }.first {
                 it.readingEndOffset != previousReadingEndOffset ||
-                    (autoFollow && pageRunwayEnabled && shouldAdvanceChatPage(it))
+                    (autoFollow && shouldFollowChatOutput(it, pageRunwayEnabled))
             }
             val viewportCompensation = chatViewportShrinkCompensation(
                 previousReadingEndOffset = previousReadingEndOffset,
@@ -438,8 +438,14 @@ fun ChatScreen(
                 listState.scrollBy(viewportCompensation.toFloat())
                 continue
             }
-            if (!autoFollow || !pageRunwayEnabled) continue
+            if (!autoFollow) continue
             val currentPosition = listState.layoutInfo.chatPagingPosition(liveEdgeIndex)
+            if (!pageRunwayEnabled) {
+                if (shouldFollowChatOutput(currentPosition, pageRunwayEnabled = false)) {
+                    listState.scrollToItem(liveEdgeIndex)
+                }
+                continue
+            }
             val pageDistance = chatPageAdvanceDistance(currentPosition, pageOverlapPx)
             if (shouldAdvanceChatPage(currentPosition) && pageDistance > 0) {
                 listState.animateScrollBy(
