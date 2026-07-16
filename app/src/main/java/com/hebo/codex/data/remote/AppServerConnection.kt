@@ -171,7 +171,9 @@ class AppServerConnection(
     private fun send(message: JsonObject) {
         check(::webSocket.isInitialized) { "WebSocket 尚未建立" }
         if (!webSocket.send(json.encodeToString(JsonObject.serializer(), message))) {
-            throw ProtocolException("WebSocket 发送失败")
+            val error = ConnectionException("WebSocket 发送失败")
+            failConnection(error)
+            throw error
         }
     }
 

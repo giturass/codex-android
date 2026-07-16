@@ -405,7 +405,6 @@ private fun activityGroupStatus(
 internal fun ConversationItem.activityStatus(
     activeItemKeys: Set<ConversationItemKey> = emptySet(),
 ): ActivityStatus {
-    if (ConversationItemKey(turnId, id) in activeItemKeys) return ActivityStatus.IN_PROGRESS
     return when (this) {
         is ConversationItem.CommandExecution -> status
         is ConversationItem.FileChange -> status
@@ -413,8 +412,13 @@ internal fun ConversationItem.activityStatus(
         is ConversationItem.Reasoning,
         is ConversationItem.Plan,
         is ConversationItem.AgentMessage,
-        is ConversationItem.UserMessage,
-        -> ActivityStatus.COMPLETED
+        -> if (ConversationItemKey(turnId, id) in activeItemKeys) {
+            ActivityStatus.IN_PROGRESS
+        } else {
+            ActivityStatus.COMPLETED
+        }
+
+        is ConversationItem.UserMessage -> ActivityStatus.COMPLETED
     }
 }
 

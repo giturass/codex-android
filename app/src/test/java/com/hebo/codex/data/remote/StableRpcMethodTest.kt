@@ -28,6 +28,7 @@ class StableRpcMethodTest {
     fun stableWhitelistContainsUserFacingCapabilityGroups() {
         val methods = StableRpcMethod.entries.map(StableRpcMethod::wireName).toSet()
         val expected = setOf(
+            "thread/read",
             "thread/fork",
             "thread/archive",
             "thread/delete",

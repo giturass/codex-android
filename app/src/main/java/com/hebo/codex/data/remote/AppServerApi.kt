@@ -24,6 +24,7 @@ import java.io.OutputStream
 import java.util.Base64
 
 enum class StableRpcMethod(val wireName: String) {
+    THREAD_READ("thread/read"),
     THREAD_FORK("thread/fork"),
     THREAD_ARCHIVE("thread/archive"),
     THREAD_DELETE("thread/delete"),
@@ -138,6 +139,14 @@ class AppServerApi(
     suspend fun resumeThread(threadId: String): JsonObject = connection.request(
         "thread/resume",
         buildJsonObject { put("threadId", threadId) },
+    ).jsonObject
+
+    suspend fun readThread(threadId: String): JsonObject = request(
+        StableRpcMethod.THREAD_READ,
+        buildJsonObject {
+            put("threadId", threadId)
+            put("includeTurns", true)
+        },
     ).jsonObject
 
     suspend fun forkThread(threadId: String, lastTurnId: String? = null): JsonObject = request(

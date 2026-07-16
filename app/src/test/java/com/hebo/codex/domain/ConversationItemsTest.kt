@@ -50,6 +50,16 @@ class ConversationItemsTest {
     }
 
     @Test
+    fun `显式状态条目不写入瞬时活动集合`() {
+        val command = command("command-1", ActivityStatus.IN_PROGRESS)
+
+        val started = conversationState().withConversationItem(command, isActive = true)
+
+        assertEquals(emptySet<ConversationItemKey>(), started.activeItemKeys)
+        assertEquals(listOf(command), started.items)
+    }
+
+    @Test
     fun `恢复后的增量会重新激活目标条目`() {
         val item = agentMessage("item-1", "turn-1", "已有")
         val restored = conversationState(items = listOf(item))
@@ -125,19 +135,46 @@ class ConversationItemsTest {
     }
 
     @Test
-    fun `恢复快照可识别显式进行中的活动条目`() {
-        val command = ConversationItem.CommandExecution(
-            id = "command-1",
-            turnId = "turn-1",
-            command = "pwd",
-            cwd = "/project",
-            output = "",
-            exitCode = null,
-            status = ActivityStatus.IN_PROGRESS,
+    fun `恢复快照不保留缺失的显式状态条目`() {
+        val command = command("command-1", ActivityStatus.IN_PROGRESS)
+        val streaming = agentMessage("agent-1", "turn-1", "正在生成")
+        val current = conversationState(
+            items = listOf(command, streaming),
+            activeTurnId = "turn-1",
+            activeItemKeys = setOf(command.key, streaming.key),
         )
+        val restored = conversationState(activeTurnId = "turn-1")
 
-        assertEquals(true, command.isExplicitlyInProgress)
-        assertEquals(false, command.copy(status = ActivityStatus.COMPLETED).isExplicitlyInProgress)
+        val merged = current.withRestoredConversation(restored)
+
+        assertEquals(listOf(streaming), merged.items)
+        assertEquals(setOf(streaming.key), merged.activeItemKeys)
+    }
+
+    @Test
+    fun `前台刷新只替换会话快照字段`() {
+        val current = conversationState(
+            items = listOf(command("command-1", ActivityStatus.IN_PROGRESS)),
+            activeTurnId = "turn-1",
+        ).copy(
+            model = "gpt-5",
+            goalLoaded = true,
+            notices = listOf(ConversationNotice("notice", "保留提示")),
+        )
+        val refreshed = conversationState(
+            items = listOf(command("command-1", ActivityStatus.COMPLETED)),
+        ).copy(title = "新标题")
+
+        val merged = current.withRefreshedConversation(refreshed)
+
+        assertEquals("新标题", merged.title)
+        assertEquals(
+            ActivityStatus.COMPLETED,
+            (merged.items.single() as ConversationItem.CommandExecution).status,
+        )
+        assertEquals("gpt-5", merged.model)
+        assertEquals(true, merged.goalLoaded)
+        assertEquals(listOf(ConversationNotice("notice", "保留提示")), merged.notices)
     }
 
     @Test
@@ -160,6 +197,16 @@ class ConversationItemsTest {
         id = id,
         turnId = turnId,
         text = text,
+    )
+
+    private fun command(id: String, status: ActivityStatus) = ConversationItem.CommandExecution(
+        id = id,
+        turnId = "turn-1",
+        command = "pwd",
+        cwd = "/project",
+        output = "",
+        exitCode = null,
+        status = status,
     )
 
     private fun conversationState(

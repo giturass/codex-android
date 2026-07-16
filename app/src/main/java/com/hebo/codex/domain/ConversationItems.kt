@@ -8,7 +8,11 @@ internal fun ConversationState.withConversationItem(
     isActive: Boolean,
 ): ConversationState = copy(
     items = items.upsertConversationItem(item),
-    activeItemKeys = if (isActive) activeItemKeys + item.key else activeItemKeys - item.key,
+    activeItemKeys = if (isActive && item.usesTransientActivityState) {
+        activeItemKeys + item.key
+    } else {
+        activeItemKeys - item.key
+    },
 )
 
 internal fun ConversationState.withUpdatedConversationItem(
@@ -39,8 +43,10 @@ internal fun ConversationState.withRestoredConversation(
     if (activeTurnId != restoredTurnId) return restored
 
     val restoredKeys = restored.items.mapTo(mutableSetOf(), ConversationItem::key)
+    val currentItems = items.associateBy { it.key }
     val retainedKeys = activeItemKeys.filterTo(mutableSetOf()) { key ->
-        key.turnId == restoredTurnId && key !in restoredKeys
+        key.turnId == restoredTurnId && key !in restoredKeys &&
+            currentItems[key]?.usesTransientActivityState == true
     }
     if (retainedKeys.isEmpty()) return restored
 
@@ -59,15 +65,33 @@ internal fun ConversationState.withRestoredConversation(
     )
 }
 
-internal val ConversationItem.isExplicitlyInProgress: Boolean
+internal fun ConversationState.withRefreshedConversation(
+    refreshed: ConversationState,
+): ConversationState {
+    val merged = withRestoredConversation(refreshed)
+    return copy(
+        serverName = merged.serverName,
+        title = merged.title,
+        cwd = merged.cwd,
+        items = merged.items,
+        activeItemKeys = merged.activeItemKeys,
+        activeTurnId = merged.activeTurnId,
+        isRunning = merged.isRunning,
+        plan = plan?.takeIf { it.turnId == merged.activeTurnId },
+    )
+}
+
+internal val ConversationItem.usesTransientActivityState: Boolean
     get() = when (this) {
-        is ConversationItem.CommandExecution -> status == ActivityStatus.IN_PROGRESS
-        is ConversationItem.FileChange -> status == ActivityStatus.IN_PROGRESS
-        is ConversationItem.Activity -> status == ActivityStatus.IN_PROGRESS
-        is ConversationItem.UserMessage,
         is ConversationItem.AgentMessage,
         is ConversationItem.Reasoning,
         is ConversationItem.Plan,
+        -> true
+
+        is ConversationItem.UserMessage,
+        is ConversationItem.CommandExecution,
+        is ConversationItem.FileChange,
+        is ConversationItem.Activity,
         -> false
     }
 

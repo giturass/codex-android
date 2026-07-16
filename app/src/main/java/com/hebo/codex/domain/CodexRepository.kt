@@ -218,7 +218,11 @@ class CodexRepository(
         val conversation = conversationMutex.withLock {
             conversationLeases.acquire(key)
             try {
-                conversations[key] ?: run {
+                val existing = conversations[key]
+                if (existing != null) {
+                    refreshConversation(key, existing)
+                    existing
+                } else {
                     val snapshot = resumeConversation(key)
                     MutableStateFlow(snapshot.toConversationState(awaitServer(serverId))).also {
                         conversations[key] = it
@@ -1198,6 +1202,35 @@ class CodexRepository(
         }
     }
 
+    private suspend fun refreshConversation(
+        key: ConversationKey,
+        state: MutableStateFlow<ConversationState>,
+    ) {
+        val snapshot = runSuspendCatching {
+            readConversationSnapshot(key)
+        }.getOrElse { error ->
+            state.updateState { current ->
+                current.copy(errorMessage = error.toUserFacingError("刷新会话失败"))
+            }
+            return
+        }
+        val server = awaitServer(key.serverId)
+        state.updateState { current ->
+            current.withRefreshedConversation(snapshot.toConversationState(server))
+        }
+        removeRestoredItemUpdates(key, state.value)
+    }
+
+    private suspend fun readConversationSnapshot(key: ConversationKey): ThreadSnapshot {
+        val firstResult = runSuspendCatching {
+            ProtocolMapper.threadSnapshot(api(key.serverId).readThread(key.threadId))
+        }
+        return firstResult.getOrElse { error ->
+            if (connections[key.serverId]?.status?.value is ConnectionStatus.Connected) throw error
+            ProtocolMapper.threadSnapshot(api(key.serverId).readThread(key.threadId))
+        }
+    }
+
     private suspend fun awaitServer(serverId: String): ServerProfile =
         withTimeoutOrNull(SERVER_LOAD_TIMEOUT_MILLIS) {
             serverSettings
@@ -1208,10 +1241,6 @@ class CodexRepository(
     private fun com.hebo.codex.data.remote.ThreadSnapshot.toConversationState(
         profile: ServerProfile,
     ): ConversationState {
-        val activeItemKeys = activeTurnId?.let { turnId ->
-            items.filter { item -> item.turnId == turnId && item.isExplicitlyInProgress }
-                .mapTo(mutableSetOf(), ConversationItem::key)
-        }.orEmpty()
         return ConversationState(
             serverId = profile.id,
             serverName = profile.name,
@@ -1219,7 +1248,6 @@ class CodexRepository(
             title = summary.title,
             cwd = summary.cwd,
             items = items,
-            activeItemKeys = activeItemKeys,
             activeTurnId = activeTurnId,
             isRunning = summary.status == ThreadRuntimeStatus.ACTIVE,
             model = model,

@@ -29,6 +29,24 @@ class ActivityItemPresentationTest {
     }
 
     @Test
+    fun `命令只使用协议内的显式状态`() {
+        val item = ConversationItem.CommandExecution(
+            id = "command",
+            turnId = "turn",
+            command = "pwd",
+            cwd = "/workspace",
+            output = "",
+            exitCode = 0,
+            status = ActivityStatus.COMPLETED,
+        )
+
+        assertEquals(
+            ActivityStatus.COMPLETED,
+            item.activityStatus(setOf(ConversationItemKey("turn", "command"))),
+        )
+    }
+
+    @Test
     fun `失败命令标题保留命令预览`() {
         val item = ConversationItem.CommandExecution(
             id = "command",

@@ -47,6 +47,7 @@ codex app-server \
 当前使用以下稳定接口和通知
 
 - `thread/list`
+- `thread/read`
 - `thread/start`
 - `thread/resume`
 - `turn/start`
