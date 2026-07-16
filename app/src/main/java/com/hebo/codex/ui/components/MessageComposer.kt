@@ -17,6 +17,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -65,6 +66,7 @@ private val ComposerTextFieldHeight = 48.dp
 private val ComposerExpandedTextFieldMaxHeight = 140.dp
 
 internal enum class MessageComposerAction {
+    EXECUTE,
     SEND,
     STOP,
 }
@@ -362,6 +364,11 @@ internal fun MessageComposerActionButton(
 
             action == MessageComposerAction.STOP -> Icon(
                 Icons.Rounded.Stop,
+                contentDescription = contentDescription,
+            )
+
+            action == MessageComposerAction.EXECUTE -> Icon(
+                Icons.Rounded.Terminal,
                 contentDescription = contentDescription,
             )
 

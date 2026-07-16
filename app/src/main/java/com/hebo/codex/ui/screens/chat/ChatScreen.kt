@@ -79,6 +79,7 @@ import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PriorityHigh
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -151,6 +152,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.hebo.codex.R
+import com.hebo.codex.domain.ActivityStatus
 import com.hebo.codex.domain.ApprovalDecision
 import com.hebo.codex.domain.ApprovalPolicy
 import com.hebo.codex.domain.ApprovalReviewer
@@ -505,6 +507,7 @@ fun ChatScreen(
                             is ConversationRow.Item -> ConversationItemView(
                                 item = row.item,
                                 activeItemKeys = conversation.activeItemKeys,
+                                serverName = conversation.serverName,
                                 cwd = conversation.cwd,
                                 onOpenRemoteFile = { remoteFileTarget = it },
                                 onLinkError = showLinkError,
@@ -588,6 +591,7 @@ fun ChatScreen(
                     ConversationComposer(
                         serverId = conversation.serverId,
                         conversationId = conversation.threadId,
+                        shellTarget = ShellCommandTarget(conversation.serverName, conversation.cwd),
                         isRunning = conversation.isRunning,
                         plan = conversation.plan,
                         activeTurnId = conversation.activeTurnId,
@@ -1117,6 +1121,7 @@ private fun ForkFromTurnAction(
 private fun ConversationItemView(
     item: ConversationItem,
     activeItemKeys: Set<ConversationItemKey>,
+    serverName: String,
     cwd: String,
     onOpenRemoteFile: (RemoteFileTarget) -> Unit,
     onLinkError: (String) -> Unit,
@@ -1124,6 +1129,7 @@ private fun ConversationItemView(
 ) {
     when (item) {
         is ConversationItem.UserMessage -> UserMessage(item)
+        is ConversationItem.UserShellCommand -> UserShellCommand(item, serverName)
         is ConversationItem.AgentMessage -> AgentMessage(item, cwd, onOpenRemoteFile, onLinkError)
         is ConversationItem.Plan -> PlanSnapshot(
             item = item,
@@ -1139,6 +1145,101 @@ private fun ConversationItemView(
             onOpenDetails = onOpenActivityDetails,
         )
     }
+}
+
+@Composable
+private fun UserShellCommand(
+    item: ConversationItem.UserShellCommand,
+    serverName: String,
+) {
+    val statusColor = when (item.status) {
+        ActivityStatus.FAILED,
+        ActivityStatus.DECLINED,
+        -> MaterialTheme.colorScheme.error
+
+        ActivityStatus.IN_PROGRESS,
+        ActivityStatus.COMPLETED,
+        -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Rounded.Terminal,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = statusColor,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "用户 Shell",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = statusColor,
+                )
+                if (item.status == ActivityStatus.IN_PROGRESS) {
+                    CircularProgressIndicator(Modifier.size(16.dp), color = statusColor, strokeWidth = 2.dp)
+                } else {
+                    Text(
+                        when (item.status) {
+                            ActivityStatus.COMPLETED -> "已完成"
+                            ActivityStatus.FAILED -> "失败"
+                            ActivityStatus.DECLINED -> "已取消"
+                            ActivityStatus.IN_PROGRESS -> error("已处理进行中状态")
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = statusColor,
+                    )
+                }
+            }
+            ShellCommandBlock(item.command)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "$serverName · ${item.cwd}",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                CopyTextIconButton(item.cwd, "复制工作目录")
+            }
+            if (item.output.isNotBlank()) {
+                TerminalOutputBlock(item.output)
+            } else if (item.status == ActivityStatus.IN_PROGRESS) {
+                Text(
+                    "等待命令输出…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            val result = listOfNotNull(
+                item.exitCode?.let { "退出码 $it" },
+                item.durationMillis?.let(::formatShellDuration),
+            ).joinToString(" · ")
+            if (result.isNotEmpty()) {
+                Text(
+                    result,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = statusColor,
+                )
+            }
+        }
+    }
+}
+
+internal fun formatShellDuration(durationMillis: Long): String = when {
+    durationMillis < 1_000L -> "小于 1 秒"
+    durationMillis % 1_000L < 100L -> "${durationMillis / 1_000L} 秒"
+    else -> "${durationMillis / 1_000L}.${durationMillis % 1_000L / 100L} 秒"
 }
 
 @Composable
@@ -1663,6 +1764,7 @@ private fun PermissionsCard(
 internal fun ConversationComposer(
     serverId: String?,
     conversationId: String?,
+    shellTarget: ShellCommandTarget?,
     isRunning: Boolean,
     plan: ActiveTurnPlan?,
     activeTurnId: String?,
@@ -1740,6 +1842,13 @@ internal fun ConversationComposer(
         if (activeToken?.trigger == '$' || activeToken?.trigger == '@') onLoadResources(false)
     }
     val hasInput = composerValue.text.isNotBlank() || attachments.isNotEmpty()
+    val isShellMode = shellTarget != null && isShellCommandInput(composerValue.text)
+    val shellCommand = shellCommandFromInput(composerValue.text)
+    val shellBlockReason = shellCommandBlockReason(
+        message = composerValue.text,
+        attachmentCount = attachments.size,
+        isRunning = isRunning,
+    )
 
     Column(
         Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 12.dp),
@@ -1766,6 +1875,16 @@ internal fun ConversationComposer(
                     when (entry) {
                         is ComposerPaletteEntry.Resource -> onAddAttachment(entry.input, null)
                         is ComposerPaletteEntry.Command -> when (entry.command) {
+                            ComposerCommand.SHELL -> {
+                                if (nextMessage.isBlank()) {
+                                    composerValue = TextFieldValue("!", selection = TextRange(1))
+                                    onMessageChange("!")
+                                    focusRequester.requestFocus()
+                                    keyboardController?.show()
+                                } else {
+                                    onInputError(IllegalArgumentException("Shell 模式只能从空输入开始"))
+                                }
+                            }
                             ComposerCommand.PHRASE -> {
                                 showQuickPhrases = true
                                 addMenuExpanded = true
@@ -1778,6 +1897,13 @@ internal fun ConversationComposer(
                         }
                     }
                 },
+            )
+            Spacer(Modifier.height(6.dp))
+        }
+        if (isShellMode) {
+            ShellModeBanner(
+                target = requireNotNull(shellTarget),
+                blockReason = shellBlockReason,
             )
             Spacer(Modifier.height(6.dp))
         }
@@ -1801,51 +1927,70 @@ internal fun ConversationComposer(
                 composerValue = it
                 onMessageChange(it.text)
             },
-            placeholder = placeholder,
+            placeholder = if (isShellMode) "输入要在服务端执行的命令" else placeholder,
             enabled = !isSending,
             compactEndExtra = compactEndExtra,
             leadingContent = {
-                ComposerAddMenu(
-                    expanded = addMenuExpanded,
-                    onExpandedChange = {
-                        addMenuExpanded = it
-                    },
-                    showQuickPhrases = showQuickPhrases,
-                    onShowQuickPhrases = { showQuickPhrases = it },
-                    quickPhrases = quickPhrases,
-                    quickPhraseSendEnabled = sendEnabled && !isSending,
-                    enabled = !isSending,
-                    onPickImage = {
-                        imagePicker.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                        )
-                    },
-                    onAddImageAddress = { dialog = ComposerDialog.ImageAddress },
-                    onManageQuickPhrases = {
-                        addMenuExpanded = false
-                        showQuickPhraseManager = true
-                    },
-                    onSelectQuickPhrase = { phrase ->
-                        addMenuExpanded = false
-                        onSendQuickPhrase(phrase.content)
-                    },
-                    onInsertTrigger = { trigger ->
-                        val nextValue = insertComposerTrigger(composerValue, trigger)
-                        composerValue = nextValue
-                        onMessageChange(nextValue.text)
-                        focusRequester.requestFocus()
-                        keyboardController?.show()
-                    },
-                )
+                if (isShellMode) {
+                    Icon(
+                        Icons.Rounded.Terminal,
+                        contentDescription = "Shell 模式",
+                        tint = MaterialTheme.statusColors.warning,
+                    )
+                } else {
+                    ComposerAddMenu(
+                        expanded = addMenuExpanded,
+                        onExpandedChange = {
+                            addMenuExpanded = it
+                        },
+                        showQuickPhrases = showQuickPhrases,
+                        onShowQuickPhrases = { showQuickPhrases = it },
+                        quickPhrases = quickPhrases,
+                        quickPhraseSendEnabled = sendEnabled && !isSending,
+                        enabled = !isSending,
+                        onPickImage = {
+                            imagePicker.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                            )
+                        },
+                        onAddImageAddress = { dialog = ComposerDialog.ImageAddress },
+                        onManageQuickPhrases = {
+                            addMenuExpanded = false
+                            showQuickPhraseManager = true
+                        },
+                        onSelectQuickPhrase = { phrase ->
+                            addMenuExpanded = false
+                            onSendQuickPhrase(phrase.content)
+                        },
+                        onInsertTrigger = { trigger ->
+                            val nextValue = insertComposerTrigger(composerValue, trigger)
+                            composerValue = nextValue
+                            onMessageChange(nextValue.text)
+                            focusRequester.requestFocus()
+                            keyboardController?.show()
+                        },
+                    )
+                }
             },
             expandedContent = {
-                TextButton(
-                    onClick = onOpenOptions,
-                    enabled = !isRunning && !isSending,
-                    modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(horizontal = 8.dp),
-                ) {
-                    Text(modelLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (isShellMode) {
+                    Text(
+                        text = "服务端 Shell · ${requireNotNull(shellTarget).serverName}",
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                } else {
+                    TextButton(
+                        onClick = onOpenOptions,
+                        enabled = !isRunning && !isSending,
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                    ) {
+                        Text(modelLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
             },
             trailingContent = {
@@ -1873,15 +2018,22 @@ internal fun ConversationComposer(
                     enabled = if (stopsActiveTurn) {
                         !isSending
                     } else {
-                        hasInput && sendEnabled && !isSending
+                        hasInput && sendEnabled && !isSending &&
+                            (!isShellMode || shellCommand != null && shellBlockReason == null)
                     },
                     action = if (stopsActiveTurn) {
                         MessageComposerAction.STOP
+                    } else if (isShellMode) {
+                        MessageComposerAction.EXECUTE
                     } else {
                         MessageComposerAction.SEND
                     },
                     isLoading = isSending,
-                    contentDescription = if (stopsActiveTurn) "停止" else "发送",
+                    contentDescription = when {
+                        stopsActiveTurn -> "停止"
+                        isShellMode -> "执行 Shell 命令"
+                        else -> "发送"
+                    },
                 )
             },
             shadowElevation = 6.dp,
@@ -1911,6 +2063,52 @@ internal fun ConversationComposer(
         )
 
         null -> Unit
+    }
+}
+
+@Composable
+private fun ShellModeBanner(
+    target: ShellCommandTarget,
+    blockReason: String?,
+) {
+    val color = if (blockReason == null) MaterialTheme.statusColors.warning else MaterialTheme.colorScheme.error
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(1.dp, color.copy(alpha = 0.58f)),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(
+                Icons.Rounded.Terminal,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = color,
+            )
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    "服务端 Shell · ${target.serverName}",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = color,
+                )
+                Text(
+                    target.cwd,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    blockReason ?: "命令将在服务端主机直接执行，不受线程沙箱和审批策略限制",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = color,
+                )
+            }
+        }
     }
 }
 

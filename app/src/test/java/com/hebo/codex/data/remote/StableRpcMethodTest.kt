@@ -36,6 +36,7 @@ class StableRpcMethodTest {
             "thread/goal/set",
             "thread/unarchive",
             "thread/compact/start",
+            "thread/shellCommand",
             "review/start",
             "fs/getMetadata",
             "fs/readFile",

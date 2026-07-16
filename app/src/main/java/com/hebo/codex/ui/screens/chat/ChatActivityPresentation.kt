@@ -376,6 +376,7 @@ private fun activeActivityLabel(
             ?: "制定计划中"
 
         is ConversationItem.CommandExecution -> activeItem.command.commandPreview()
+        is ConversationItem.UserShellCommand -> activeItem.command.commandPreview()
         is ConversationItem.FileChange -> activeItem.changes
             .map(::changedFileLabel)
             .map(ChangedFileLabel::path)
@@ -407,6 +408,7 @@ internal fun ConversationItem.activityStatus(
 ): ActivityStatus {
     return when (this) {
         is ConversationItem.CommandExecution -> status
+        is ConversationItem.UserShellCommand -> status
         is ConversationItem.FileChange -> status
         is ConversationItem.Activity -> status
         is ConversationItem.Reasoning,
@@ -849,6 +851,7 @@ private fun activityTypeIcon(item: ConversationItem): ImageVector = when (item) 
     is ConversationItem.Reasoning -> Icons.Rounded.Psychology
     is ConversationItem.Plan -> Icons.Rounded.Checklist
     is ConversationItem.CommandExecution -> Icons.Rounded.Terminal
+    is ConversationItem.UserShellCommand -> Icons.Rounded.Terminal
     is ConversationItem.FileChange -> Icons.Rounded.EditNote
     is ConversationItem.Activity -> when (item.kind) {
         ActivityKind.MCP_TOOL, ActivityKind.DYNAMIC_TOOL -> Icons.Rounded.Extension
@@ -871,6 +874,7 @@ private fun activityTypeDescription(item: ConversationItem): String = when (item
     is ConversationItem.Reasoning -> "分析推理"
     is ConversationItem.Plan -> "计划"
     is ConversationItem.CommandExecution -> "命令"
+    is ConversationItem.UserShellCommand -> "用户 Shell"
     is ConversationItem.FileChange -> "文件修改"
     is ConversationItem.Activity -> when (item.kind) {
         ActivityKind.MCP_TOOL, ActivityKind.DYNAMIC_TOOL -> "工具调用"
@@ -905,6 +909,7 @@ internal fun activityItemTitle(item: ConversationItem): String {
         is ConversationItem.Plan -> "计划"
 
         is ConversationItem.CommandExecution -> item.command.commandPreview()
+        is ConversationItem.UserShellCommand -> item.command.commandPreview()
 
         is ConversationItem.FileChange -> item.changes
             .map(::changedFileLabel)
@@ -936,6 +941,8 @@ internal fun activityItemHasDetails(item: ConversationItem): Boolean = when (ite
         item.cwd.isNotBlank() ||
         item.output.isNotBlank() ||
         item.exitCode != null
+
+    is ConversationItem.UserShellCommand -> false
 
     is ConversationItem.FileChange -> item.changes.isNotEmpty()
     is ConversationItem.Activity -> !item.summary.isNullOrBlank() ||
@@ -998,6 +1005,8 @@ private fun ActivityItemDetails(
                 )
             }
         }
+
+        is ConversationItem.UserShellCommand -> Unit
 
         is ConversationItem.FileChange -> {
             item.changes.forEach { change ->

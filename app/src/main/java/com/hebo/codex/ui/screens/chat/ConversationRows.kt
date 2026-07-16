@@ -72,6 +72,7 @@ internal fun buildConversationRows(
 private fun ConversationItem.isGroupableActivity(): Boolean =
     this !is ConversationItem.UserMessage &&
         this !is ConversationItem.AgentMessage &&
+        this !is ConversationItem.UserShellCommand &&
         this !is ConversationItem.Plan
 
 private fun ConversationItem.rowKey(prefix: String): String =

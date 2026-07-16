@@ -35,6 +35,7 @@ enum class StableRpcMethod(val wireName: String) {
     THREAD_GOAL_CLEAR("thread/goal/clear"),
     THREAD_UNARCHIVE("thread/unarchive"),
     THREAD_COMPACT("thread/compact/start"),
+    THREAD_SHELL_COMMAND("thread/shellCommand"),
     SKILLS_LIST("skills/list"),
     SKILLS_EXTRA_ROOTS_SET("skills/extraRoots/set"),
     SKILLS_CONFIG_WRITE("skills/config/write"),
@@ -188,6 +189,16 @@ class AppServerApi(
             buildJsonObject {
                 put("threadId", threadId)
                 put("turnId", turnId)
+            },
+        )
+    }
+
+    suspend fun runShellCommand(threadId: String, command: String) {
+        request(
+            StableRpcMethod.THREAD_SHELL_COMMAND,
+            buildJsonObject {
+                put("threadId", threadId)
+                put("command", command)
             },
         )
     }

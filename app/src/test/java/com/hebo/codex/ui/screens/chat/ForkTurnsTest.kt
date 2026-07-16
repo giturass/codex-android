@@ -49,6 +49,27 @@ class ForkTurnsTest {
         assertEquals("已从“原会话”的第 3 轮创建分叉", forkAnnouncement("原会话", turn))
     }
 
+    @Test
+    fun `Shell 回合使用用户执行的命令作为标题`() {
+        val turns = buildForkTurns(
+            items = listOf(
+                ConversationItem.UserShellCommand(
+                    id = "shell",
+                    turnId = "turn-shell",
+                    command = "/usr/bin/zsh -lc 'git status --short'",
+                    cwd = "/project",
+                    output = "",
+                    exitCode = 0,
+                    durationMillis = 100,
+                    status = com.hebo.codex.domain.ActivityStatus.COMPLETED,
+                ),
+            ),
+            activeTurnId = null,
+        )
+
+        assertEquals("!git status --short", turns.single().title)
+    }
+
     private fun userMessage(
         id: String,
         turnId: String,

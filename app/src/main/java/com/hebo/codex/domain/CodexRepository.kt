@@ -291,6 +291,31 @@ class CodexRepository(
     suspend fun sendMessage(serverId: String, threadId: String, message: String) =
         sendMessage(serverId, threadId, listOf(UserInputPart.Text(message)))
 
+    suspend fun runShellCommand(serverId: String, threadId: String, command: String) {
+        val normalized = command.trim()
+        require(normalized.isNotEmpty()) { "Shell 命令不能为空" }
+        val state = requireConversation(serverId, threadId)
+        require(!state.value.isRunning) { "当前任务结束后才能执行 Shell 命令" }
+        state.updateState { current -> current.copy(isRunning = true, errorMessage = null) }
+        setThreadAttention(serverId, threadId, ThreadAttention.RUNNING)
+        try {
+            api(serverId).runShellCommand(threadId, normalized)
+        } catch (error: Throwable) {
+            state.updateState { current ->
+                if (current.activeTurnId == null) {
+                    current.copy(
+                        isRunning = false,
+                        errorMessage = error.toUserFacingError("执行 Shell 命令失败"),
+                    )
+                } else {
+                    current
+                }
+            }
+            setThreadAttention(serverId, threadId, ThreadAttention.FAILED)
+            throw error
+        }
+    }
+
     suspend fun interrupt(serverId: String, threadId: String) {
         val state = requireConversation(serverId, threadId)
         val turnId = state.value.activeTurnId ?: return
@@ -999,6 +1024,10 @@ class CodexRepository(
                 val completedTurnId = turn.requiredString("id")
                 val errorMessage = (turn["error"] as? JsonObject)?.optionalString("message")
                     ?.let { serverError("任务执行失败", it) }
+                val completedTurnItems = state.value.items.filter { it.turnId == completedTurnId }
+                val shellItem = completedTurnItems.singleOrNull() as? ConversationItem.UserShellCommand
+                val shellFailed = shellItem?.status == ActivityStatus.FAILED ||
+                    shellItem?.status == ActivityStatus.DECLINED
                 state.updateState {
                     it.copy(
                         activeTurnId = null,
@@ -1008,12 +1037,16 @@ class CodexRepository(
                         errorMessage = errorMessage,
                     ).withoutActiveItems(completedTurnId)
                 }
-                val completionAttention = if (errorMessage == null) ThreadAttention.READY else ThreadAttention.FAILED
+                val completionAttention = if (errorMessage == null && !shellFailed) {
+                    ThreadAttention.READY
+                } else {
+                    ThreadAttention.FAILED
+                }
                 setThreadAttention(
                     serverId,
                     threadId,
                     completedThreadAttention(
-                        hasError = errorMessage != null,
+                        hasError = errorMessage != null || shellFailed,
                         isViewed = conversationLeases.isHeld(key),
                     ),
                 )
@@ -1022,7 +1055,12 @@ class CodexRepository(
                         serverId = serverId,
                         threadId = threadId,
                         title = state.value.title,
-                        message = if (errorMessage == null) "任务已完成，可以查看结果" else errorMessage.summary,
+                        message = when {
+                            errorMessage != null -> errorMessage.summary
+                            shellItem == null -> "任务已完成，可以查看结果"
+                            shellFailed -> "Shell 命令执行失败，可以查看输出"
+                            else -> "Shell 命令已完成，可以查看输出"
+                        },
                         attention = completionAttention,
                     ),
                 )
@@ -1114,15 +1152,21 @@ class CodexRepository(
             }
 
             "item/commandExecution/outputDelta" -> updateNotifiedItem { item ->
-                val command = item as? ConversationItem.CommandExecution
-                    ?: throw ProtocolException("command output delta 的目标类型不正确")
-                command.copy(output = command.output + params.requiredString("delta"))
+                val delta = params.requiredString("delta")
+                when (item) {
+                    is ConversationItem.CommandExecution -> item.copy(output = item.output + delta)
+                    is ConversationItem.UserShellCommand -> item.copy(output = item.output + delta)
+                    else -> throw ProtocolException("command output delta 的目标类型不正确")
+                }
             }
 
             "item/commandExecution/terminalInteraction" -> updateNotifiedItem { item ->
-                val command = item as? ConversationItem.CommandExecution
-                    ?: throw ProtocolException("terminal interaction 的目标类型不正确")
-                command.copy(output = command.output + params.requiredString("stdin"))
+                val stdin = params.requiredString("stdin")
+                when (item) {
+                    is ConversationItem.CommandExecution -> item.copy(output = item.output + stdin)
+                    is ConversationItem.UserShellCommand -> item.copy(output = item.output + stdin)
+                    else -> throw ProtocolException("terminal interaction 的目标类型不正确")
+                }
             }
 
             "item/fileChange/patchUpdated" -> updateNotifiedItem { item ->

@@ -58,13 +58,40 @@ internal data class ComposerToken(
     val query: String,
 )
 
+internal data class ShellCommandTarget(
+    val serverName: String,
+    val cwd: String,
+)
+
 internal enum class ComposerCommand(val label: String, val description: String) {
+    SHELL("/shell", "直接在服务端执行 Shell 命令"),
     PHRASE("/phrase", "插入或管理快捷短语"),
     GOAL("/goal", "创建或管理持续目标"),
     REVIEW("/review", "审查代码修改"),
     COMPACT("/compact", "压缩当前会话上下文"),
     SETTINGS("/settings", "调整下一轮模型与权限"),
     ATTACH("/attach", "添加图片、Skill 或提及"),
+}
+
+internal fun isShellCommandInput(message: String): Boolean = message.startsWith('!')
+
+internal fun shellCommandFromInput(message: String): String? = message
+    .takeIf(::isShellCommandInput)
+    ?.drop(1)
+    ?.trim()
+    ?.takeIf(String::isNotEmpty)
+
+internal fun shellCommandBlockReason(
+    message: String,
+    attachmentCount: Int,
+    isRunning: Boolean,
+): String? {
+    if (!isShellCommandInput(message)) return null
+    return when {
+        isRunning -> "当前任务结束后才能执行 Shell 命令"
+        attachmentCount > 0 -> "Shell 命令不能包含附件"
+        else -> null
+    }
 }
 
 internal sealed interface ComposerPaletteEntry {

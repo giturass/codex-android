@@ -380,6 +380,7 @@ private fun NewTaskContent(
             ConversationComposer(
                 serverId = null,
                 conversationId = null,
+                shellTarget = null,
                 isRunning = false,
                 plan = null,
                 activeTurnId = null,

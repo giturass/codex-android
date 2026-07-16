@@ -122,6 +122,34 @@ class ProtocolMapperTest {
     }
 
     @Test
+    fun mapsUserShellCommandAsUserConversationItem() {
+        val item = json.parseToJsonElement(
+            """{
+              "type":"commandExecution",
+              "id":"shell-1",
+              "command":"/usr/bin/zsh -lc 'git status --short'",
+              "cwd":"/workspace",
+              "source":"userShell",
+              "status":"completed",
+              "aggregatedOutput":" M README.md",
+              "exitCode":0,
+              "durationMs":1250
+            }""",
+        ).jsonObject
+
+        val mapped = ProtocolMapper.conversationItem(item, "turn-shell")
+            as ConversationItem.UserShellCommand
+
+        assertEquals("shell-1", mapped.id)
+        assertEquals("turn-shell", mapped.turnId)
+        assertEquals("/workspace", mapped.cwd)
+        assertEquals(" M README.md", mapped.output)
+        assertEquals(0, mapped.exitCode)
+        assertEquals(1250L, mapped.durationMillis)
+        assertEquals(ActivityStatus.COMPLETED, mapped.status)
+    }
+
+    @Test
     fun mapsReasoningPartsWithoutFlatteningProtocolArrays() {
         val item = json.parseToJsonElement(
             """{

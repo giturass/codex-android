@@ -22,10 +22,15 @@ internal fun buildForkTurns(
         val input = turnItems
             .filterIsInstance<ConversationItem.UserMessage>()
             .flatMap(ConversationItem.UserMessage::content)
+        val shellCommand = turnItems.filterIsInstance<ConversationItem.UserShellCommand>().lastOrNull()
         ForkTurn(
             turnId = turnId,
             number = index + 1,
-            title = input.forkTurnTitle(),
+            title = if (input.isNotEmpty()) {
+                input.forkTurnTitle()
+            } else {
+                shellCommand?.let { "!${shellCommandForDisplay(it.command)}" } ?: input.forkTurnTitle()
+            },
             attachmentCount = input.count { it !is UserMessagePart.Text },
         )
     }

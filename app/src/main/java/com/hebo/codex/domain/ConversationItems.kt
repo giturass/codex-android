@@ -90,6 +90,7 @@ internal val ConversationItem.usesTransientActivityState: Boolean
 
         is ConversationItem.UserMessage,
         is ConversationItem.CommandExecution,
+        is ConversationItem.UserShellCommand,
         is ConversationItem.FileChange,
         is ConversationItem.Activity,
         -> false

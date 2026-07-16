@@ -207,6 +207,10 @@ class ChatViewModel(
         val current = mutableState.value
         if (current.isSendingDraft || current.connectionStatus !is ConnectionStatus.Connected) return
         val draft = current.draft
+        if (isShellCommandInput(draft.message)) {
+            sendShellDraft(current, draft)
+            return
+        }
         val input = buildList {
             draft.message.takeIf(String::isNotBlank)?.let { add(UserInputPart.Text(it)) }
             addAll(draft.attachments.map(DraftAttachment::input))
@@ -215,6 +219,47 @@ class ChatViewModel(
         mutableState.update { it.copy(isSendingDraft = true, screenError = null) }
         viewModelScope.launch {
             val result = runSuspendCatching { repository.sendMessage(serverId, threadId, input, draft.options) }
+            if (result.isSuccess) {
+                runSuspendCatching { draftRepository.delete(draftKey) }
+                    .onFailure { error ->
+                        mutableState.update {
+                            it.copy(screenError = error.toUserFacingError("清理草稿失败"))
+                        }
+                    }
+                mutableState.update { state ->
+                    state.copy(
+                        draft = if (state.draft == draft) {
+                            ChatDraft(options = state.conversation.defaultTurnOptions())
+                        } else {
+                            state.draft
+                        },
+                        isSendingDraft = false,
+                    )
+                }
+            } else {
+                mutableState.update { it.copy(isSendingDraft = false) }
+                result.exceptionOrNull()?.let(::showError)
+            }
+        }
+    }
+
+    private fun sendShellDraft(current: ChatUiState, draft: ChatDraft) {
+        val blockReason = shellCommandBlockReason(
+            message = draft.message,
+            attachmentCount = draft.attachments.size,
+            isRunning = current.conversation?.isRunning == true,
+        )
+        val command = shellCommandFromInput(draft.message)
+        val validationError = blockReason ?: if (command == null) "Shell 命令不能为空" else null
+        if (validationError != null) {
+            reportInputError(IllegalArgumentException(validationError))
+            return
+        }
+        mutableState.update { it.copy(isSendingDraft = true, screenError = null) }
+        viewModelScope.launch {
+            val result = runSuspendCatching {
+                repository.runShellCommand(serverId, threadId, requireNotNull(command))
+            }
             if (result.isSuccess) {
                 runSuspendCatching { draftRepository.delete(draftKey) }
                     .onFailure { error ->

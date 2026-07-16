@@ -340,6 +340,29 @@ class ConversationRowsTest {
         assertEquals(plan, (rows[1] as ConversationRow.Item).item)
     }
 
+    @Test
+    fun `用户 Shell 命令作为独立聊天记录展示`() {
+        val shell = ConversationItem.UserShellCommand(
+            id = "shell",
+            turnId = "turn-1",
+            command = "/usr/bin/zsh -lc 'pwd'",
+            cwd = "/project",
+            output = "/project",
+            exitCode = 0,
+            durationMillis = 100,
+            status = ActivityStatus.COMPLETED,
+        )
+
+        val rows = buildConversationRows(
+            items = listOf(command("command", "turn-1"), shell),
+            activeTurnId = null,
+        )
+
+        assertEquals(2, rows.size)
+        assertTrue(rows[0] is ConversationRow.ActivityGroup)
+        assertEquals(shell, (rows[1] as ConversationRow.Item).item)
+    }
+
     private fun command(
         id: String,
         turnId: String,

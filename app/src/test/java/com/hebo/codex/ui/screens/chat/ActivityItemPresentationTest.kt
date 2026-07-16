@@ -180,4 +180,10 @@ class ActivityItemPresentationTest {
         assertEquals("fetch", activityItemTitle(item))
         assertEquals("github", activityItemSubtitle(item))
     }
+
+    @Test
+    fun `Shell 命令耗时使用紧凑格式`() {
+        assertEquals("小于 1 秒", formatShellDuration(999))
+        assertEquals("1.2 秒", formatShellDuration(1_250))
+    }
 }

@@ -202,15 +202,7 @@ object ProtocolMapper {
                 rawContentParts = item.stringArray("content"),
             )
 
-            "commandExecution" -> ConversationItem.CommandExecution(
-                id = id,
-                turnId = turnId,
-                command = item.requiredString("command"),
-                cwd = item.requiredString("cwd"),
-                output = item.optionalString("aggregatedOutput").orEmpty(),
-                exitCode = item["exitCode"]?.takeUnless { it is JsonNull }?.jsonPrimitive?.intOrNull,
-                status = activityStatus(item.optionalString("status")),
-            )
+            "commandExecution" -> commandExecution(item, id, turnId)
 
             "fileChange" -> ConversationItem.FileChange(
                 id = id,
@@ -336,6 +328,38 @@ object ProtocolMapper {
                 summary = "客户端尚未支持此类活动",
                 technicalDetails = item.compactText(),
             )
+        }
+    }
+
+    private fun commandExecution(item: JsonObject, id: String, turnId: String): ConversationItem {
+        val command = item.requiredString("command")
+        val cwd = item.requiredString("cwd")
+        val output = item.optionalString("aggregatedOutput").orEmpty()
+        val exitCode = item["exitCode"]?.takeUnless { it is JsonNull }?.jsonPrimitive?.intOrNull
+        val status = activityStatus(item.optionalString("status"))
+        return when (item.optionalString("source") ?: "agent") {
+            "userShell" -> ConversationItem.UserShellCommand(
+                id = id,
+                turnId = turnId,
+                command = command,
+                cwd = cwd,
+                output = output,
+                exitCode = exitCode,
+                durationMillis = item.optionalLong("durationMs"),
+                status = status,
+            )
+
+            "agent", "unifiedExecStartup", "unifiedExecInteraction" -> ConversationItem.CommandExecution(
+                id = id,
+                turnId = turnId,
+                command = command,
+                cwd = cwd,
+                output = output,
+                exitCode = exitCode,
+                status = status,
+            )
+
+            else -> throw ProtocolException("未知命令执行来源：${item.optionalString("source")}")
         }
     }
 

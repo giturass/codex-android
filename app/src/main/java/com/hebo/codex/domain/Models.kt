@@ -177,6 +177,17 @@ sealed interface ConversationItem {
         val status: ActivityStatus,
     ) : ConversationItem
 
+    data class UserShellCommand(
+        override val id: String,
+        override val turnId: String,
+        val command: String,
+        val cwd: String,
+        val output: String,
+        val exitCode: Int?,
+        val durationMillis: Long?,
+        val status: ActivityStatus,
+    ) : ConversationItem
+
     data class FileChange(
         override val id: String,
         override val turnId: String,
