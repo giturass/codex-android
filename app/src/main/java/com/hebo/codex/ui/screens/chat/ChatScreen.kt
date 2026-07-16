@@ -2010,6 +2010,24 @@ internal fun ConversationComposer(
         attachmentCount = attachments.size,
         isRunning = isRunning,
     )
+    fun enterShellMode(nextMessage: String) {
+        val blockReason = shellModeEntryBlockReason(nextMessage, attachments.size)
+        if (blockReason != null) {
+            onInputError(IllegalArgumentException(blockReason))
+            return
+        }
+        composerValue = TextFieldValue("!", selection = TextRange(1))
+        onMessageChange("!")
+        focusRequester.requestFocus()
+        keyboardController?.show()
+    }
+    fun exitShellMode() {
+        val nextMessage = messageAfterExitingShellMode(composerValue.text)
+        composerValue = TextFieldValue(nextMessage, selection = TextRange(nextMessage.length))
+        onMessageChange(nextMessage)
+        focusRequester.requestFocus()
+        keyboardController?.show()
+    }
 
     Column(
         Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 12.dp),
@@ -2036,16 +2054,7 @@ internal fun ConversationComposer(
                     when (entry) {
                         is ComposerPaletteEntry.Resource -> onAddAttachment(entry.input, null)
                         is ComposerPaletteEntry.Command -> when (entry.command) {
-                            ComposerCommand.SHELL -> {
-                                if (nextMessage.isBlank()) {
-                                    composerValue = TextFieldValue("!", selection = TextRange(1))
-                                    onMessageChange("!")
-                                    focusRequester.requestFocus()
-                                    keyboardController?.show()
-                                } else {
-                                    onInputError(IllegalArgumentException("Shell 模式只能从空输入开始"))
-                                }
-                            }
+                            ComposerCommand.SHELL -> enterShellMode(nextMessage)
                             ComposerCommand.PHRASE -> {
                                 showQuickPhrases = true
                                 addMenuExpanded = true
@@ -2065,6 +2074,8 @@ internal fun ConversationComposer(
             ShellModeBanner(
                 target = requireNotNull(shellTarget),
                 blockReason = shellBlockReason,
+                exitEnabled = !isSending,
+                onExit = ::exitShellMode,
             )
             Spacer(Modifier.height(6.dp))
         }
@@ -2109,6 +2120,10 @@ internal fun ConversationComposer(
                         quickPhrases = quickPhrases,
                         quickPhraseSendEnabled = sendEnabled && !isSending,
                         enabled = !isSending,
+                        shellEntryEnabled = !hasInput,
+                        onEnterShell = shellTarget?.let {
+                            { enterShellMode(composerValue.text) }
+                        },
                         onPickImage = {
                             imagePicker.launch(
                                 PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
@@ -2231,6 +2246,8 @@ internal fun ConversationComposer(
 private fun ShellModeBanner(
     target: ShellCommandTarget,
     blockReason: String?,
+    exitEnabled: Boolean,
+    onExit: () -> Unit,
 ) {
     val color = if (blockReason == null) MaterialTheme.statusColors.warning else MaterialTheme.colorScheme.error
     Surface(
@@ -2267,6 +2284,17 @@ private fun ShellModeBanner(
                     blockReason ?: "命令将在服务端主机直接执行，不受线程沙箱和审批策略限制",
                     style = MaterialTheme.typography.bodySmall,
                     color = color,
+                )
+            }
+            IconButton(
+                onClick = onExit,
+                enabled = exitEnabled,
+                modifier = Modifier.size(32.dp),
+            ) {
+                Icon(
+                    Icons.Rounded.Close,
+                    contentDescription = "退出 Shell 模式",
+                    modifier = Modifier.size(18.dp),
                 )
             }
         }
@@ -2421,6 +2449,8 @@ private fun ComposerAddMenu(
     quickPhrases: List<QuickPhrase>,
     quickPhraseSendEnabled: Boolean,
     enabled: Boolean,
+    shellEntryEnabled: Boolean,
+    onEnterShell: (() -> Unit)?,
     onPickImage: () -> Unit,
     onAddImageAddress: () -> Unit,
     onManageQuickPhrases: () -> Unit,
@@ -2437,7 +2467,7 @@ private fun ComposerAddMenu(
         val addButtonColors = IconButtonDefaults.iconButtonColors()
         Icon(
             imageVector = Icons.Rounded.Add,
-            contentDescription = "添加内容",
+            contentDescription = "更多输入方式",
             modifier = Modifier
                 .size(48.dp)
                 .menuAnchor(
@@ -2501,6 +2531,30 @@ private fun ComposerAddMenu(
                         onInsertTrigger('@')
                     },
                 )
+                if (onEnterShell != null) {
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text("服务端 Shell")
+                                Text(
+                                    if (shellEntryEnabled) {
+                                        "在当前服务器直接执行命令"
+                                    } else {
+                                        "请先清空输入与附件"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        },
+                        leadingIcon = { Icon(Icons.Rounded.Terminal, contentDescription = null) },
+                        enabled = shellEntryEnabled,
+                        onClick = {
+                            onExpandedChange(false)
+                            onEnterShell()
+                        },
+                    )
+                }
             }
         }
     }

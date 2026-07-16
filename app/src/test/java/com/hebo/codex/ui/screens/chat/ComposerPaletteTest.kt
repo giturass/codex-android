@@ -63,6 +63,26 @@ class ComposerPaletteTest {
     }
 
     @Test
+    fun `Shell 模式只能从无内容输入进入`() {
+        assertNull(shellModeEntryBlockReason("", attachmentCount = 0))
+        assertNull(shellModeEntryBlockReason("   ", attachmentCount = 0))
+        assertEquals(
+            "Shell 模式只能从空输入开始",
+            shellModeEntryBlockReason("普通消息", attachmentCount = 0),
+        )
+        assertEquals(
+            "进入 Shell 模式前请先移除附件",
+            shellModeEntryBlockReason("", attachmentCount = 1),
+        )
+    }
+
+    @Test
+    fun `退出 Shell 模式保留命令文本`() {
+        assertEquals("git status", messageAfterExitingShellMode("!git status"))
+        assertEquals("", messageAfterExitingShellMode("!"))
+    }
+
+    @Test
     fun `Shell 模式拒绝运行中任务和附件`() {
         assertEquals(
             "当前任务结束后才能执行 Shell 命令",

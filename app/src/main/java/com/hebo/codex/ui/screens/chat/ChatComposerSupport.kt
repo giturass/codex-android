@@ -81,6 +81,17 @@ internal fun shellCommandFromInput(message: String): String? = message
     ?.trim()
     ?.takeIf(String::isNotEmpty)
 
+internal fun shellModeEntryBlockReason(message: String, attachmentCount: Int): String? = when {
+    message.isNotBlank() -> "Shell 模式只能从空输入开始"
+    attachmentCount > 0 -> "进入 Shell 模式前请先移除附件"
+    else -> null
+}
+
+internal fun messageAfterExitingShellMode(message: String): String {
+    require(isShellCommandInput(message)) { "当前输入不是 Shell 模式" }
+    return message.drop(1)
+}
+
 internal fun shellCommandBlockReason(
     message: String,
     attachmentCount: Int,
