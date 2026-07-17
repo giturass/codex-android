@@ -7,7 +7,11 @@ package com.hebo.codex.ui.screens.chat
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -72,6 +76,7 @@ import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -81,8 +86,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -135,7 +142,7 @@ internal fun ActivityGroupCard(
     } else {
         null
     }
-    val hasLeadingContent = singleItem != null || !isSealed || sealedGroupStatusIcon != null
+    val hasLeadingContent = singleItem != null || sealedGroupStatusIcon != null
 
     Row(
         modifier = Modifier
@@ -156,14 +163,6 @@ internal fun ActivityGroupCard(
     ) {
         if (singleItem != null) {
             ActivityTimelineIcon(singleItem, activeItemKeys)
-        } else if (!isSealed) {
-            Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    color = contentColor,
-                    strokeWidth = 2.dp,
-                )
-            }
         } else if (sealedGroupStatusIcon != null) {
             Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
                 Icon(
@@ -179,6 +178,11 @@ internal fun ActivityGroupCard(
             ActivityGroupMetrics(
                 metrics = activityGroupMetrics(items),
                 color = aggregateColor,
+                modifier = Modifier.weight(1f),
+            )
+        } else if (singleItem == null) {
+            ActiveActivityGroupTitle(
+                text = activityGroupLabel(items, isSealed, activeItemKeys),
                 modifier = Modifier.weight(1f),
             )
         } else {
@@ -200,6 +204,55 @@ internal fun ActivityGroupCard(
             )
         }
     }
+}
+
+@Composable
+private fun ActiveActivityGroupTitle(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    val baseColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val highlightColor = lerp(baseColor, MaterialTheme.colorScheme.onSurface, 0.35f)
+    var titleWidth by remember { mutableFloatStateOf(0f) }
+    val transition = rememberInfiniteTransition(label = "活动组标题流光")
+    val progress by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2_000, easing = LinearEasing),
+        ),
+        label = "活动组标题流光进度",
+    )
+    val shimmerWidth = titleWidth * 0.45f
+    val shimmerCenter = -shimmerWidth / 2f + progress * (titleWidth + shimmerWidth)
+    val shimmerStart = shimmerCenter - shimmerWidth / 2f
+    val shimmerEnd = shimmerCenter + shimmerWidth / 2f
+    val titleBrush = if (titleWidth > 0f) {
+        Brush.linearGradient(
+            colorStops = arrayOf(
+                0f to baseColor,
+                0.35f to baseColor,
+                0.5f to highlightColor,
+                0.65f to baseColor,
+                1f to baseColor,
+            ),
+            start = Offset(shimmerStart, 0f),
+            end = Offset(shimmerEnd, 0f),
+        )
+    } else {
+        Brush.linearGradient(listOf(baseColor, baseColor))
+    }
+
+    Text(
+        text = text,
+        modifier = modifier,
+        style = MaterialTheme.typography.bodyLarge.copy(
+            brush = titleBrush,
+        ),
+        onTextLayout = { result -> titleWidth = result.getLineRight(0) },
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 internal data class ActivityDetailsActions(
