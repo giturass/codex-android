@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -149,6 +150,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -184,6 +186,7 @@ import com.hebo.codex.domain.ThreadGoalStatus
 import com.hebo.codex.domain.ThreadAttention
 import com.hebo.codex.domain.TokenUsage
 import com.hebo.codex.domain.ActiveTurnPlan
+import com.hebo.codex.domain.TurnPlanStep
 import com.hebo.codex.domain.TurnOptions
 import com.hebo.codex.domain.UserInputPart
 import com.hebo.codex.domain.UserFacingError
@@ -231,6 +234,7 @@ private const val CHAT_LIST_END_KEY = "chat-list-end"
 private const val CHAT_LIST_PAGE_RUNWAY_KEY = "chat-list-page-runway"
 private const val SCROLL_TO_BOTTOM_BUTTON_DELAY_MILLIS = 500L
 private const val PAGE_SCROLL_ANIMATION_DURATION_MILLIS = 180
+private const val PLAN_STEP_PROGRESS_FADE_DURATION_MILLIS = 150
 private val ChatPageOverlap = 64.dp
 private val ConversationHeaderItemMinHeight = 48.dp
 private val ConversationHeaderVerticalPadding = 8.dp
@@ -2373,6 +2377,8 @@ internal fun composerModelLabel(
 
 @Composable
 private fun ActivePlanCard(plan: ActiveTurnPlan) {
+    val currentStepNumber = activePlanStepNumber(plan.steps)
+    val progressLabel = "$currentStepNumber/${plan.steps.size}"
     val summary = plan.steps.firstOrNull { it.status == PlanStepStatus.IN_PROGRESS }?.text
         ?: plan.steps.firstOrNull { it.status == PlanStepStatus.PENDING }?.text
         ?: "计划步骤已完成"
@@ -2432,7 +2438,30 @@ private fun ActivePlanCard(plan: ActiveTurnPlan) {
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                Box(
+                    modifier = Modifier
+                        .widthIn(min = 24.dp)
+                        .clearAndSetSemantics {
+                            contentDescription = "第 $currentStepNumber 步，共 ${plan.steps.size} 步"
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Crossfade(
+                        targetState = progressLabel,
+                        animationSpec = tween(PLAN_STEP_PROGRESS_FADE_DURATION_MILLIS),
+                        label = "工作计划步骤进度",
+                    ) { visibleProgress ->
+                        Text(
+                            text = visibleProgress,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Medium,
+                                fontFeatureSettings = "tnum",
+                            ),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
+                }
                 Spacer(Modifier.width(8.dp))
                 Text(
                     text = summary,
@@ -2496,6 +2525,15 @@ private fun ActivePlanCard(plan: ActiveTurnPlan) {
             }
         }
     }
+}
+
+internal fun activePlanStepNumber(steps: List<TurnPlanStep>): Int {
+    require(steps.isNotEmpty())
+    val currentStepIndex = steps.indexOfFirst { it.status == PlanStepStatus.IN_PROGRESS }
+        .takeIf { it >= 0 }
+        ?: steps.indexOfFirst { it.status == PlanStepStatus.PENDING }.takeIf { it >= 0 }
+        ?: steps.lastIndex
+    return currentStepIndex + 1
 }
 
 @Composable
