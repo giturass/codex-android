@@ -6,6 +6,7 @@ internal data class ChatPagingPosition(
     val outputEndOffset: Int?,
     val firstVisibleItemIndex: Int?,
     val lastVisibleItemIndex: Int?,
+    val readingStartOffset: Int,
     val readingEndOffset: Int,
 )
 
@@ -30,6 +31,21 @@ internal fun hasReachedChatOutputEnd(position: ChatPagingPosition): Boolean {
         ?: position.firstVisibleItemIndex?.let { it > outputEndIndex }
         ?: false
 }
+
+internal fun isChatOutputEndVisible(position: ChatPagingPosition): Boolean =
+    position.outputEndOffset?.let {
+        it > position.readingStartOffset && it <= position.readingEndOffset
+    } ?: false
+
+internal fun shouldDockCompletedChatOutput(
+    wasRunning: Boolean,
+    isRunning: Boolean,
+    wasOutputEndVisible: Boolean,
+    isUserScrollInProgress: Boolean,
+): Boolean = wasRunning &&
+    !isRunning &&
+    wasOutputEndVisible &&
+    !isUserScrollInProgress
 
 internal fun shouldFollowChatOutput(
     position: ChatPagingPosition,

@@ -123,6 +123,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
@@ -289,6 +290,10 @@ fun ChatScreen(
     var retainedPageRunwayHeightPx by remember(conversation?.threadId) { mutableIntStateOf(0) }
     var currentOutputRequest by remember(conversation?.threadId) { mutableIntStateOf(0) }
     var handledCurrentOutputRequest by remember(conversation?.threadId) { mutableIntStateOf(0) }
+    var completionDockRequest by remember(conversation?.threadId) { mutableIntStateOf(0) }
+    var handledCompletionDockRequest by remember(conversation?.threadId) { mutableIntStateOf(0) }
+    var runningOutputEndVisible by remember(conversation?.threadId) { mutableStateOf(false) }
+    var completionDockInProgress by remember(conversation?.threadId) { mutableStateOf(false) }
     var lastUserScrollForward by remember(conversation?.threadId) { mutableStateOf(false) }
     var topControlsHeightPx by remember { mutableStateOf(0) }
     var bottomControlsHeightPx by remember { mutableStateOf(0) }
@@ -365,9 +370,20 @@ fun ChatScreen(
         }
     }
     LaunchedEffect(conversation?.isRunning) {
-        if (conversation?.isRunning == true) {
+        val isRunning = conversation?.isRunning == true
+        val shouldDock = shouldDockCompletedChatOutput(
+            wasRunning = retainPageRunway,
+            isRunning = isRunning,
+            wasOutputEndVisible = runningOutputEndVisible,
+            isUserScrollInProgress = !autoFollow && listState.isScrollInProgress,
+        )
+        if (isRunning) {
+            runningOutputEndVisible = false
             retainPageRunway = true
             pageRunwayEnabled = true
+        } else {
+            retainPageRunway = false
+            if (shouldDock) completionDockRequest++
         }
     }
 
@@ -433,6 +449,18 @@ fun ChatScreen(
 
     LaunchedEffect(
         conversation?.threadId,
+        conversation?.isRunning,
+        initialListPositioned,
+        liveEdgeIndex,
+    ) {
+        if (conversation?.isRunning != true || !initialListPositioned) return@LaunchedEffect
+        snapshotFlow {
+            isChatOutputEndVisible(listState.layoutInfo.chatPagingPosition(liveEdgeIndex))
+        }.collect { runningOutputEndVisible = it }
+    }
+
+    LaunchedEffect(
+        conversation?.threadId,
         initialListPositioned,
         listViewportHeightPx,
         pageRunwayEnabled,
@@ -457,8 +485,9 @@ fun ChatScreen(
         pageRunwayEnabled,
         liveEdgeIndex,
         pageOverlapPx,
+        completionDockInProgress,
     ) {
-        if (!initialListPositioned) return@LaunchedEffect
+        if (!initialListPositioned || completionDockInProgress) return@LaunchedEffect
         var previousReadingEndOffset = listState.layoutInfo.readingEndOffset()
         while (true) {
             val position = snapshotFlow {
@@ -491,6 +520,31 @@ fun ChatScreen(
                     animationSpec = tween(PAGE_SCROLL_ANIMATION_DURATION_MILLIS),
                 )
             }
+        }
+    }
+    LaunchedEffect(
+        completionDockRequest,
+        initialListPositioned,
+        liveEdgeIndex,
+        liveEdgeHeightPx,
+    ) {
+        if (!initialListPositioned || completionDockRequest == handledCompletionDockRequest) {
+            return@LaunchedEffect
+        }
+        handledCompletionDockRequest = completionDockRequest
+        completionDockInProgress = true
+        try {
+            withFrameNanos { }
+            if (!autoFollow && listState.isScrollInProgress) return@LaunchedEffect
+            val readingEndOffset = listState.layoutInfo.readingEndOffset()
+            listState.animateScrollToItem(
+                index = liveEdgeIndex,
+                scrollOffset = -(readingEndOffset - liveEdgeHeightPx).coerceAtLeast(0),
+            )
+            showScrollToBottomButton = false
+            pageRunwayEnabled = false
+        } finally {
+            completionDockInProgress = false
         }
     }
     LaunchedEffect(
@@ -1008,6 +1062,9 @@ fun ChatScreen(
 private fun LazyListLayoutInfo.readingEndOffset(): Int =
     (viewportEndOffset - afterContentPadding).coerceAtLeast(0)
 
+private fun LazyListLayoutInfo.readingStartOffset(): Int =
+    viewportStartOffset + beforeContentPadding
+
 private fun LazyListLayoutInfo.chatPagingPosition(liveEdgeIndex: Int): ChatPagingPosition {
     val outputEndItem = visibleItemsInfo.firstOrNull { it.index == liveEdgeIndex - 1 }
     return ChatPagingPosition(
@@ -1016,6 +1073,7 @@ private fun LazyListLayoutInfo.chatPagingPosition(liveEdgeIndex: Int): ChatPagin
         outputEndOffset = outputEndItem?.let { it.offset + it.size },
         firstVisibleItemIndex = visibleItemsInfo.firstOrNull()?.index,
         lastVisibleItemIndex = visibleItemsInfo.lastOrNull()?.index,
+        readingStartOffset = readingStartOffset(),
         readingEndOffset = readingEndOffset(),
     )
 }

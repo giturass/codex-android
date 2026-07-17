@@ -89,6 +89,67 @@ class ChatPagingTest {
     }
 
     @Test
+    fun `末尾文字位于阅读区内时可见`() {
+        assertTrue(isChatOutputEndVisible(position(outputEndOffset = 600)))
+        assertTrue(
+            isChatOutputEndVisible(
+                position(outputEndOffset = 101, readingStartOffset = 100),
+            ),
+        )
+    }
+
+    @Test
+    fun `末尾文字位于阅读区外时不可见`() {
+        assertFalse(isChatOutputEndVisible(position(outputEndOffset = 601)))
+        assertFalse(
+            isChatOutputEndVisible(
+                position(outputEndOffset = 100, readingStartOffset = 100),
+            ),
+        )
+        assertFalse(isChatOutputEndVisible(position(outputEndOffset = null)))
+    }
+
+    @Test
+    fun `运行完成且末尾可见时归位`() {
+        assertTrue(
+            shouldDockCompletedChatOutput(
+                wasRunning = true,
+                isRunning = false,
+                wasOutputEndVisible = true,
+                isUserScrollInProgress = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `非完成转换或用户正在滚动时不归位`() {
+        assertFalse(
+            shouldDockCompletedChatOutput(
+                wasRunning = false,
+                isRunning = false,
+                wasOutputEndVisible = true,
+                isUserScrollInProgress = false,
+            ),
+        )
+        assertFalse(
+            shouldDockCompletedChatOutput(
+                wasRunning = true,
+                isRunning = false,
+                wasOutputEndVisible = false,
+                isUserScrollInProgress = false,
+            ),
+        )
+        assertFalse(
+            shouldDockCompletedChatOutput(
+                wasRunning = true,
+                isRunning = false,
+                wasOutputEndVisible = true,
+                isUserScrollInProgress = true,
+            ),
+        )
+    }
+
+    @Test
     fun `无分页跑道时末尾内容二次布局到阅读区下方后继续跟随`() {
         assertTrue(
             shouldFollowChatOutput(
@@ -189,12 +250,14 @@ class ChatPagingTest {
         outputEndOffset: Int? = 582,
         firstVisibleItemIndex: Int? = 2,
         lastVisibleItemIndex: Int? = 5,
+        readingStartOffset: Int = 0,
     ) = ChatPagingPosition(
         liveEdgeIndex = 5,
         liveEdgeOffset = liveEdgeOffset,
         outputEndOffset = outputEndOffset,
         firstVisibleItemIndex = firstVisibleItemIndex,
         lastVisibleItemIndex = lastVisibleItemIndex,
+        readingStartOffset = readingStartOffset,
         readingEndOffset = 600,
     )
 }
