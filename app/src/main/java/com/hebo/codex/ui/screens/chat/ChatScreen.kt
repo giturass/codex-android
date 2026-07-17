@@ -232,7 +232,6 @@ private val highlightedMarkdownComponents = markdownComponents(
 
 private const val CHAT_LIST_END_KEY = "chat-list-end"
 private const val CHAT_LIST_PAGE_RUNWAY_KEY = "chat-list-page-runway"
-private const val SCROLL_TO_BOTTOM_BUTTON_DELAY_MILLIS = 500L
 private const val PAGE_SCROLL_ANIMATION_DURATION_MILLIS = 180
 private const val PLAN_STEP_PROGRESS_FADE_DURATION_MILLIS = 150
 private val ChatPageOverlap = 64.dp
@@ -298,7 +297,6 @@ fun ChatScreen(
     var handledCompletionDockRequest by remember(conversation?.threadId) { mutableIntStateOf(0) }
     var runningOutputEndVisible by remember(conversation?.threadId) { mutableStateOf(false) }
     var completionDockInProgress by remember(conversation?.threadId) { mutableStateOf(false) }
-    var lastUserScrollForward by remember(conversation?.threadId) { mutableStateOf(false) }
     var topControlsHeightPx by remember { mutableStateOf(0) }
     var bottomControlsHeightPx by remember { mutableStateOf(0) }
     var dialog by remember { mutableStateOf<ChatDialog?>(null) }
@@ -592,38 +590,25 @@ fun ChatScreen(
         listState,
         autoFollow,
         initialListPositioned,
-        pageRunwayEnabled,
         liveEdgeIndex,
-        liveEdgeHeightPx,
-        pageOverlapPx,
-        lastUserScrollForward,
     ) {
-        if (autoFollow || !initialListPositioned || !lastUserScrollForward) return@LaunchedEffect
+        if (autoFollow || !initialListPositioned) return@LaunchedEffect
         snapshotFlow {
-            val position = listState.layoutInfo.chatPagingPosition(liveEdgeIndex)
-            val anchorOffset = if (pageRunwayEnabled) {
-                pageOverlapPx
-            } else {
-                (position.readingEndOffset - liveEdgeHeightPx).coerceAtLeast(0)
+            resolveChatUserScroll(
+                position = listState.layoutInfo.chatPagingPosition(liveEdgeIndex),
+                isScrollInProgress = listState.isScrollInProgress,
+            )
+        }.collectLatest { resolution ->
+            when (resolution) {
+                ChatUserScrollResolution.IN_PROGRESS -> showScrollToBottomButton = false
+                ChatUserScrollResolution.FOLLOW_OUTPUT -> {
+                    showScrollToBottomButton = false
+                    autoFollow = true
+                }
+                ChatUserScrollResolution.SHOW_RETURN_TO_OUTPUT -> {
+                    showScrollToBottomButton = true
+                }
             }
-            !listState.isScrollInProgress &&
-                hasReachedChatPageAnchor(position, anchorOffset)
-        }.first { it }
-        autoFollow = true
-    }
-    LaunchedEffect(
-        listState,
-        autoFollow,
-        initialListPositioned,
-        liveEdgeIndex,
-    ) {
-        snapshotFlow {
-            val position = listState.layoutInfo.chatPagingPosition(liveEdgeIndex)
-            !autoFollow && initialListPositioned && !listState.isScrollInProgress &&
-                !hasReachedChatOutputEnd(position)
-        }.collectLatest { shouldShow ->
-            if (shouldShow) delay(SCROLL_TO_BOTTOM_BUTTON_DELAY_MILLIS)
-            showScrollToBottomButton = shouldShow
         }
     }
     val userScrollConnection = remember(conversation?.threadId, listState, liveEdgeIndex) {
@@ -635,7 +620,6 @@ fun ChatScreen(
                 if (source != NestedScrollSource.UserInput || available.y >= 0f) return Offset.Zero
                 val position = listState.layoutInfo.chatPagingPosition(liveEdgeIndex)
                 if (!shouldStopForwardUserScroll(position)) return Offset.Zero
-                lastUserScrollForward = true
                 return Offset(x = 0f, y = available.y)
             }
 
@@ -643,7 +627,6 @@ fun ChatScreen(
                 if (available.y >= 0f) return Velocity.Zero
                 val position = listState.layoutInfo.chatPagingPosition(liveEdgeIndex)
                 if (!shouldStopForwardUserScroll(position)) return Velocity.Zero
-                lastUserScrollForward = true
                 return available
             }
 
@@ -653,7 +636,6 @@ fun ChatScreen(
                 source: NestedScrollSource,
             ): Offset {
                 if (source == NestedScrollSource.UserInput && consumed.y != 0f) {
-                    lastUserScrollForward = consumed.y < 0f
                     autoFollow = false
                 }
                 return Offset.Zero

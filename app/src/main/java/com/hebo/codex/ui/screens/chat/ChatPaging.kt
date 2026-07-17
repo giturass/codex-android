@@ -32,6 +32,21 @@ internal fun hasReachedChatOutputEnd(position: ChatPagingPosition): Boolean {
         ?: false
 }
 
+internal enum class ChatUserScrollResolution {
+    IN_PROGRESS,
+    FOLLOW_OUTPUT,
+    SHOW_RETURN_TO_OUTPUT,
+}
+
+internal fun resolveChatUserScroll(
+    position: ChatPagingPosition,
+    isScrollInProgress: Boolean,
+): ChatUserScrollResolution = when {
+    isScrollInProgress -> ChatUserScrollResolution.IN_PROGRESS
+    hasReachedChatOutputEnd(position) -> ChatUserScrollResolution.FOLLOW_OUTPUT
+    else -> ChatUserScrollResolution.SHOW_RETURN_TO_OUTPUT
+}
+
 internal fun isChatOutputEndVisible(position: ChatPagingPosition): Boolean =
     position.outputEndOffset?.let {
         it > position.readingStartOffset && it <= position.readingEndOffset

@@ -89,6 +89,39 @@ class ChatPagingTest {
     }
 
     @Test
+    fun `查看历史的轻微滚动结束后继续跟随`() {
+        assertEquals(
+            ChatUserScrollResolution.FOLLOW_OUTPUT,
+            resolveChatUserScroll(
+                position = position(outputEndOffset = 600),
+                isScrollInProgress = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `查看历史使末尾离开阅读区后显示返回按钮`() {
+        assertEquals(
+            ChatUserScrollResolution.SHOW_RETURN_TO_OUTPUT,
+            resolveChatUserScroll(
+                position = position(outputEndOffset = 601),
+                isScrollInProgress = false,
+            ),
+        )
+    }
+
+    @Test
+    fun `滚动过程中暂不改变跟随状态`() {
+        assertEquals(
+            ChatUserScrollResolution.IN_PROGRESS,
+            resolveChatUserScroll(
+                position = position(outputEndOffset = 601),
+                isScrollInProgress = true,
+            ),
+        )
+    }
+
+    @Test
     fun `末尾文字位于阅读区内时可见`() {
         assertTrue(isChatOutputEndVisible(position(outputEndOffset = 600)))
         assertTrue(
