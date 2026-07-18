@@ -6,6 +6,12 @@ plugins {
     alias(libs.plugins.room)
 }
 
+val releaseSigningEnabled = providers.gradleProperty("releaseSigning").orNull == "true"
+
+fun requiredSigningEnvironmentVariable(name: String): String =
+    providers.environmentVariable(name).orNull
+        ?: error("$name must be set when releaseSigning=true")
+
 android {
     namespace = "com.hebo.codex"
     compileSdk = 37
@@ -20,10 +26,24 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (releaseSigningEnabled) {
+            create("release") {
+                storeFile = file(requiredSigningEnvironmentVariable("ANDROID_KEYSTORE_FILE"))
+                storePassword = requiredSigningEnvironmentVariable("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = requiredSigningEnvironmentVariable("ANDROID_KEY_ALIAS")
+                keyPassword = requiredSigningEnvironmentVariable("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            if (releaseSigningEnabled) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",

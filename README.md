@@ -18,7 +18,7 @@ Codex Android 是基于 Codex app-server 的非官方原生 Android 客户端，
 ## 项目状态
 
 - 最低支持 Android 8.0（API 26）
-- 当前仅提供源码构建，尚未发布预编译 APK
+- 可从 [GitHub Releases](https://github.com/hebo6/codex-android/releases/latest) 下载正式 APK
 - app-server WebSocket 传输本身仍是实验性接口，不建议用于生产环境
 
 ## 功能
@@ -77,7 +77,7 @@ codex app-server \
 
 构建环境要求
 
-- JDK 17 或更高版本
+- JDK 26
 - Android SDK 37
 - 使用仓库提供的 Gradle Wrapper，无需单独安装 Gradle
 
