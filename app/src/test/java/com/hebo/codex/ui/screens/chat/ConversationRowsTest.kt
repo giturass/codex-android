@@ -2,6 +2,7 @@ package com.hebo.codex.ui.screens.chat
 
 import com.hebo.codex.domain.ActivityKind
 import com.hebo.codex.domain.ActivityStatus
+import com.hebo.codex.domain.AgentMessagePhase
 import com.hebo.codex.domain.ChangedFile
 import com.hebo.codex.domain.ConversationItem
 import com.hebo.codex.domain.FileChangeKind
@@ -15,7 +16,7 @@ class ConversationRowsTest {
         val items = listOf(
             command("command-1", "turn-1"),
             command("command-2", "turn-1"),
-            ConversationItem.AgentMessage("answer", "turn-1", "完成"),
+            finalAnswer("answer", "turn-1", "完成"),
             command("command-3", "turn-2"),
         )
 
@@ -96,6 +97,30 @@ class ConversationRowsTest {
     }
 
     @Test
+    fun `进度消息计划和操作收纳到同一活动组`() {
+        val commentary = ConversationItem.AgentMessage(
+            id = "commentary",
+            turnId = "turn-1",
+            text = "正在检查实现",
+            phase = AgentMessagePhase.COMMENTARY,
+        )
+        val plan = ConversationItem.Plan(
+            id = "plan",
+            turnId = "turn-1",
+            text = "1. 检查实现",
+        )
+
+        val rows = buildConversationRows(
+            items = listOf(commentary, plan, command("command", "turn-1")),
+            activeTurnId = "turn-1",
+        )
+
+        val group = rows.single() as ConversationRow.ActivityGroup
+        assertEquals(listOf(commentary, plan, command("command", "turn-1")), group.items)
+        assertTrue(!group.isSealed)
+    }
+
+    @Test
     fun `未封口的操作显示当前命令`() {
         val rows = buildConversationRows(
             items = listOf(command("command", "turn-1", ActivityStatus.IN_PROGRESS)),
@@ -127,7 +152,7 @@ class ConversationRowsTest {
         val rows = buildConversationRows(
             items = listOf(
                 command("command", "turn-1"),
-                ConversationItem.AgentMessage("answer", "turn-1", "开始回答"),
+                finalAnswer("answer", "turn-1", "开始回答"),
             ),
             activeTurnId = "turn-1",
         )
@@ -151,11 +176,24 @@ class ConversationRowsTest {
     }
 
     @Test
+    fun `最终回答条目开始时立即为活动组封口`() {
+        val rows = buildConversationRows(
+            items = listOf(
+                command("command", "turn-1"),
+                finalAnswer("answer", "turn-1", ""),
+            ),
+            activeTurnId = "turn-1",
+        )
+
+        assertTrue((rows.first() as ConversationRow.ActivityGroup).isSealed)
+    }
+
+    @Test
     fun `正文后的新活动形成新的未封口活动组`() {
         val rows = buildConversationRows(
             items = listOf(
                 command("command-1", "turn-1"),
-                ConversationItem.AgentMessage("answer", "turn-1", "继续处理"),
+                finalAnswer("answer", "turn-1", "继续处理"),
                 command("command-2", "turn-1"),
             ),
             activeTurnId = "turn-1",
@@ -196,6 +234,17 @@ class ConversationRowsTest {
     @Test
     fun `活动组汇总全部类型并保持固定顺序`() {
         val items = listOf(
+            ConversationItem.AgentMessage(
+                id = "commentary",
+                turnId = "turn-1",
+                text = "正在检查",
+                phase = AgentMessagePhase.COMMENTARY,
+            ),
+            ConversationItem.Plan(
+                id = "plan",
+                turnId = "turn-1",
+                text = "1. 检查实现",
+            ),
             command("command", "turn-1"),
             ConversationItem.Activity(
                 id = "activity",
@@ -216,6 +265,7 @@ class ConversationRowsTest {
         assertEquals(
             listOf(
                 ActivityGroupMetric(ActivityGroupMetricType.REASONING, 1),
+                ActivityGroupMetric(ActivityGroupMetricType.PROGRESS, 2),
                 ActivityGroupMetric(ActivityGroupMetricType.COMMAND, 1),
                 ActivityGroupMetric(ActivityGroupMetricType.FILE, 1),
                 ActivityGroupMetric(ActivityGroupMetricType.ACTIVITY, 1),
@@ -323,7 +373,7 @@ class ConversationRowsTest {
     }
 
     @Test
-    fun `计划作为独立的持久化记录展示`() {
+    fun `计划收纳到活动组`() {
         val plan = ConversationItem.Plan(
             id = "plan-1",
             turnId = "turn-1",
@@ -335,9 +385,9 @@ class ConversationRowsTest {
             activeTurnId = null,
         )
 
-        assertEquals(2, rows.size)
-        assertTrue(rows[0] is ConversationRow.ActivityGroup)
-        assertEquals(plan, (rows[1] as ConversationRow.Item).item)
+        val group = rows.single() as ConversationRow.ActivityGroup
+        assertEquals(listOf(command("command", "turn-1"), plan), group.items)
+        assertTrue(group.isSealed)
     }
 
     @Test
@@ -375,6 +425,17 @@ class ConversationRowsTest {
         output = "",
         exitCode = 0,
         status = status,
+    )
+
+    private fun finalAnswer(
+        id: String,
+        turnId: String,
+        text: String,
+    ) = ConversationItem.AgentMessage(
+        id = id,
+        turnId = turnId,
+        text = text,
+        phase = AgentMessagePhase.FINAL_ANSWER,
     )
 
     private fun fileChange(

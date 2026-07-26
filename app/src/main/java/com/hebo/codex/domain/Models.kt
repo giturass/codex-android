@@ -152,6 +152,7 @@ sealed interface ConversationItem {
         override val id: String,
         override val turnId: String,
         val text: String,
+        val phase: AgentMessagePhase? = null,
     ) : ConversationItem
 
     data class Reasoning(
@@ -206,6 +207,11 @@ sealed interface ConversationItem {
         val remotePath: String? = null,
         val status: ActivityStatus,
     ) : ConversationItem
+}
+
+enum class AgentMessagePhase {
+    COMMENTARY,
+    FINAL_ANSWER,
 }
 
 enum class ActivityKind {

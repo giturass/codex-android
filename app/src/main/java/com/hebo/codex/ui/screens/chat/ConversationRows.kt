@@ -1,5 +1,6 @@
 package com.hebo.codex.ui.screens.chat
 
+import com.hebo.codex.domain.AgentMessagePhase
 import com.hebo.codex.domain.ConversationItem
 
 internal sealed interface ConversationRow {
@@ -53,7 +54,7 @@ internal fun buildConversationRows(
             activityItems += item
         } else {
             flushActivities()
-            if (item is ConversationItem.AgentMessage && item.text.isNotBlank()) {
+            if (item is ConversationItem.AgentMessage && item.startsFinalAnswer()) {
                 sealActivityGroups(item.turnId)
             }
             if (item.isGroupableActivity()) activityItems += item else rows += ConversationRow.Item(item)
@@ -70,10 +71,22 @@ internal fun buildConversationRows(
 }
 
 private fun ConversationItem.isGroupableActivity(): Boolean =
-    this !is ConversationItem.UserMessage &&
-        this !is ConversationItem.AgentMessage &&
-        this !is ConversationItem.UserShellCommand &&
-        this !is ConversationItem.Plan
+    when (this) {
+        is ConversationItem.UserMessage,
+        is ConversationItem.UserShellCommand,
+        -> false
+
+        is ConversationItem.AgentMessage -> phase == AgentMessagePhase.COMMENTARY
+        is ConversationItem.Reasoning,
+        is ConversationItem.Plan,
+        is ConversationItem.CommandExecution,
+        is ConversationItem.FileChange,
+        is ConversationItem.Activity,
+        -> true
+    }
+
+private fun ConversationItem.AgentMessage.startsFinalAnswer(): Boolean =
+    phase == AgentMessagePhase.FINAL_ANSWER || (phase == null && text.isNotBlank())
 
 private fun ConversationItem.rowKey(prefix: String): String =
     "$prefix:${turnId.length}:$turnId:${id.length}:$id"

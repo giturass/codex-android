@@ -2,6 +2,7 @@ package com.hebo.codex.ui.screens.chat
 
 import com.hebo.codex.domain.ActivityKind
 import com.hebo.codex.domain.ActivityStatus
+import com.hebo.codex.domain.AgentMessagePhase
 import com.hebo.codex.domain.ChangedFile
 import com.hebo.codex.domain.ConversationItem
 import com.hebo.codex.domain.ConversationItemKey
@@ -179,6 +180,19 @@ class ActivityItemPresentationTest {
 
         assertEquals("fetch", activityItemTitle(item))
         assertEquals("github", activityItemSubtitle(item))
+    }
+
+    @Test
+    fun `进度消息使用首行作为标题并保留详情`() {
+        val item = ConversationItem.AgentMessage(
+            id = "commentary",
+            turnId = "turn",
+            text = "\n正在检查实现\n\n稍后运行测试",
+            phase = AgentMessagePhase.COMMENTARY,
+        )
+
+        assertEquals("正在检查实现", activityItemTitle(item))
+        assertTrue(activityItemHasDetails(item))
     }
 
     @Test

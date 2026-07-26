@@ -108,6 +108,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hebo.codex.domain.ActivityKind
 import com.hebo.codex.domain.ActivityStatus
+import com.hebo.codex.domain.AgentMessagePhase
 import com.hebo.codex.domain.ChangedFile
 import com.hebo.codex.domain.ConversationItem
 import com.hebo.codex.domain.ConversationItemKey
@@ -314,6 +315,7 @@ private fun ActivityGroupMetrics(
 
 internal enum class ActivityGroupMetricType {
     REASONING,
+    PROGRESS,
     COMMAND,
     FILE,
     ACTIVITY,
@@ -327,11 +329,16 @@ internal data class ActivityGroupMetric(
 
 internal fun activityGroupMetrics(items: List<ConversationItem>): List<ActivityGroupMetric> {
     val reasoningCount = items.count { it is ConversationItem.Reasoning }
+    val progressCount = items.count {
+        it is ConversationItem.Plan ||
+            it is ConversationItem.AgentMessage && it.phase == AgentMessagePhase.COMMENTARY
+    }
     val commands = items.filterIsInstance<ConversationItem.CommandExecution>()
     val fileChanges = items.filterIsInstance<ConversationItem.FileChange>()
     val activities = items.filterIsInstance<ConversationItem.Activity>()
     return buildList {
         if (reasoningCount > 0) add(ActivityGroupMetric(ActivityGroupMetricType.REASONING, reasoningCount))
+        if (progressCount > 0) add(ActivityGroupMetric(ActivityGroupMetricType.PROGRESS, progressCount))
         if (commands.isNotEmpty()) {
             add(
                 ActivityGroupMetric(
@@ -373,6 +380,7 @@ private fun ActivityGroupMetric.iconTextSpacing() = when {
 
 private fun ActivityGroupMetric.icon(): ImageVector = when (type) {
     ActivityGroupMetricType.REASONING -> Icons.Rounded.Psychology
+    ActivityGroupMetricType.PROGRESS -> Icons.Rounded.Checklist
     ActivityGroupMetricType.COMMAND -> Icons.Rounded.Terminal
     ActivityGroupMetricType.FILE -> Icons.Rounded.EditNote
     ActivityGroupMetricType.ACTIVITY -> Icons.Rounded.Extension
@@ -381,6 +389,7 @@ private fun ActivityGroupMetric.icon(): ImageVector = when (type) {
 private fun ActivityGroupMetric.contentDescription(): String {
     val description = when (type) {
         ActivityGroupMetricType.REASONING -> "$count 项推理"
+        ActivityGroupMetricType.PROGRESS -> "$count 项进度更新"
         ActivityGroupMetricType.COMMAND -> "$count 条命令"
         ActivityGroupMetricType.FILE -> "$count 次文件修改"
         ActivityGroupMetricType.ACTIVITY -> "$count 项操作"
@@ -390,7 +399,10 @@ private fun ActivityGroupMetric.contentDescription(): String {
     val failedUnit = when (type) {
         ActivityGroupMetricType.COMMAND -> "条"
         ActivityGroupMetricType.FILE -> "次"
-        ActivityGroupMetricType.REASONING, ActivityGroupMetricType.ACTIVITY -> "项"
+        ActivityGroupMetricType.REASONING,
+        ActivityGroupMetricType.PROGRESS,
+        ActivityGroupMetricType.ACTIVITY,
+        -> "项"
     }
     return "$description，其中 $failedCount ${failedUnit}失败"
 }
@@ -406,6 +418,7 @@ internal fun activityGroupLabel(
     return activityGroupMetrics(items).joinToString(" · ") { metric ->
         when (metric.type) {
             ActivityGroupMetricType.REASONING -> "推理 ${metric.count}"
+            ActivityGroupMetricType.PROGRESS -> "进度 ${metric.count}"
             ActivityGroupMetricType.COMMAND -> "命令 ${metric.count}"
             ActivityGroupMetricType.FILE -> "文件 ${metric.count}"
             ActivityGroupMetricType.ACTIVITY -> "操作 ${metric.count}"
@@ -438,7 +451,8 @@ private fun activeActivityLabel(
             .ifBlank { "修改文件" }
 
         is ConversationItem.Activity -> activeItem.title
-        is ConversationItem.UserMessage, is ConversationItem.AgentMessage -> error("活动组包含非活动条目")
+        is ConversationItem.AgentMessage -> agentMessageTitle(activeItem.text)
+        is ConversationItem.UserMessage -> error("活动组包含用户消息")
     }
 }
 
@@ -920,7 +934,8 @@ private fun activityTypeIcon(item: ConversationItem): ImageVector = when (item) 
         ActivityKind.UNKNOWN -> Icons.AutoMirrored.Rounded.HelpOutline
     }
 
-    is ConversationItem.UserMessage, is ConversationItem.AgentMessage -> Icons.AutoMirrored.Rounded.HelpOutline
+    is ConversationItem.AgentMessage -> Icons.Rounded.EditNote
+    is ConversationItem.UserMessage -> Icons.AutoMirrored.Rounded.HelpOutline
 }
 
 private fun activityTypeDescription(item: ConversationItem): String = when (item) {
@@ -944,7 +959,10 @@ private fun activityTypeDescription(item: ConversationItem): String = when (item
     }
 
     is ConversationItem.UserMessage -> "用户消息"
-    is ConversationItem.AgentMessage -> "Codex 回复"
+    is ConversationItem.AgentMessage -> when (item.phase) {
+        AgentMessagePhase.COMMENTARY -> "进度更新"
+        AgentMessagePhase.FINAL_ANSWER, null -> "Codex 回复"
+    }
 }
 
 private fun activityStatusDescription(status: ActivityStatus): String = when (status) {
@@ -972,7 +990,10 @@ internal fun activityItemTitle(item: ConversationItem): String {
 
         is ConversationItem.Activity -> item.title
         is ConversationItem.UserMessage -> "用户消息"
-        is ConversationItem.AgentMessage -> "Codex 回复"
+        is ConversationItem.AgentMessage -> when (item.phase) {
+            AgentMessagePhase.COMMENTARY -> agentMessageTitle(item.text)
+            AgentMessagePhase.FINAL_ANSWER, null -> "Codex 回复"
+        }
     }
     return when (item.activityStatus()) {
         ActivityStatus.IN_PROGRESS, ActivityStatus.COMPLETED -> title
@@ -1003,7 +1024,8 @@ internal fun activityItemHasDetails(item: ConversationItem): Boolean = when (ite
         !item.technicalDetails.isNullOrBlank() ||
         item.remotePath != null
 
-    is ConversationItem.UserMessage, is ConversationItem.AgentMessage -> false
+    is ConversationItem.AgentMessage -> item.phase == AgentMessagePhase.COMMENTARY && item.text.isNotBlank()
+    is ConversationItem.UserMessage -> false
 }
 
 @Composable
@@ -1094,9 +1116,25 @@ private fun ActivityItemDetails(
             }
         }
 
-        is ConversationItem.UserMessage, is ConversationItem.AgentMessage -> Unit
+        is ConversationItem.AgentMessage -> if (item.phase == AgentMessagePhase.COMMENTARY) {
+            SelectionContainer {
+                ChatMarkdown(
+                    content = item.text,
+                    cwd = cwd,
+                    onOpenRemoteFile = onOpenRemoteFile,
+                    onLinkError = onLinkError,
+                )
+            }
+        } else {
+            Unit
+        }
+
+        is ConversationItem.UserMessage -> Unit
     }
 }
+
+private fun agentMessageTitle(text: String): String =
+    text.lineSequence().firstOrNull(String::isNotBlank)?.trim() ?: "进度更新"
 
 @Composable
 private fun ChangedFileView(change: ChangedFile) {

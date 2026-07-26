@@ -2,6 +2,7 @@ package com.hebo.codex.data.remote
 
 import com.hebo.codex.domain.ActivityKind
 import com.hebo.codex.domain.ActivityStatus
+import com.hebo.codex.domain.AgentMessagePhase
 import com.hebo.codex.domain.ChangedFile
 import com.hebo.codex.domain.CommandAction
 import com.hebo.codex.domain.ConversationItem
@@ -193,6 +194,7 @@ object ProtocolMapper {
                 id = id,
                 turnId = turnId,
                 text = item.requiredString("text"),
+                phase = agentMessagePhase(item.optionalString("phase")),
             )
 
             "reasoning" -> ConversationItem.Reasoning(
@@ -458,6 +460,13 @@ object ProtocolMapper {
         "declined" -> ActivityStatus.DECLINED
         null -> ActivityStatus.COMPLETED
         else -> throw ProtocolException("未知活动状态：$value")
+    }
+
+    private fun agentMessagePhase(value: String?): AgentMessagePhase? = when (value) {
+        null -> null
+        "commentary" -> AgentMessagePhase.COMMENTARY
+        "final_answer" -> AgentMessagePhase.FINAL_ANSWER
+        else -> throw ProtocolException("未知助手消息阶段：$value")
     }
 
     private fun imageGenerationStatus(value: String): ActivityStatus = when (value) {

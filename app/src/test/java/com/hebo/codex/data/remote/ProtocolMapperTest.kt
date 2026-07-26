@@ -2,6 +2,7 @@ package com.hebo.codex.data.remote
 
 import com.hebo.codex.domain.ActivityKind
 import com.hebo.codex.domain.ActivityStatus
+import com.hebo.codex.domain.AgentMessagePhase
 import com.hebo.codex.domain.CommandAction
 import com.hebo.codex.domain.ConversationItem
 import com.hebo.codex.domain.FileChangeKind
@@ -49,7 +50,8 @@ class ProtocolMapperTest {
                       {
                         "type": "agentMessage",
                         "id": "agent-1",
-                        "text": "正在检查"
+                        "text": "正在检查",
+                        "phase": "commentary"
                       },
                       {
                         "type": "commandExecution",
@@ -80,7 +82,23 @@ class ProtocolMapperTest {
             listOf(UserMessagePart.Text("定位空指针")),
             (snapshot.items[0] as ConversationItem.UserMessage).content,
         )
+        assertEquals(
+            AgentMessagePhase.COMMENTARY,
+            (snapshot.items[1] as ConversationItem.AgentMessage).phase,
+        )
         assertEquals(ActivityStatus.COMPLETED, (snapshot.items[2] as ConversationItem.CommandExecution).status)
+    }
+
+    @Test
+    fun mapsFinalAnswerPhase() {
+        val item = json.parseToJsonElement(
+            """{"type":"agentMessage","id":"answer","text":"","phase":"final_answer"}""",
+        ).jsonObject
+
+        val mapped = ProtocolMapper.conversationItem(item, "turn-1")
+            as ConversationItem.AgentMessage
+
+        assertEquals(AgentMessagePhase.FINAL_ANSWER, mapped.phase)
     }
 
     @Test
