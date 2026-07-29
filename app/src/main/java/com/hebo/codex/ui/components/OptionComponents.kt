@@ -15,7 +15,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun <T> OptionChipRow(
     values: List<T>,
-    selected: T,
+    selected: T?,
     label: @Composable (T) -> String,
     onSelect: (T) -> Unit,
 ) {
