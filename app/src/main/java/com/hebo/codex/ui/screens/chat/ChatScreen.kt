@@ -433,8 +433,10 @@ fun ChatScreen(
     val bottomContentPadding = if (conversation == null) {
         bottomSystemPadding + 16.dp
     } else {
-        maxOf(bottomControlsHeight, ChatComposerOverlayMinHeight) +
-            bottomSystemPadding + ChatBottomHazeFadeHeight
+        chatBottomContentPadding(
+            bottomControlsHeight = bottomControlsHeight,
+            bottomSystemPadding = bottomSystemPadding,
+        )
     }
     val topHazeHeight = topControlsHeight + ChatTopHazeFadeHeight
     val bottomHazeHeight = bottomControlsHeight + bottomSystemPadding + ChatBottomHazeFadeHeight
@@ -1077,6 +1079,11 @@ fun ChatScreen(
 
 private fun LazyListLayoutInfo.readingEndOffset(): Int =
     (viewportEndOffset - afterContentPadding).coerceAtLeast(0)
+
+internal fun chatBottomContentPadding(
+    bottomControlsHeight: Dp,
+    bottomSystemPadding: Dp,
+): Dp = maxOf(bottomControlsHeight, ChatComposerOverlayMinHeight) + bottomSystemPadding
 
 private fun LazyListLayoutInfo.readingStartOffset(): Int =
     viewportStartOffset + beforeContentPadding
