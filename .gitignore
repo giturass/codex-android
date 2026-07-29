@@ -9,3 +9,4 @@ captures/
 .cxx/
 app/build/
 .signing/
+.codex/config.toml
