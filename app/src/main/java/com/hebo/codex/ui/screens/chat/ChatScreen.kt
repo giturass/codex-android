@@ -215,6 +215,9 @@ import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import com.mikepenz.markdown.compose.components.markdownComponents
+import com.mikepenz.markdown.compose.elements.MarkdownTable
+import com.mikepenz.markdown.compose.elements.MarkdownTableHeader
+import com.mikepenz.markdown.compose.elements.MarkdownTableRow
 import com.mikepenz.markdown.compose.elements.highlightedCodeBlock
 import com.mikepenz.markdown.compose.elements.highlightedCodeFence
 import com.mikepenz.markdown.m3.Markdown
@@ -228,6 +231,33 @@ import kotlin.math.max
 private val highlightedMarkdownComponents = markdownComponents(
     codeBlock = highlightedCodeBlock,
     codeFence = highlightedCodeFence,
+    table = { model ->
+        MarkdownTable(
+            content = model.content,
+            node = model.node,
+            style = model.typography.table,
+            headerBlock = { content, header, tableWidth, style ->
+                MarkdownTableHeader(
+                    content = content,
+                    header = header,
+                    tableWidth = tableWidth,
+                    style = style,
+                    maxLines = Int.MAX_VALUE,
+                    overflow = TextOverflow.Clip,
+                )
+            },
+            rowBlock = { content, row, tableWidth, style ->
+                MarkdownTableRow(
+                    content = content,
+                    header = row,
+                    tableWidth = tableWidth,
+                    style = style,
+                    maxLines = Int.MAX_VALUE,
+                    overflow = TextOverflow.Clip,
+                )
+            },
+        )
+    },
 )
 
 private const val CHAT_LIST_END_KEY = "chat-list-end"
