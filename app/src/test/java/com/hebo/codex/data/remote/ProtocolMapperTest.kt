@@ -4,7 +4,9 @@ import com.hebo.codex.domain.ActivityKind
 import com.hebo.codex.domain.ActivityStatus
 import com.hebo.codex.domain.AgentMessagePhase
 import com.hebo.codex.domain.CommandAction
+import com.hebo.codex.domain.ConversationEvent
 import com.hebo.codex.domain.ConversationItem
+import com.hebo.codex.domain.ConversationRunStatus
 import com.hebo.codex.domain.FileChangeKind
 import com.hebo.codex.domain.FileSystemAccessMode
 import com.hebo.codex.domain.FileSystemPermissionTarget
@@ -124,6 +126,42 @@ class ProtocolMapperTest {
         assertEquals(6L, usage.last.inputTokens)
         assertEquals(1L, usage.last.reasoningOutputTokens)
         assertEquals(200000L, usage.modelContextWindow)
+    }
+
+    @Test
+    fun mapsNotificationMetadataAndTypedStatusEvent() {
+        val notification = ProtocolMapper.notification(
+            serverId = "server-1",
+            method = "thread/status/changed",
+            params = json.parseToJsonElement(
+                """{"threadId":"thread-1","status":{"type":"active"}}""",
+            ).jsonObject,
+        )
+
+        assertEquals("thread-1", notification.threadId)
+        assertTrue(notification.bumpThreadRevision)
+        assertEquals(
+            ConversationEvent.StatusChanged(ConversationRunStatus.ACTIVE),
+            notification.conversationEvent,
+        )
+    }
+
+    @Test
+    fun mapsItemDeltaToReusableTypedUpdate() {
+        val notification = ProtocolMapper.notification(
+            serverId = "server-1",
+            method = "item/agentMessage/delta",
+            params = json.parseToJsonElement(
+                """{"threadId":"thread-1","turnId":"turn-1","itemId":"item-1","delta":"完成"}""",
+            ).jsonObject,
+        )
+        val event = notification.conversationEvent as ConversationEvent.ItemChanged
+        val original = ConversationItem.AgentMessage("item-1", "turn-1", "开始")
+
+        val updated = event.update.apply(original) as ConversationItem.AgentMessage
+
+        assertEquals("开始完成", updated.text)
+        assertTrue(event.markActive)
     }
 
     @Test

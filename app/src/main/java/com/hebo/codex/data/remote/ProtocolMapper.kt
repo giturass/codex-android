@@ -3,9 +3,14 @@ package com.hebo.codex.data.remote
 import com.hebo.codex.domain.ActivityKind
 import com.hebo.codex.domain.ActivityStatus
 import com.hebo.codex.domain.AgentMessagePhase
+import com.hebo.codex.domain.ApprovalType
 import com.hebo.codex.domain.ChangedFile
 import com.hebo.codex.domain.CommandAction
+import com.hebo.codex.domain.ConversationEvent
 import com.hebo.codex.domain.ConversationItem
+import com.hebo.codex.domain.ConversationItemUpdate
+import com.hebo.codex.domain.ConversationNotice
+import com.hebo.codex.domain.ConversationRunStatus
 import com.hebo.codex.domain.ExecPolicyAmendment
 import com.hebo.codex.domain.FileChangeKind
 import com.hebo.codex.domain.FileSystemAccessMode
@@ -13,6 +18,7 @@ import com.hebo.codex.domain.FileSystemPermissionEntry
 import com.hebo.codex.domain.FileSystemPermissionTarget
 import com.hebo.codex.domain.NetworkPolicyAmendment
 import com.hebo.codex.domain.NetworkPolicyRuleAction
+import com.hebo.codex.domain.PendingServerRequest
 import com.hebo.codex.domain.ThreadRuntimeStatus
 import com.hebo.codex.domain.ThreadSummary
 import com.hebo.codex.domain.TokenUsage
@@ -22,7 +28,13 @@ import com.hebo.codex.domain.TurnPlanStep
 import com.hebo.codex.domain.PlanStepStatus
 import com.hebo.codex.domain.RequestedFileSystemPermissions
 import com.hebo.codex.domain.RequestedPermissions
+import com.hebo.codex.domain.ThreadGoal
+import com.hebo.codex.domain.ThreadGoalStatus
 import com.hebo.codex.domain.UserMessagePart
+import com.hebo.codex.domain.UserQuestion
+import com.hebo.codex.domain.UserQuestionOption
+import com.hebo.codex.util.serverError
+import java.util.UUID
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -45,6 +57,15 @@ data class ThreadSnapshot(
     val approvalPolicy: String?,
     val approvalsReviewer: String?,
     val sandbox: String?,
+)
+
+internal data class ProtocolNotification(
+    val threadId: String?,
+    val conversationEvent: ConversationEvent? = null,
+    val serverNotice: String? = null,
+    val bumpThreadRevision: Boolean = false,
+    val bumpFeatureRevision: Boolean = false,
+    val bumpRateLimitRevision: Boolean = false,
 )
 
 object ProtocolMapper {
@@ -124,6 +145,350 @@ object ProtocolMapper {
             last = usage.requiredObject("last").tokenUsageBreakdown(),
             modelContextWindow = usage.optionalLong("modelContextWindow"),
         )
+    }
+
+    fun pendingServerRequest(
+        method: String,
+        params: JsonObject,
+        requestKey: String,
+        receivedAtMillis: Long,
+    ): PendingServerRequest = when (method) {
+        "item/commandExecution/requestApproval" -> PendingServerRequest.Approval(
+            requestKey = requestKey,
+            itemId = params.requiredString("itemId"),
+            turnId = params.requiredString("turnId"),
+            type = ApprovalType.COMMAND_EXECUTION,
+            reason = params.optionalString("reason"),
+            command = params.optionalString("command"),
+            cwd = params.optionalString("cwd"),
+            environmentId = params.optionalString("environmentId"),
+            networkHost = (params["networkApprovalContext"] as? JsonObject)?.optionalString("host"),
+            commandActions = commandActions(params["commandActions"]),
+            grantRoot = null,
+            proposedExecPolicy = execPolicyAmendment(params["proposedExecpolicyAmendment"]),
+            proposedNetworkPolicies = networkPolicyAmendments(params["proposedNetworkPolicyAmendments"]),
+        )
+
+        "item/fileChange/requestApproval" -> PendingServerRequest.Approval(
+            requestKey = requestKey,
+            itemId = params.requiredString("itemId"),
+            turnId = params.requiredString("turnId"),
+            type = ApprovalType.FILE_CHANGE,
+            reason = params.optionalString("reason"),
+            command = null,
+            cwd = null,
+            environmentId = null,
+            networkHost = null,
+            commandActions = emptyList(),
+            grantRoot = params.optionalString("grantRoot"),
+            proposedExecPolicy = null,
+            proposedNetworkPolicies = emptyList(),
+        )
+
+        "item/tool/requestUserInput" -> PendingServerRequest.Questions(
+            requestKey = requestKey,
+            itemId = params.requiredString("itemId"),
+            turnId = params.requiredString("turnId"),
+            questions = params.requiredArray("questions").map { element ->
+                val question = element.jsonObject
+                UserQuestion(
+                    id = question.requiredString("id"),
+                    header = question.requiredString("header"),
+                    question = question.requiredString("question"),
+                    options = (question["options"] as? JsonArray).orEmpty().map { optionElement ->
+                        val option = optionElement.jsonObject
+                        UserQuestionOption(
+                            label = option.requiredString("label"),
+                            description = option.requiredString("description"),
+                        )
+                    },
+                    allowsOther = question.optionalBoolean("isOther") ?: false,
+                    isSecret = question.optionalBoolean("isSecret") ?: false,
+                )
+            },
+            autoResolutionMillis = params.optionalLong("autoResolutionMs"),
+            receivedAtMillis = receivedAtMillis,
+        )
+
+        "mcpServer/elicitation/request" -> PendingServerRequest.McpElicitation(
+            requestKey = requestKey,
+            turnId = params.optionalString("turnId"),
+            serverName = params.requiredString("serverName"),
+            mode = params.requiredString("mode"),
+            message = params.requiredString("message"),
+            url = params.optionalString("url"),
+            requestedSchema = params["requestedSchema"]?.toString(),
+        )
+
+        "item/permissions/requestApproval" -> PendingServerRequest.Permissions(
+            requestKey = requestKey,
+            itemId = params.requiredString("itemId"),
+            turnId = params.requiredString("turnId"),
+            environmentId = params.optionalString("environmentId"),
+            cwd = params.requiredString("cwd"),
+            reason = params.optionalString("reason"),
+            requestedPermissions = requestedPermissions(params.requiredObject("permissions")),
+        )
+
+        else -> throw ProtocolException("支持的服务端请求未实现：$method")
+    }
+
+    internal fun notification(
+        serverId: String,
+        method: String,
+        params: JsonObject,
+    ): ProtocolNotification {
+        val threadId = params.optionalString("threadId")
+        val featureRevision = method == "account/updated" ||
+            method == "account/rateLimits/updated" ||
+            method == "account/login/completed" ||
+            method == "app/list/updated" ||
+            method == "skills/changed" ||
+            method == "mcpServer/oauthLogin/completed" ||
+            method == "mcpServer/startupStatus/updated"
+        val rateLimitRevision = method == "account/updated" ||
+            method == "account/rateLimits/updated" ||
+            method == "account/login/completed"
+        val serverNotice = when {
+            method == "configWarning" || method == "deprecationNotice" ->
+                listOfNotNull(params.optionalString("summary"), params.optionalString("details")).joinToString("\n")
+
+            method == "warning" && threadId == null -> params.requiredString("message")
+            else -> null
+        }
+        val event = if (threadId == null) {
+            null
+        } else {
+            conversationEvent(serverId, method, params)
+        }
+        val itemStarted = event as? ConversationEvent.ItemUpserted
+        val bumpThreadRevision = (
+            method.startsWith("thread/") &&
+                method != "thread/tokenUsage/updated" &&
+                method != "thread/goal/updated" &&
+                method != "thread/goal/cleared"
+            ) ||
+            method == "turn/completed" ||
+            (
+                method == "item/started" &&
+                    (itemStarted?.item is ConversationItem.UserMessage)
+                )
+        return ProtocolNotification(
+            threadId = threadId,
+            conversationEvent = event,
+            serverNotice = serverNotice,
+            bumpThreadRevision = bumpThreadRevision,
+            bumpFeatureRevision = featureRevision,
+            bumpRateLimitRevision = rateLimitRevision,
+        )
+    }
+
+    fun threadGoal(value: JsonObject): ThreadGoal = ThreadGoal(
+        objective = value.requiredString("objective"),
+        status = ThreadGoalStatus.entries.singleOrNull { it.wireValue == value.requiredString("status") }
+            ?: throw ProtocolException("未知目标状态：${value.requiredString("status")}"),
+        tokenBudget = value.optionalLong("tokenBudget"),
+        tokensUsed = value.optionalLong("tokensUsed") ?: 0L,
+        timeUsedSeconds = value.optionalLong("timeUsedSeconds") ?: 0L,
+    )
+
+    private fun conversationEvent(
+        serverId: String,
+        method: String,
+        params: JsonObject,
+    ): ConversationEvent? = when (method) {
+        "thread/status/changed" -> ConversationEvent.StatusChanged(
+            when (params.requiredObject("status").requiredString("type")) {
+                "active" -> ConversationRunStatus.ACTIVE
+                "systemError" -> ConversationRunStatus.SYSTEM_ERROR
+                else -> ConversationRunStatus.INACTIVE
+            },
+        )
+
+        "thread/name/updated" -> ConversationEvent.NameUpdated(params.optionalString("threadName"))
+        "thread/archived", "thread/deleted", "thread/closed" -> ConversationEvent.Closed(
+            ConversationNotice(
+                id = UUID.randomUUID().toString(),
+                message = when (method) {
+                    "thread/archived" -> "会话已归档"
+                    "thread/deleted" -> "会话已删除"
+                    else -> "服务端已关闭会话"
+                },
+            ),
+        )
+
+        "thread/tokenUsage/updated" -> ConversationEvent.TokenUsageUpdated(tokenUsage(params))
+        "thread/goal/updated" -> ConversationEvent.GoalChanged(threadGoal(params.requiredObject("goal")))
+        "thread/goal/cleared" -> ConversationEvent.GoalChanged(null)
+        "turn/started" -> ConversationEvent.TurnStarted(
+            params.requiredObject("turn").requiredString("id"),
+        )
+
+        "turn/completed" -> {
+            val turn = params.requiredObject("turn")
+            ConversationEvent.TurnCompleted(
+                turnId = turn.requiredString("id"),
+                error = (turn["error"] as? JsonObject)?.optionalString("message")
+                    ?.let { serverError("任务执行失败", it) },
+            )
+        }
+
+        "turn/plan/updated" -> ConversationEvent.PlanUpdated(activeTurnPlan(params))
+        "error" -> {
+            val message = params.requiredObject("error").requiredString("message")
+            ConversationEvent.NoticeAdded(
+                notice = ConversationNotice(UUID.randomUUID().toString(), "服务器报告错误", message),
+                terminalError = if (params.optionalBoolean("willRetry") == true) {
+                    null
+                } else {
+                    serverError("服务器报告错误", message)
+                },
+            )
+        }
+
+        "warning", "guardianWarning" -> ConversationEvent.NoticeAdded(
+            ConversationNotice(
+                UUID.randomUUID().toString(),
+                params.requiredString("message"),
+            ),
+        )
+
+        "model/rerouted" -> ConversationEvent.NoticeAdded(
+            ConversationNotice(
+                UUID.randomUUID().toString(),
+                "模型已从 ${params.requiredString("fromModel")} 切换为 ${params.requiredString("toModel")}",
+            ),
+        )
+
+        "model/verification" -> ConversationEvent.NoticeAdded(
+            ConversationNotice(UUID.randomUUID().toString(), "模型请求需要额外账号验证"),
+        )
+
+        "model/safetyBuffering/updated" -> if (params.optionalBoolean("showBufferingUi") == true) {
+            ConversationEvent.NoticeAdded(
+                ConversationNotice(UUID.randomUUID().toString(), "模型正在进行安全检查"),
+            )
+        } else {
+            null
+        }
+
+        "hook/started", "hook/completed" -> ConversationEvent.NoticeAdded(
+            ConversationNotice(
+                UUID.randomUUID().toString(),
+                if (method == "hook/started") "Hook 开始执行" else "Hook 执行完成",
+            ),
+        )
+
+        "item/autoApprovalReview/started", "item/autoApprovalReview/completed" ->
+            ConversationEvent.NoticeAdded(
+                ConversationNotice(
+                    UUID.randomUUID().toString(),
+                    if (method.endsWith("started")) "自动审批审查开始" else "自动审批审查完成",
+                ),
+            )
+
+        "item/started", "item/completed" -> ConversationEvent.ItemUpserted(
+            item = conversationItem(
+                item = params.requiredObject("item"),
+                turnId = params.requiredString("turnId"),
+            ),
+            isActive = method == "item/started",
+        )
+
+        "item/agentMessage/delta" -> itemChanged(params, method, markActive = true) { item ->
+            val message = item as? ConversationItem.AgentMessage
+                ?: throw ProtocolException("agentMessage delta 的目标类型不正确")
+            message.copy(text = message.text + params.requiredString("delta"))
+        }
+
+        "item/reasoning/summaryTextDelta" -> itemChanged(params, method, markActive = true) { item ->
+            val reasoning = item as? ConversationItem.Reasoning
+                ?: throw ProtocolException("reasoning summary delta 的目标类型不正确")
+            reasoning.appendSummaryDelta(
+                summaryIndex = params.requiredInt("summaryIndex"),
+                delta = params.requiredString("delta"),
+            )
+        }
+
+        "item/reasoning/summaryPartAdded" -> itemChanged(params, method, markActive = true) { item ->
+            val reasoning = item as? ConversationItem.Reasoning
+                ?: throw ProtocolException("reasoning summary part 的目标类型不正确")
+            reasoning.addSummaryPart(params.requiredInt("summaryIndex"))
+        }
+
+        "item/reasoning/textDelta" -> itemChanged(params, method, markActive = true) { item ->
+            val reasoning = item as? ConversationItem.Reasoning
+                ?: throw ProtocolException("reasoning delta 的目标类型不正确")
+            reasoning.appendRawContentDelta(
+                contentIndex = params.requiredInt("contentIndex"),
+                delta = params.requiredString("delta"),
+            )
+        }
+
+        "item/commandExecution/outputDelta" -> itemChanged(params, method) { item ->
+            item.appendCommandOutput(params.requiredString("delta"))
+        }
+
+        "item/commandExecution/terminalInteraction" -> itemChanged(params, method) { item ->
+            item.appendCommandOutput(params.requiredString("stdin"))
+        }
+
+        "item/fileChange/patchUpdated" -> itemChanged(params, method) { item ->
+            val fileChange = item as? ConversationItem.FileChange
+                ?: throw ProtocolException("fileChange patch 的目标类型不正确")
+            conversationItem(
+                item = JsonObject(
+                    mapOf(
+                        "id" to JsonPrimitive(fileChange.id),
+                        "type" to JsonPrimitive("fileChange"),
+                        "changes" to params.requiredArray("changes"),
+                        "status" to JsonPrimitive("inProgress"),
+                    ),
+                ),
+                turnId = fileChange.turnId,
+            )
+        }
+
+        "item/plan/delta" -> itemChanged(params, method, markActive = true) { item ->
+            val plan = item as? ConversationItem.Plan
+                ?: throw ProtocolException("plan delta 的目标类型不正确")
+            plan.copy(text = plan.text + params.requiredString("delta"))
+        }
+
+        "item/mcpToolCall/progress" -> itemChanged(params, method) { item ->
+            val activity = item as? ConversationItem.Activity
+                ?: throw ProtocolException("MCP progress 的目标类型不正确")
+            activity.copy(
+                details = listOf(activity.details, params.requiredString("message"))
+                    .filter(String::isNotBlank)
+                    .joinToString("\n"),
+            )
+        }
+
+        "serverRequest/resolved" -> (params["requestId"] as? JsonPrimitive)?.let { requestId ->
+            ConversationEvent.RequestResolved("$serverId:$requestId")
+        }
+
+        else -> null
+    }
+
+    private fun itemChanged(
+        params: JsonObject,
+        method: String,
+        markActive: Boolean = false,
+        update: ConversationItemUpdate,
+    ): ConversationEvent.ItemChanged = ConversationEvent.ItemChanged(
+        method = method,
+        turnId = params.requiredString("turnId"),
+        itemId = params.requiredString("itemId"),
+        markActive = markActive,
+        update = update,
+    )
+
+    private fun ConversationItem.appendCommandOutput(delta: String): ConversationItem = when (this) {
+        is ConversationItem.CommandExecution -> copy(output = output + delta)
+        is ConversationItem.UserShellCommand -> copy(output = output + delta)
+        else -> throw ProtocolException("command output delta 的目标类型不正确")
     }
 
     private fun JsonObject.tokenUsageBreakdown() = TokenUsageBreakdown(

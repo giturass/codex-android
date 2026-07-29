@@ -6,24 +6,16 @@ import com.hebo.codex.data.local.ServerStore
 import com.hebo.codex.data.remote.AppServerApi
 import com.hebo.codex.data.remote.AppServerClientFactory
 import com.hebo.codex.data.remote.AppServerConnection
-import com.hebo.codex.data.remote.ProtocolException
 import com.hebo.codex.data.remote.ProtocolMapper
 import com.hebo.codex.data.remote.ServerEvent
 import com.hebo.codex.data.remote.StableFeatureApi
 import com.hebo.codex.data.remote.StableRpcMethod
 import com.hebo.codex.data.remote.ThreadSnapshot
-import com.hebo.codex.data.remote.addSummaryPart
-import com.hebo.codex.data.remote.appendRawContentDelta
-import com.hebo.codex.data.remote.appendSummaryDelta
-import com.hebo.codex.data.remote.optionalBoolean
-import com.hebo.codex.data.remote.optionalLong
 import com.hebo.codex.data.remote.optionalString
 import com.hebo.codex.data.remote.requiredArray
-import com.hebo.codex.data.remote.requiredInt
 import com.hebo.codex.data.remote.requiredObject
 import com.hebo.codex.data.remote.requiredString
 import com.hebo.codex.util.runSuspendCatching
-import com.hebo.codex.util.serverError
 import com.hebo.codex.util.toUserFacingError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -41,7 +33,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
@@ -429,7 +420,7 @@ class CodexRepository(
             StableRpcMethod.THREAD_GOAL_GET,
             buildJsonObject { put("threadId", threadId) },
         ).jsonObject
-        val goal = (response["goal"] as? JsonObject)?.toThreadGoal()
+        val goal = (response["goal"] as? JsonObject)?.let(ProtocolMapper::threadGoal)
         conversations[ConversationKey(serverId, threadId)]?.updateState {
             it.copy(goal = goal, goalLoaded = true)
         }
@@ -453,7 +444,7 @@ class CodexRepository(
                 put("tokenBudget", tokenBudget?.let(::JsonPrimitive) ?: JsonNull)
             },
         ).jsonObject
-        return response.requiredObject("goal").toThreadGoal().also { goal ->
+        return ProtocolMapper.threadGoal(response.requiredObject("goal")).also { goal ->
             conversations[ConversationKey(serverId, threadId)]?.updateState {
                 it.copy(goal = goal, goalLoaded = true)
             }
@@ -810,92 +801,12 @@ class CodexRepository(
             return
         }
         val requestKey = requestKey(serverId, request.id)
-        val pending = when (request.method) {
-            "item/commandExecution/requestApproval" -> PendingServerRequest.Approval(
-                requestKey = requestKey,
-                itemId = request.params.requiredString("itemId"),
-                turnId = request.params.requiredString("turnId"),
-                type = ApprovalType.COMMAND_EXECUTION,
-                reason = request.params.optionalString("reason"),
-                command = request.params.optionalString("command"),
-                cwd = request.params.optionalString("cwd"),
-                environmentId = request.params.optionalString("environmentId"),
-                networkHost = (request.params["networkApprovalContext"] as? JsonObject)?.optionalString("host"),
-                commandActions = ProtocolMapper.commandActions(request.params["commandActions"]),
-                grantRoot = null,
-                proposedExecPolicy = ProtocolMapper.execPolicyAmendment(
-                    request.params["proposedExecpolicyAmendment"],
-                ),
-                proposedNetworkPolicies = ProtocolMapper.networkPolicyAmendments(
-                    request.params["proposedNetworkPolicyAmendments"],
-                ),
-            )
-
-            "item/fileChange/requestApproval" -> PendingServerRequest.Approval(
-                requestKey = requestKey,
-                itemId = request.params.requiredString("itemId"),
-                turnId = request.params.requiredString("turnId"),
-                type = ApprovalType.FILE_CHANGE,
-                reason = request.params.optionalString("reason"),
-                command = null,
-                cwd = null,
-                environmentId = null,
-                networkHost = null,
-                commandActions = emptyList(),
-                grantRoot = request.params.optionalString("grantRoot"),
-                proposedExecPolicy = null,
-                proposedNetworkPolicies = emptyList(),
-            )
-
-            "item/tool/requestUserInput" -> PendingServerRequest.Questions(
-                requestKey = requestKey,
-                itemId = request.params.requiredString("itemId"),
-                turnId = request.params.requiredString("turnId"),
-                questions = request.params.requiredArray("questions").map { element ->
-                    val question = element.jsonObject
-                    UserQuestion(
-                        id = question.requiredString("id"),
-                        header = question.requiredString("header"),
-                        question = question.requiredString("question"),
-                        options = (question["options"] as? JsonArray).orEmpty().map { optionElement ->
-                            val option = optionElement.jsonObject
-                            UserQuestionOption(
-                                label = option.requiredString("label"),
-                                description = option.requiredString("description"),
-                            )
-                        },
-                        allowsOther = question.optionalBoolean("isOther") ?: false,
-                        isSecret = question.optionalBoolean("isSecret") ?: false,
-                    )
-                },
-                autoResolutionMillis = request.params.optionalLong("autoResolutionMs"),
-                receivedAtMillis = System.currentTimeMillis(),
-            )
-
-            "mcpServer/elicitation/request" -> PendingServerRequest.McpElicitation(
-                requestKey = requestKey,
-                turnId = request.params.optionalString("turnId"),
-                serverName = request.params.requiredString("serverName"),
-                mode = request.params.requiredString("mode"),
-                message = request.params.requiredString("message"),
-                url = request.params.optionalString("url"),
-                requestedSchema = request.params["requestedSchema"]?.toString(),
-            )
-
-            "item/permissions/requestApproval" -> PendingServerRequest.Permissions(
-                requestKey = requestKey,
-                itemId = request.params.requiredString("itemId"),
-                turnId = request.params.requiredString("turnId"),
-                environmentId = request.params.optionalString("environmentId"),
-                cwd = request.params.requiredString("cwd"),
-                reason = request.params.optionalString("reason"),
-                requestedPermissions = ProtocolMapper.requestedPermissions(
-                    request.params.requiredObject("permissions"),
-                ),
-            )
-
-            else -> error("支持的服务端请求未实现：${request.method}")
-        }
+        val pending = ProtocolMapper.pendingServerRequest(
+            method = request.method,
+            params = request.params,
+            requestKey = requestKey,
+            receivedAtMillis = System.currentTimeMillis(),
+        )
         pendingRequestRoutes[requestKey] = PendingRequestRoute(request.id, threadId)
         conversation.updateState { current ->
             current.copy(pendingRequests = current.pendingRequests + pending)
@@ -913,165 +824,67 @@ class CodexRepository(
     }
 
     private fun handleNotification(serverId: String, method: String, params: JsonObject) {
-        when (method) {
-            "account/updated", "account/rateLimits/updated", "account/login/completed" -> {
-                bumpFeatureRevision(serverId)
-                bumpRateLimitRevision(serverId)
-            }
+        val notification = ProtocolMapper.notification(serverId, method, params)
+        if (notification.bumpFeatureRevision) bumpFeatureRevision(serverId)
+        if (notification.bumpRateLimitRevision) bumpRateLimitRevision(serverId)
+        if (notification.bumpThreadRevision) bumpThreadRevision(serverId)
+        notification.serverNotice?.let { addServerNotice(serverId, it) }
 
-            "app/list/updated", "skills/changed", "mcpServer/oauthLogin/completed",
-            "mcpServer/startupStatus/updated" -> bumpFeatureRevision(serverId)
-
-            "configWarning" -> addServerNotice(
-                serverId,
-                listOfNotNull(params.optionalString("summary"), params.optionalString("details")).joinToString("\n"),
-            )
-
-            "deprecationNotice" -> addServerNotice(
-                serverId,
-                listOfNotNull(params.optionalString("summary"), params.optionalString("details")).joinToString("\n"),
-            )
-
-            "warning" -> {
-                val message = params.requiredString("message")
-                val targetThreadId = params.optionalString("threadId")
-                if (targetThreadId == null) addServerNotice(serverId, message)
-                else conversations[ConversationKey(serverId, targetThreadId)]?.addNotice(message)
-            }
-        }
-
-        val threadId = params.optionalString("threadId")
-        if (
-            method.startsWith("thread/") && method != "thread/tokenUsage/updated" &&
-            method != "thread/goal/updated" && method != "thread/goal/cleared"
-        ) {
-            bumpThreadRevision(serverId)
-        }
-        if (threadId == null) return
+        val threadId = notification.threadId ?: return
+        val event = notification.conversationEvent ?: return
         val key = ConversationKey(serverId, threadId)
         val state = conversations[key]
-        fun updateNotifiedItem(
-            markActive: Boolean = false,
-            transform: (ConversationItem) -> ConversationItem,
-        ) {
-            if (state == null) return
-            val turnId = params.requiredString("turnId")
-            val itemId = params.requiredString("itemId")
-            val update = PendingItemUpdate(method, markActive, transform)
-            if (!state.updateItem(turnId, itemId, markActive, transform)) {
-                val route = ItemRoute(serverId, threadId, turnId, itemId)
-                var firstPendingUpdate = false
-                pendingItemUpdates.compute(route) { _, current ->
-                    firstPendingUpdate = current == null
-                    current.orEmpty().toMutableList().apply { add(update) }
+        when (event) {
+            is ConversationEvent.StatusChanged -> {
+                state?.updateState { current ->
+                    current.reduceConversationEvent(event)
                 }
-                if (firstPendingUpdate) {
-                    val current = state.value
-                    Log.w(
-                        LOG_TAG,
-                        "暂存缺少基础条目的流式事件：method=$method, turnId=$turnId, itemId=$itemId, " +
-                            "activeTurnId=${current.activeTurnId}, itemCount=${current.items.size}",
-                    )
-                }
-            }
-        }
-        when (method) {
-            "thread/started" -> bumpThreadRevision(serverId)
+                when (event.status) {
+                    ConversationRunStatus.ACTIVE ->
+                        setThreadAttention(serverId, threadId, ThreadAttention.RUNNING)
 
-            "thread/status/changed" -> state?.updateState { current ->
-                val status = params.requiredObject("status").requiredString("type")
-                val isActive = status == "active"
-                current.copy(
-                    activeItemKeys = if (isActive) current.activeItemKeys else emptySet(),
-                    isRunning = isActive,
-                )
-            }.also {
-                val status = params.requiredObject("status").requiredString("type")
-                when (status) {
-                    "active" -> setThreadAttention(serverId, threadId, ThreadAttention.RUNNING)
-                    "systemError" -> setThreadAttention(serverId, threadId, ThreadAttention.FAILED)
-                    else -> Unit
+                    ConversationRunStatus.SYSTEM_ERROR ->
+                        setThreadAttention(serverId, threadId, ThreadAttention.FAILED)
+
+                    ConversationRunStatus.INACTIVE -> Unit
                 }
             }
 
-            "thread/name/updated" -> state?.updateState { current ->
-                current.copy(title = params.optionalString("threadName") ?: current.title)
-            }
-
-            "thread/archived", "thread/deleted", "thread/closed" -> {
+            is ConversationEvent.Closed -> {
                 removePendingRequests(serverId, threadId)
                 state?.updateState { current ->
-                    val message = when (method) {
-                        "thread/archived" -> "会话已归档"
-                        "thread/deleted" -> "会话已删除"
-                        else -> "服务端已关闭会话"
-                    }
-                    current.copy(
-                        activeItemKeys = emptySet(),
-                        isRunning = false,
-                        notices = (current.notices + ConversationNotice(
-                            UUID.randomUUID().toString(),
-                            message,
-                        )).takeLast(MAX_NOTICES),
-                    )
+                    current.reduceConversationEvent(event)
                 }
                 pendingResumeGoalSnapshots.remove(key)
                 removePendingItemUpdates(key)
                 conversations.remove(key)
             }
 
-            "thread/unarchived" -> bumpThreadRevision(serverId)
-
-            "thread/tokenUsage/updated" -> state?.updateState {
-                it.copy(tokenUsage = ProtocolMapper.tokenUsage(params))
-            }
-
-            "thread/goal/updated" -> {
-                val goal = params.requiredObject("goal").toThreadGoal()
+            is ConversationEvent.GoalChanged -> {
                 val announce = !pendingResumeGoalSnapshots.remove(key)
-                state?.updateState { current -> current.withGoal(goal, announce) }
+                state?.updateState { current ->
+                    current.reduceConversationEvent(event, announceGoal = announce)
+                }
             }
 
-            "thread/goal/cleared" -> {
-                val announce = !pendingResumeGoalSnapshots.remove(key)
-                state?.updateState { current -> current.withGoal(null, announce) }
-            }
-
-            "turn/started" -> {
+            is ConversationEvent.TurnStarted -> {
                 if (state == null) return
-                val turn = params.requiredObject("turn")
-                state.updateState {
-                    it.copy(
-                        activeItemKeys = emptySet(),
-                        activeTurnId = turn.requiredString("id"),
-                        isRunning = true,
-                        plan = null,
-                        errorMessage = null,
-                    )
+                state.updateState { current ->
+                    current.reduceConversationEvent(event)
                 }
                 setThreadAttention(serverId, threadId, ThreadAttention.RUNNING)
             }
 
-            "turn/completed" -> {
+            is ConversationEvent.TurnCompleted -> {
                 if (state == null) return
-                val turn = params.requiredObject("turn")
-                val completedTurnId = turn.requiredString("id")
-                val errorMessage = (turn["error"] as? JsonObject)?.optionalString("message")
-                    ?.let { serverError("任务执行失败", it) }
-                val completedTurnItems = state.value.items.filter { it.turnId == completedTurnId }
+                val completedTurnItems = state.value.items.filter { it.turnId == event.turnId }
                 val shellItem = completedTurnItems.singleOrNull() as? ConversationItem.UserShellCommand
                 val shellFailed = shellItem?.status == ActivityStatus.FAILED ||
                     shellItem?.status == ActivityStatus.DECLINED
-                state.updateState {
-                    it.copy(
-                        activeTurnId = null,
-                        isRunning = false,
-                        pendingRequests = emptyList(),
-                        plan = null,
-                        errorMessage = errorMessage,
-                    ).withoutActiveItems(completedTurnId)
+                state.updateState { current ->
+                    current.reduceConversationEvent(event)
                 }
-                val completionAttention = if (errorMessage == null && !shellFailed) {
+                val completionAttention = if (event.error == null && !shellFailed) {
                     ThreadAttention.READY
                 } else {
                     ThreadAttention.FAILED
@@ -1080,7 +893,7 @@ class CodexRepository(
                     serverId,
                     threadId,
                     completedThreadAttention(
-                        hasError = errorMessage != null || shellFailed,
+                        hasError = event.error != null || shellFailed,
                         isViewed = conversationLeases.isHeld(key),
                     ),
                 )
@@ -1090,7 +903,7 @@ class CodexRepository(
                         threadId = threadId,
                         title = state.value.title,
                         message = when {
-                            errorMessage != null -> errorMessage.summary
+                            event.error != null -> event.error.summary
                             shellItem == null -> "任务已完成，可以查看结果"
                             shellFailed -> "Shell 命令执行失败，可以查看输出"
                             else -> "Shell 命令已完成，可以查看输出"
@@ -1099,144 +912,46 @@ class CodexRepository(
                     ),
                 )
                 removePendingRequests(serverId, threadId)
-                removePendingItemUpdates(key, completedTurnId)
-                bumpThreadRevision(serverId)
+                removePendingItemUpdates(key, event.turnId)
                 releaseConversationIfUnused(key)
             }
 
-            "turn/plan/updated" -> state?.updateState { current ->
-                current.withActiveTurnPlan(ProtocolMapper.activeTurnPlan(params))
-            }
-
-            "error" -> {
-                val error = params.requiredObject("error")
-                val message = error.requiredString("message")
-                state?.addNotice("服务器报告错误", message)
-                if (!(params.optionalBoolean("willRetry") ?: false)) {
-                    state?.updateState { it.copy(errorMessage = serverError("服务器报告错误", message)) }
-                }
-            }
-
-            "guardianWarning" -> state?.addNotice(params.requiredString("message"))
-
-            "model/rerouted" -> state?.addNotice(
-                "模型已从 ${params.requiredString("fromModel")} 切换为 ${params.requiredString("toModel")}",
-            )
-
-            "model/verification" -> state?.addNotice("模型请求需要额外账号验证")
-
-            "model/safetyBuffering/updated" -> if (params.optionalBoolean("showBufferingUi") == true) {
-                state?.addNotice("模型正在进行安全检查")
-            }
-
-            "hook/started", "hook/completed" -> state?.addNotice(
-                if (method == "hook/started") "Hook 开始执行" else "Hook 执行完成",
-            )
-
-            "item/autoApprovalReview/started", "item/autoApprovalReview/completed" -> state?.addNotice(
-                if (method.endsWith("started")) "自动审批审查开始" else "自动审批审查完成",
-            )
-
-            "item/started", "item/completed" -> {
-                val itemPayload = params.requiredObject("item")
-                if (method == "item/started" && itemPayload.requiredString("type") == "userMessage") {
-                    bumpThreadRevision(serverId)
-                }
+            is ConversationEvent.ItemUpserted -> {
                 if (state == null) return
-                val item = ProtocolMapper.conversationItem(
-                    item = itemPayload,
-                    turnId = params.requiredString("turnId"),
-                )
                 state.updateState { current ->
-                    current.withConversationItem(item, isActive = method == "item/started")
+                    current.reduceConversationEvent(event)
                 }
-                val route = ItemRoute(serverId, threadId, item.turnId, item.id)
-                if (method == "item/started") replayPendingItemUpdates(state, route)
+                val route = ItemRoute(serverId, threadId, event.item.turnId, event.item.id)
+                if (event.isActive) replayPendingItemUpdates(state, route)
                 else pendingItemUpdates.remove(route)
             }
 
-            "item/agentMessage/delta" -> updateNotifiedItem(markActive = true) { item ->
-                val message = item as? ConversationItem.AgentMessage
-                    ?: throw ProtocolException("agentMessage delta 的目标类型不正确")
-                message.copy(text = message.text + params.requiredString("delta"))
-            }
-
-            "item/reasoning/summaryTextDelta" -> updateNotifiedItem(markActive = true) { item ->
-                val reasoning = item as? ConversationItem.Reasoning
-                    ?: throw ProtocolException("reasoning summary delta 的目标类型不正确")
-                reasoning.appendSummaryDelta(
-                    summaryIndex = params.requiredInt("summaryIndex"),
-                    delta = params.requiredString("delta"),
-                )
-            }
-
-            "item/reasoning/summaryPartAdded" -> updateNotifiedItem(markActive = true) { item ->
-                val reasoning = item as? ConversationItem.Reasoning
-                    ?: throw ProtocolException("reasoning summary part 的目标类型不正确")
-                reasoning.addSummaryPart(params.requiredInt("summaryIndex"))
-            }
-
-            "item/reasoning/textDelta" -> updateNotifiedItem(markActive = true) { item ->
-                val reasoning = item as? ConversationItem.Reasoning
-                    ?: throw ProtocolException("reasoning delta 的目标类型不正确")
-                reasoning.appendRawContentDelta(
-                    contentIndex = params.requiredInt("contentIndex"),
-                    delta = params.requiredString("delta"),
-                )
-            }
-
-            "item/commandExecution/outputDelta" -> updateNotifiedItem { item ->
-                val delta = params.requiredString("delta")
-                when (item) {
-                    is ConversationItem.CommandExecution -> item.copy(output = item.output + delta)
-                    is ConversationItem.UserShellCommand -> item.copy(output = item.output + delta)
-                    else -> throw ProtocolException("command output delta 的目标类型不正确")
+            is ConversationEvent.ItemChanged -> {
+                if (state == null) return
+                val update = PendingItemUpdate(event.method, event.markActive, event.update)
+                if (!state.updateItem(event.turnId, event.itemId, event.markActive, event.update::apply)) {
+                    val route = ItemRoute(serverId, threadId, event.turnId, event.itemId)
+                    var firstPendingUpdate = false
+                    pendingItemUpdates.compute(route) { _, current ->
+                        firstPendingUpdate = current == null
+                        current.orEmpty().toMutableList().apply { add(update) }
+                    }
+                    if (firstPendingUpdate) {
+                        val current = state.value
+                        Log.w(
+                            LOG_TAG,
+                            "暂存缺少基础条目的流式事件：method=${event.method}, " +
+                                "turnId=${event.turnId}, itemId=${event.itemId}, " +
+                                "activeTurnId=${current.activeTurnId}, itemCount=${current.items.size}",
+                        )
+                    }
                 }
             }
 
-            "item/commandExecution/terminalInteraction" -> updateNotifiedItem { item ->
-                val stdin = params.requiredString("stdin")
-                when (item) {
-                    is ConversationItem.CommandExecution -> item.copy(output = item.output + stdin)
-                    is ConversationItem.UserShellCommand -> item.copy(output = item.output + stdin)
-                    else -> throw ProtocolException("terminal interaction 的目标类型不正确")
-                }
-            }
-
-            "item/fileChange/patchUpdated" -> updateNotifiedItem { item ->
-                val fileChange = item as? ConversationItem.FileChange
-                    ?: throw ProtocolException("fileChange patch 的目标类型不正确")
-                val replacement = ProtocolMapper.conversationItem(
-                    item = buildJsonObject {
-                        put("id", fileChange.id)
-                        put("type", "fileChange")
-                        put("changes", params.requiredArray("changes"))
-                        put("status", "inProgress")
-                    },
-                    turnId = fileChange.turnId,
-                )
-                replacement
-            }
-
-            "item/plan/delta" -> updateNotifiedItem(markActive = true) { item ->
-                val plan = item as? ConversationItem.Plan
-                    ?: throw ProtocolException("plan delta 的目标类型不正确")
-                plan.copy(text = plan.text + params.requiredString("delta"))
-            }
-
-            "item/mcpToolCall/progress" -> updateNotifiedItem { item ->
-                val activity = item as? ConversationItem.Activity
-                    ?: throw ProtocolException("MCP progress 的目标类型不正确")
-                activity.copy(details = listOf(activity.details, params.requiredString("message"))
-                    .filter(String::isNotBlank).joinToString("\n"))
-            }
-
-            "serverRequest/resolved" -> {
-                val requestId = params["requestId"] as? JsonPrimitive ?: return
-                val key = requestKey(serverId, requestId)
-                pendingRequestRoutes.remove(key)
+            is ConversationEvent.RequestResolved -> {
+                pendingRequestRoutes.remove(event.requestKey)
                 state?.updateState { current ->
-                    current.copy(pendingRequests = current.pendingRequests.filterNot { it.requestKey == key })
+                    current.reduceConversationEvent(event)
                 }
                 state?.value?.let { current ->
                     setThreadAttention(
@@ -1246,6 +961,10 @@ class CodexRepository(
                         else if (current.isRunning) ThreadAttention.RUNNING else null,
                     )
                 }
+            }
+
+            else -> state?.updateState { current ->
+                current.reduceConversationEvent(event)
             }
         }
     }
@@ -1361,7 +1080,7 @@ class CodexRepository(
         route: ItemRoute,
     ) {
         pendingItemUpdates.remove(route)?.forEach { update ->
-            check(state.updateItem(route.turnId, route.itemId, update.markActive, update.transform)) {
+            check(state.updateItem(route.turnId, route.itemId, update.markActive, update.update::apply)) {
                 "无法重放流式事件：${update.method} ${route.turnId}/${route.itemId}"
             }
         }
@@ -1384,22 +1103,6 @@ class CodexRepository(
 
     private fun <T> MutableStateFlow<T>.updateState(transform: (T) -> T) {
         update(transform)
-    }
-
-    private fun MutableStateFlow<ConversationState>.addNotice(
-        message: String,
-        technicalDetails: String? = null,
-    ) {
-        updateState { current ->
-            current.copy(
-                notices = (current.notices + ConversationNotice(
-                    UUID.randomUUID().toString(),
-                    message,
-                    technicalDetails,
-                ))
-                    .takeLast(MAX_NOTICES),
-            )
-        }
     }
 
     private fun MutableStateFlow<Map<String, ConnectionStatus>>.updateValue(
@@ -1452,15 +1155,6 @@ class CodexRepository(
                 }
             }
             ?: "新消息"
-
-    private fun JsonObject.toThreadGoal() = ThreadGoal(
-        objective = requiredString("objective"),
-        status = ThreadGoalStatus.entries.singleOrNull { it.wireValue == requiredString("status") }
-            ?: throw ProtocolException("未知目标状态：${requiredString("status")}"),
-        tokenBudget = optionalLong("tokenBudget"),
-        tokensUsed = optionalLong("tokensUsed") ?: 0L,
-        timeUsedSeconds = optionalLong("timeUsedSeconds") ?: 0L,
-    )
 
     private fun requestKey(serverId: String, id: JsonPrimitive): String = "$serverId:${id}"
 
@@ -1528,7 +1222,7 @@ class CodexRepository(
     private data class PendingItemUpdate(
         val method: String,
         val markActive: Boolean,
-        val transform: (ConversationItem) -> ConversationItem,
+        val update: ConversationItemUpdate,
     )
 
     private data class PendingRequestRoute(val id: JsonPrimitive, val threadId: String)

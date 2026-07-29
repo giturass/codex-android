@@ -3,7 +3,6 @@
 package com.hebo.codex.ui.screens.home
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,7 +32,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -82,6 +80,8 @@ import com.hebo.codex.domain.projectName
 import com.hebo.codex.ui.displayDescriptionRes
 import com.hebo.codex.ui.displayLabelRes
 import com.hebo.codex.ui.components.NavigationAttention
+import com.hebo.codex.ui.components.OptionChipRow
+import com.hebo.codex.ui.components.SettingDescription
 import com.hebo.codex.ui.components.navigationAttention
 import com.hebo.codex.ui.ratelimits.RateLimitsUiState
 import com.hebo.codex.ui.quickphrases.QuickPhraseViewModel
@@ -600,19 +600,15 @@ private fun ThreadOptionsSheet(
             )
             if (selectableModels.isNotEmpty()) {
                 Text("模型", style = MaterialTheme.typography.labelLarge)
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-                    selectableModels.forEach { model ->
-                        FilterChip(
-                            selected = model.model == modelId,
-                            onClick = {
-                                modelId = model.model
-                                serviceTier = model.defaultServiceTier.orEmpty()
-                            },
-                            label = { Text(model.displayName) },
-                            modifier = Modifier.padding(end = 8.dp),
-                        )
-                    }
-                }
+                OptionChipRow(
+                    values = selectableModels,
+                    selected = selectedModel,
+                    label = { it.displayName },
+                    onSelect = { model ->
+                        modelId = model.model
+                        serviceTier = model.defaultServiceTier.orEmpty()
+                    },
+                )
                 selectedModel?.description?.takeIf(String::isNotBlank)?.let { description ->
                     Text(
                         description,
@@ -651,7 +647,7 @@ private fun ThreadOptionsSheet(
                     singleLine = true,
                 )
                 Text("沙箱", style = MaterialTheme.typography.labelLarge)
-                ChoiceRow(
+                OptionChipRow(
                     values = listOf(
                         null,
                         SandboxMode.READ_ONLY,
@@ -664,23 +660,23 @@ private fun ThreadOptionsSheet(
                     onSelect = { sandbox = it },
                 )
                 sandbox?.let {
-                    OptionDescription(
+                    SettingDescription(
                         stringResource(it.displayDescriptionRes),
                         critical = it == SandboxMode.DANGER_FULL_ACCESS,
                     )
                 }
                 Text("审批", style = MaterialTheme.typography.labelLarge)
-                ChoiceRow(
+                OptionChipRow(
                     values = listOf(null, ApprovalPolicy.UNTRUSTED, ApprovalPolicy.ON_REQUEST, ApprovalPolicy.NEVER),
                     selected = approval,
                     label = { it?.let { value -> stringResource(value.displayLabelRes) }
                         ?: stringResource(R.string.common_server_default) },
                     onSelect = { approval = it },
                 )
-                approval?.let { OptionDescription(stringResource(it.displayDescriptionRes)) }
+                approval?.let { SettingDescription(stringResource(it.displayDescriptionRes)) }
                 if (selectedModel?.supportsPersonality == true) {
                     Text("人格", style = MaterialTheme.typography.labelLarge)
-                    ChoiceRow(
+                    OptionChipRow(
                         values = listOf(null, Personality.FRIENDLY, Personality.PRAGMATIC, Personality.NONE),
                         selected = personality,
                         label = { it?.let { value -> stringResource(value.displayLabelRes) }
@@ -689,14 +685,14 @@ private fun ThreadOptionsSheet(
                     )
                 }
                 Text("审批者", style = MaterialTheme.typography.labelLarge)
-                ChoiceRow(
+                OptionChipRow(
                     values = listOf<ApprovalReviewer?>(null) + ApprovalReviewer.entries,
                     selected = approvalReviewer,
                     label = { it?.let { value -> stringResource(value.displayLabelRes) }
                         ?: stringResource(R.string.common_server_default) },
                     onSelect = { approvalReviewer = it },
                 )
-                approvalReviewer?.let { OptionDescription(stringResource(it.displayDescriptionRes)) }
+                approvalReviewer?.let { SettingDescription(stringResource(it.displayDescriptionRes)) }
                 OutlinedTextField(
                     value = baseInstructions,
                     onValueChange = { baseInstructions = it },
@@ -746,34 +742,6 @@ private fun ThreadOptionsSheet(
                 Text("保存")
             }
             Spacer(Modifier.height(12.dp))
-        }
-    }
-}
-
-@Composable
-private fun OptionDescription(text: String, critical: Boolean = false) {
-    Text(
-        text,
-        style = MaterialTheme.typography.bodySmall,
-        color = if (critical) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-}
-
-@Composable
-private fun <T> ChoiceRow(
-    values: List<T>,
-    selected: T,
-    label: @Composable (T) -> String,
-    onSelect: (T) -> Unit,
-) {
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-        values.forEach { item ->
-            FilterChip(
-                selected = item == selected,
-                onClick = { onSelect(item) },
-                label = { Text(label(item)) },
-                modifier = Modifier.padding(end = 8.dp),
-            )
         }
     }
 }

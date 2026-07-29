@@ -1,5 +1,13 @@
 package com.hebo.codex.ui.screens.chat
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
+
 internal const val EXPANDABLE_CONTENT_SIZE_ANIMATION_DURATION_MILLIS = 220
 internal const val EXPANDABLE_CONTENT_FADE_DURATION_MILLIS = 100
 
@@ -28,4 +36,33 @@ internal fun ContentExpansionPhase.settle(): ContentExpansionPhase = when (this)
     ContentExpansionPhase.COLLAPSED,
     ContentExpansionPhase.EXPANDED,
     -> this
+}
+
+@Composable
+internal fun rememberContentExpansionPhase(
+    expanded: Boolean,
+    key: Any? = Unit,
+): ContentExpansionPhase {
+    var phase by remember(key) {
+        mutableStateOf(ContentExpansionPhase.COLLAPSED)
+    }
+    LaunchedEffect(key, expanded) {
+        phase = phase.startTransition(expanded)
+        when (phase) {
+            ContentExpansionPhase.EXPANDING -> {
+                delay(EXPANDABLE_CONTENT_SIZE_ANIMATION_DURATION_MILLIS.toLong())
+                phase = phase.settle()
+            }
+
+            ContentExpansionPhase.COLLAPSING -> {
+                delay(EXPANDABLE_CONTENT_FADE_DURATION_MILLIS.toLong())
+                phase = phase.settle()
+            }
+
+            ContentExpansionPhase.COLLAPSED,
+            ContentExpansionPhase.EXPANDED,
+            -> Unit
+        }
+    }
+    return phase
 }

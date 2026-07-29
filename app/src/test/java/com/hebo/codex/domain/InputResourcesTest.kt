@@ -1,7 +1,5 @@
-package com.hebo.codex.ui.screens.chat
+package com.hebo.codex.domain
 
-import com.hebo.codex.domain.FeatureEntry
-import com.hebo.codex.domain.FeatureKind
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

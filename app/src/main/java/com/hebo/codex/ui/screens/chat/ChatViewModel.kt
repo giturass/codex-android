@@ -14,7 +14,6 @@ import com.hebo.codex.domain.DraftAttachment
 import com.hebo.codex.domain.DraftKey
 import com.hebo.codex.domain.DraftRepository
 import com.hebo.codex.domain.DraftTarget
-import com.hebo.codex.domain.FeatureArea
 import com.hebo.codex.domain.FeatureEntry
 import com.hebo.codex.domain.ModelOption
 import com.hebo.codex.domain.ReviewDelivery
@@ -27,11 +26,11 @@ import com.hebo.codex.domain.UserInputPart
 import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.domain.newDraftRevision
 import com.hebo.codex.domain.quickPhraseInput
+import com.hebo.codex.domain.loadInputResources
 import com.hebo.codex.util.runSuspendCatching
 import com.hebo.codex.util.toUserFacingError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -216,30 +215,8 @@ class ChatViewModel(
             addAll(draft.attachments.map(DraftAttachment::input))
         }
         if (input.isEmpty()) return
-        mutableState.update { it.copy(isSendingDraft = true, screenError = null) }
-        viewModelScope.launch {
-            val result = runSuspendCatching { repository.sendMessage(serverId, threadId, input, draft.options) }
-            if (result.isSuccess) {
-                runSuspendCatching { draftRepository.delete(draftKey) }
-                    .onFailure { error ->
-                        mutableState.update {
-                            it.copy(screenError = error.toUserFacingError("清理草稿失败"))
-                        }
-                    }
-                mutableState.update { state ->
-                    state.copy(
-                        draft = if (state.draft == draft) {
-                            ChatDraft(options = state.conversation.defaultTurnOptions())
-                        } else {
-                            state.draft
-                        },
-                        isSendingDraft = false,
-                    )
-                }
-            } else {
-                mutableState.update { it.copy(isSendingDraft = false) }
-                result.exceptionOrNull()?.let(::showError)
-            }
+        submitDraft(draft) {
+            repository.sendMessage(serverId, threadId, input, draft.options)
         }
     }
 
@@ -255,32 +232,8 @@ class ChatViewModel(
             reportInputError(IllegalArgumentException(validationError))
             return
         }
-        mutableState.update { it.copy(isSendingDraft = true, screenError = null) }
-        viewModelScope.launch {
-            val result = runSuspendCatching {
-                repository.runShellCommand(serverId, threadId, requireNotNull(command))
-            }
-            if (result.isSuccess) {
-                runSuspendCatching { draftRepository.delete(draftKey) }
-                    .onFailure { error ->
-                        mutableState.update {
-                            it.copy(screenError = error.toUserFacingError("清理草稿失败"))
-                        }
-                    }
-                mutableState.update { state ->
-                    state.copy(
-                        draft = if (state.draft == draft) {
-                            ChatDraft(options = state.conversation.defaultTurnOptions())
-                        } else {
-                            state.draft
-                        },
-                        isSendingDraft = false,
-                    )
-                }
-            } else {
-                mutableState.update { it.copy(isSendingDraft = false) }
-                result.exceptionOrNull()?.let(::showError)
-            }
+        submitDraft(draft) {
+            repository.runShellCommand(serverId, threadId, requireNotNull(command))
         }
     }
 
@@ -390,36 +343,18 @@ class ChatViewModel(
         if (mutableState.value.isLoadingResources) return
         viewModelScope.launch {
             mutableState.update { it.copy(isLoadingResources = true) }
-            val skillsDeferred = async {
-                runSuspendCatching {
-                    repository.featureCatalog(serverId, FeatureArea.SKILLS, conversation.cwd, threadId, forceRefresh)
-                }
-            }
-            val appsDeferred = async {
-                runSuspendCatching {
-                    repository.featureCatalog(serverId, FeatureArea.APPS, conversation.cwd, threadId, forceRefresh)
-                }
-            }
-            val pluginsDeferred = async {
-                runSuspendCatching {
-                    repository.featureCatalog(serverId, FeatureArea.PLUGINS, conversation.cwd, threadId, forceRefresh)
-                }
-            }
-            val skills = skillsDeferred.await()
-            val apps = appsDeferred.await()
-            val plugins = pluginsDeferred.await()
-            val failure = skills.exceptionOrNull()
-                ?: apps.exceptionOrNull()
-                ?: plugins.exceptionOrNull()
+            val result = loadInputResources(
+                repository = repository,
+                serverId = serverId,
+                cwd = conversation.cwd,
+                threadId = threadId,
+                forceRefresh = forceRefresh,
+            )
             mutableState.update {
                 it.copy(
-                    inputResources = availableInputResources(
-                        skills = skills.getOrNull()?.entries.orEmpty(),
-                        apps = apps.getOrNull()?.entries.orEmpty(),
-                        plugins = plugins.getOrNull()?.entries.orEmpty(),
-                    ),
+                    inputResources = result.entries,
                     isLoadingResources = false,
-                    screenError = failure?.toUserFacingError("无法加载输入资源"),
+                    screenError = result.failure?.toUserFacingError("无法加载输入资源"),
                 )
             }
         }
@@ -533,6 +468,35 @@ class ChatViewModel(
         mutableState.update { it.copy(screenError = error.toUserFacingError()) }
     }
 
+    private fun submitDraft(draft: ChatDraft, send: suspend () -> Unit) {
+        mutableState.update { it.copy(isSendingDraft = true, screenError = null) }
+        viewModelScope.launch {
+            runSuspendCatching(send)
+                .onSuccess {
+                    runSuspendCatching { draftRepository.delete(draftKey) }
+                        .onFailure { error ->
+                            mutableState.update {
+                                it.copy(screenError = error.toUserFacingError("清理草稿失败"))
+                            }
+                        }
+                    mutableState.update { state ->
+                        state.copy(
+                            draft = if (state.draft == draft) {
+                                ChatDraft(options = state.conversation.defaultTurnOptions())
+                            } else {
+                                state.draft
+                            },
+                            isSendingDraft = false,
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    mutableState.update { it.copy(isSendingDraft = false) }
+                    showError(error)
+                }
+        }
+    }
+
     private fun updateDraft(transform: (ChatDraft) -> ChatDraft) {
         mutableState.update { it.copy(draft = transform(it.draft)) }
         scheduleDraft()
@@ -581,12 +545,3 @@ private fun ConversationDraft.Thread.toChatDraft(): ChatDraft = ChatDraft(
     attachments = attachments,
     options = options,
 )
-
-internal fun availableInputResources(
-    skills: List<FeatureEntry>,
-    apps: List<FeatureEntry>,
-    plugins: List<FeatureEntry>,
-): List<FeatureEntry> =
-    skills.filter { entry -> entry.enabled != false } +
-        apps.filter { entry -> entry.enabled != false && entry.metadata["accessible"] == "true" } +
-        plugins.filter { entry -> entry.installed == true && entry.enabled != false }

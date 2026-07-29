@@ -18,8 +18,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.animateScrollBy
-import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -46,10 +44,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListLayoutInfo
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -93,7 +89,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -116,26 +111,20 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -155,7 +144,6 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -203,6 +191,8 @@ import com.hebo.codex.ui.components.ExpandableErrorDetails
 import com.hebo.codex.ui.components.QuickPhraseManagerDialog
 import com.hebo.codex.ui.components.QuickPhraseMenuContent
 import com.hebo.codex.ui.components.NavigationAttention
+import com.hebo.codex.ui.components.OptionChipRow
+import com.hebo.codex.ui.components.SettingDescription
 import com.hebo.codex.ui.components.RemainingLinearProgressIndicator
 import com.hebo.codex.ui.components.UserFacingErrorDialog
 import com.hebo.codex.ui.quickphrases.QuickPhraseViewModel
@@ -222,8 +212,6 @@ import com.mikepenz.markdown.compose.elements.highlightedCodeBlock
 import com.mikepenz.markdown.compose.elements.highlightedCodeFence
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.model.rememberMarkdownState
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.max
@@ -262,7 +250,6 @@ private val highlightedMarkdownComponents = markdownComponents(
 
 private const val CHAT_LIST_END_KEY = "chat-list-end"
 private const val CHAT_LIST_PAGE_RUNWAY_KEY = "chat-list-page-runway"
-private const val PAGE_SCROLL_ANIMATION_DURATION_MILLIS = 180
 private const val PLAN_STEP_PROGRESS_FADE_DURATION_MILLIS = 150
 private val ChatPageOverlap = 64.dp
 private val ConversationHeaderItemMinHeight = 48.dp
@@ -307,26 +294,8 @@ fun ChatScreen(
     }
     val forkTurnsById = remember(forkTurns) { forkTurns.associateBy(ForkTurn::turnId) }
     val snackbarHostState = remember { SnackbarHostState() }
-    val listState = rememberLazyListState()
     val hazeState = rememberHazeState()
     val scrollScope = rememberCoroutineScope()
-    var autoFollow by rememberSaveable(conversation?.threadId) { mutableStateOf(true) }
-    var initialListPositioned by remember(conversation?.threadId) { mutableStateOf(false) }
-    var retainPageRunway by remember(conversation?.threadId) {
-        mutableStateOf(conversation?.isRunning == true)
-    }
-    var pageRunwayEnabled by remember(conversation?.threadId) {
-        mutableStateOf(conversation?.isRunning == true)
-    }
-    var showScrollToBottomButton by remember(conversation?.threadId) { mutableStateOf(false) }
-    var listViewportHeightPx by remember { mutableIntStateOf(0) }
-    var retainedPageRunwayHeightPx by remember(conversation?.threadId) { mutableIntStateOf(0) }
-    var currentOutputRequest by remember(conversation?.threadId) { mutableIntStateOf(0) }
-    var handledCurrentOutputRequest by remember(conversation?.threadId) { mutableIntStateOf(0) }
-    var completionDockRequest by remember(conversation?.threadId) { mutableIntStateOf(0) }
-    var handledCompletionDockRequest by remember(conversation?.threadId) { mutableIntStateOf(0) }
-    var runningOutputEndVisible by remember(conversation?.threadId) { mutableStateOf(false) }
-    var completionDockInProgress by remember(conversation?.threadId) { mutableStateOf(false) }
     var topControlsHeightPx by remember { mutableStateOf(0) }
     var bottomControlsHeightPx by remember { mutableStateOf(0) }
     var dialog by remember { mutableStateOf<ChatDialog?>(null) }
@@ -401,24 +370,6 @@ fun ChatScreen(
             activeRequestKey = conversation?.pendingRequests?.firstOrNull()?.requestKey
         }
     }
-    LaunchedEffect(conversation?.isRunning) {
-        val isRunning = conversation?.isRunning == true
-        val shouldDock = shouldDockCompletedChatOutput(
-            wasRunning = retainPageRunway,
-            isRunning = isRunning,
-            wasOutputEndVisible = runningOutputEndVisible,
-            isUserScrollInProgress = !autoFollow && listState.isScrollInProgress,
-        )
-        if (isRunning) {
-            runningOutputEndVisible = false
-            retainPageRunway = true
-            pageRunwayEnabled = true
-        } else {
-            retainPageRunway = false
-            if (shouldDock) completionDockRequest++
-        }
-    }
-
     val statusBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val bottomSystemPadding = maxOf(
         WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
@@ -467,213 +418,17 @@ fun ChatScreen(
     val bottomContentPaddingPx = with(density) { bottomContentPadding.roundToPx() }
     val pageOverlapPx = with(density) { ChatPageOverlap.roundToPx() }
     val liveEdgeHeightPx = with(density) { 1.dp.roundToPx() }
-    val readingViewportHeightPx = (
-        listViewportHeightPx - topContentPaddingPx - bottomContentPaddingPx
-    ).coerceAtLeast(0)
-    val requiredPageRunwayHeightPx = (readingViewportHeightPx - pageOverlapPx).coerceAtLeast(0)
-    val pageRunwayHeightPx = maxOf(retainedPageRunwayHeightPx, requiredPageRunwayHeightPx)
-    val pageRunwayHeight = with(density) { pageRunwayHeightPx.toDp() }
     val liveEdgeIndex = conversationRows.size
-
-    LaunchedEffect(requiredPageRunwayHeightPx) {
-        if (requiredPageRunwayHeightPx > retainedPageRunwayHeightPx) {
-            retainedPageRunwayHeightPx = requiredPageRunwayHeightPx
-        }
-    }
-
-    LaunchedEffect(
-        conversation?.threadId,
-        conversation?.isRunning,
-        initialListPositioned,
-        liveEdgeIndex,
-    ) {
-        if (conversation?.isRunning != true || !initialListPositioned) return@LaunchedEffect
-        snapshotFlow {
-            isChatOutputEndVisible(listState.layoutInfo.chatPagingPosition(liveEdgeIndex))
-        }.collect { runningOutputEndVisible = it }
-    }
-
-    LaunchedEffect(
-        conversation?.threadId,
-        initialListPositioned,
-        listViewportHeightPx,
-        pageRunwayEnabled,
-        liveEdgeIndex,
-        liveEdgeHeightPx,
-    ) {
-        if (initialListPositioned || listViewportHeightPx <= 0) return@LaunchedEffect
-        snapshotFlow { listState.layoutInfo.totalItemsCount }.first { it > liveEdgeIndex }
-        val readingEndOffset = listState.layoutInfo.readingEndOffset()
-        val scrollOffset = if (pageRunwayEnabled) {
-            -(readingEndOffset - liveEdgeHeightPx).coerceAtLeast(0)
-        } else {
-            0
-        }
-        listState.scrollToItem(liveEdgeIndex, scrollOffset)
-        initialListPositioned = true
-    }
-    LaunchedEffect(
-        listState,
-        autoFollow,
-        initialListPositioned,
-        pageRunwayEnabled,
-        liveEdgeIndex,
-        pageOverlapPx,
-        completionDockInProgress,
-    ) {
-        if (!initialListPositioned || completionDockInProgress) return@LaunchedEffect
-        var previousReadingEndOffset = listState.layoutInfo.readingEndOffset()
-        while (true) {
-            val position = snapshotFlow {
-                listState.layoutInfo.chatPagingPosition(liveEdgeIndex)
-            }.first {
-                it.readingEndOffset != previousReadingEndOffset ||
-                    (autoFollow && shouldFollowChatOutput(it, pageRunwayEnabled))
-            }
-            val viewportCompensation = chatViewportShrinkCompensation(
-                previousReadingEndOffset = previousReadingEndOffset,
-                readingEndOffset = position.readingEndOffset,
-            )
-            previousReadingEndOffset = position.readingEndOffset
-            if (viewportCompensation > 0) {
-                listState.scrollBy(viewportCompensation.toFloat())
-                continue
-            }
-            if (!autoFollow) continue
-            val currentPosition = listState.layoutInfo.chatPagingPosition(liveEdgeIndex)
-            if (!pageRunwayEnabled) {
-                if (shouldFollowChatOutput(currentPosition, pageRunwayEnabled = false)) {
-                    listState.scrollToItem(liveEdgeIndex)
-                }
-                continue
-            }
-            val pageDistance = chatPageAdvanceDistance(currentPosition, pageOverlapPx)
-            if (shouldAdvanceChatPage(currentPosition) && pageDistance > 0) {
-                listState.animateScrollBy(
-                    value = pageDistance.toFloat(),
-                    animationSpec = tween(PAGE_SCROLL_ANIMATION_DURATION_MILLIS),
-                )
-            }
-        }
-    }
-    LaunchedEffect(
-        completionDockRequest,
-        initialListPositioned,
-        liveEdgeIndex,
-        liveEdgeHeightPx,
-    ) {
-        if (!initialListPositioned || completionDockRequest == handledCompletionDockRequest) {
-            return@LaunchedEffect
-        }
-        handledCompletionDockRequest = completionDockRequest
-        completionDockInProgress = true
-        try {
-            withFrameNanos { }
-            if (!autoFollow && listState.isScrollInProgress) return@LaunchedEffect
-            val readingEndOffset = listState.layoutInfo.readingEndOffset()
-            listState.animateScrollToItem(
-                index = liveEdgeIndex,
-                scrollOffset = -(readingEndOffset - liveEdgeHeightPx).coerceAtLeast(0),
-            )
-            showScrollToBottomButton = false
-            pageRunwayEnabled = false
-        } finally {
-            completionDockInProgress = false
-        }
-    }
-    LaunchedEffect(
-        currentOutputRequest,
-        initialListPositioned,
-        liveEdgeIndex,
-        pageOverlapPx,
-    ) {
-        if (!initialListPositioned || currentOutputRequest == handledCurrentOutputRequest) {
-            return@LaunchedEffect
-        }
-        showScrollToBottomButton = false
-        listState.animateScrollToItem(
-            index = liveEdgeIndex,
-            scrollOffset = if (pageRunwayEnabled) -pageOverlapPx else 0,
-        )
-        handledCurrentOutputRequest = currentOutputRequest
-        autoFollow = true
-    }
-    LaunchedEffect(autoFollow, retainPageRunway) {
-        if (autoFollow && retainPageRunway) pageRunwayEnabled = true
-    }
-    LaunchedEffect(
-        listState,
-        autoFollow,
-        initialListPositioned,
-        pageRunwayEnabled,
-        liveEdgeIndex,
-        liveEdgeHeightPx,
-    ) {
-        if (autoFollow || !initialListPositioned || !pageRunwayEnabled) return@LaunchedEffect
-        snapshotFlow {
-            canReleaseChatPageRunway(
-                position = listState.layoutInfo.chatPagingPosition(liveEdgeIndex),
-                liveEdgeHeight = liveEdgeHeightPx,
-            )
-        }.first { it }
-        pageRunwayEnabled = false
-    }
-    LaunchedEffect(
-        listState,
-        autoFollow,
-        initialListPositioned,
-        liveEdgeIndex,
-    ) {
-        if (autoFollow || !initialListPositioned) return@LaunchedEffect
-        snapshotFlow {
-            resolveChatUserScroll(
-                position = listState.layoutInfo.chatPagingPosition(liveEdgeIndex),
-                isScrollInProgress = listState.isScrollInProgress,
-            )
-        }.collectLatest { resolution ->
-            when (resolution) {
-                ChatUserScrollResolution.IN_PROGRESS -> showScrollToBottomButton = false
-                ChatUserScrollResolution.FOLLOW_OUTPUT -> {
-                    showScrollToBottomButton = false
-                    autoFollow = true
-                }
-                ChatUserScrollResolution.SHOW_RETURN_TO_OUTPUT -> {
-                    showScrollToBottomButton = true
-                }
-            }
-        }
-    }
-    val userScrollConnection = remember(conversation?.threadId, listState, liveEdgeIndex) {
-        object : NestedScrollConnection {
-            override fun onPreScroll(
-                available: Offset,
-                source: NestedScrollSource,
-            ): Offset {
-                if (source != NestedScrollSource.UserInput || available.y >= 0f) return Offset.Zero
-                val position = listState.layoutInfo.chatPagingPosition(liveEdgeIndex)
-                if (!shouldStopForwardUserScroll(position)) return Offset.Zero
-                return Offset(x = 0f, y = available.y)
-            }
-
-            override suspend fun onPreFling(available: Velocity): Velocity {
-                if (available.y >= 0f) return Velocity.Zero
-                val position = listState.layoutInfo.chatPagingPosition(liveEdgeIndex)
-                if (!shouldStopForwardUserScroll(position)) return Velocity.Zero
-                return available
-            }
-
-            override fun onPostScroll(
-                consumed: Offset,
-                available: Offset,
-                source: NestedScrollSource,
-            ): Offset {
-                if (source == NestedScrollSource.UserInput && consumed.y != 0f) {
-                    autoFollow = false
-                }
-                return Offset.Zero
-            }
-        }
-    }
+    val pagingController = rememberChatPagingController(
+        conversationId = conversation?.threadId,
+        isRunning = conversation?.isRunning == true,
+        liveEdgeIndex = liveEdgeIndex,
+        topContentPaddingPx = topContentPaddingPx,
+        bottomContentPaddingPx = bottomContentPaddingPx,
+        pageOverlapPx = pageOverlapPx,
+        liveEdgeHeightPx = liveEdgeHeightPx,
+    )
+    val pageRunwayHeight = with(density) { pagingController.pageRunwayHeightPx.toDp() }
 
     Box(Modifier.fillMaxSize()) {
         when {
@@ -692,12 +447,12 @@ fun ChatScreen(
             }
 
             else -> LazyColumn(
-                state = listState,
+                state = pagingController.listState,
                 modifier = Modifier
                     .fillMaxSize()
                     .hazeSource(hazeState)
-                    .onSizeChanged { listViewportHeightPx = it.height }
-                    .nestedScroll(userScrollConnection),
+                    .onSizeChanged { pagingController.onViewportHeightChanged(it.height) }
+                    .nestedScroll(pagingController.userScrollConnection),
                 contentPadding = PaddingValues(
                     start = 20.dp,
                     top = topContentPadding,
@@ -738,7 +493,7 @@ fun ChatScreen(
                 item(CHAT_LIST_END_KEY) {
                     Spacer(Modifier.height(1.dp))
                 }
-                if (pageRunwayEnabled && pageRunwayHeightPx > 0) {
+                if (pagingController.pageRunwayEnabled && pagingController.pageRunwayHeightPx > 0) {
                     item(CHAT_LIST_PAGE_RUNWAY_KEY) {
                         Spacer(Modifier.height(pageRunwayHeight))
                     }
@@ -866,11 +621,11 @@ fun ChatScreen(
                             }
                         },
                         onSend = {
-                            if (!autoFollow) currentOutputRequest += 1
+                            pagingController.onSubmission()
                             viewModel.sendDraft()
                         },
                         onSendQuickPhrase = { content ->
-                            if (!autoFollow) currentOutputRequest += 1
+                            pagingController.onSubmission()
                             viewModel.sendQuickPhrase(content)
                         },
                         onStop = viewModel::interrupt,
@@ -880,7 +635,7 @@ fun ChatScreen(
         }
 
         AnimatedVisibility(
-            visible = conversation != null && showScrollToBottomButton,
+            visible = conversation != null && pagingController.showReturnToOutput,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = bottomContentPadding + 8.dp),
@@ -892,9 +647,7 @@ fun ChatScreen(
             SmallFloatingActionButton(
                 modifier = Modifier.size(46.dp),
                 shape = CircleShape,
-                onClick = {
-                    currentOutputRequest += 1
-                },
+                onClick = pagingController::returnToOutput,
                 containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                 contentColor = MaterialTheme.colorScheme.onSurface,
             ) {
@@ -1077,29 +830,10 @@ fun ChatScreen(
     }
 }
 
-private fun LazyListLayoutInfo.readingEndOffset(): Int =
-    (viewportEndOffset - afterContentPadding).coerceAtLeast(0)
-
 internal fun chatBottomContentPadding(
     bottomControlsHeight: Dp,
     bottomSystemPadding: Dp,
 ): Dp = maxOf(bottomControlsHeight, ChatComposerOverlayMinHeight) + bottomSystemPadding
-
-private fun LazyListLayoutInfo.readingStartOffset(): Int =
-    viewportStartOffset + beforeContentPadding
-
-private fun LazyListLayoutInfo.chatPagingPosition(liveEdgeIndex: Int): ChatPagingPosition {
-    val outputEndItem = visibleItemsInfo.firstOrNull { it.index == liveEdgeIndex - 1 }
-    return ChatPagingPosition(
-        liveEdgeIndex = liveEdgeIndex,
-        liveEdgeOffset = visibleItemsInfo.firstOrNull { it.index == liveEdgeIndex }?.offset,
-        outputEndOffset = outputEndItem?.let { it.offset + it.size },
-        firstVisibleItemIndex = visibleItemsInfo.firstOrNull()?.index,
-        lastVisibleItemIndex = visibleItemsInfo.lastOrNull()?.index,
-        readingStartOffset = readingStartOffset(),
-        readingEndOffset = readingEndOffset(),
-    )
-}
 
 internal data class ConversationHeaderActions(
     val onNewTask: () -> Unit,
@@ -2402,10 +2136,8 @@ private fun ActivePlanCard(plan: ActiveTurnPlan) {
         ?: plan.steps.firstOrNull { it.status == PlanStepStatus.PENDING }?.text
         ?: "计划步骤已完成"
     var expanded by remember { mutableStateOf(false) }
-    var expansionPhase by remember {
-        mutableStateOf(ContentExpansionPhase.COLLAPSED)
-    }
     val expansionTarget = expanded
+    val expansionPhase = rememberContentExpansionPhase(expansionTarget)
     val bodyAlpha by animateFloatAsState(
         targetValue = if (expansionPhase.bodyVisible) 1f else 0f,
         animationSpec = tween(EXPANDABLE_CONTENT_FADE_DURATION_MILLIS),
@@ -2416,25 +2148,6 @@ private fun ActivePlanCard(plan: ActiveTurnPlan) {
         animationSpec = tween(EXPANDABLE_CONTENT_FADE_DURATION_MILLIS),
         label = "工作计划展开箭头",
     )
-
-    LaunchedEffect(expansionTarget) {
-        expansionPhase = expansionPhase.startTransition(expansionTarget)
-        when (expansionPhase) {
-            ContentExpansionPhase.EXPANDING -> {
-                delay(EXPANDABLE_CONTENT_SIZE_ANIMATION_DURATION_MILLIS.toLong())
-                expansionPhase = expansionPhase.settle()
-            }
-
-            ContentExpansionPhase.COLLAPSING -> {
-                delay(EXPANDABLE_CONTENT_FADE_DURATION_MILLIS.toLong())
-                expansionPhase = expansionPhase.settle()
-            }
-
-            ContentExpansionPhase.COLLAPSED,
-            ContentExpansionPhase.EXPANDED,
-            -> Unit
-        }
-    }
 
     Surface(
         modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
@@ -2687,7 +2400,7 @@ private fun ImageAddressDialog(
         title = { Text("添加图片地址") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OptionRow(
+                OptionChipRow(
                     values = ManualAttachment.entries,
                     selected = kind,
                     label = { if (it == ManualAttachment.IMAGE_URL) "图片 URL" else "服务端图片" },
@@ -2776,7 +2489,7 @@ private fun TurnOptionsSheet(
                 is ModelListState.Ready -> if (selectableModels.isEmpty()) {
                     Text("当前服务端没有可选模型", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
-                    OptionRow(
+                    OptionChipRow(
                         values = listOf<ModelOption?>(null) + selectableModels,
                         selected = model,
                         label = { it?.displayName ?: "会话默认" },
@@ -2792,7 +2505,7 @@ private fun TurnOptionsSheet(
             }
             model?.reasoningEfforts?.takeIf(List<*>::isNotEmpty)?.let { efforts ->
                 Text("推理强度", style = MaterialTheme.typography.labelLarge)
-                OptionRow(
+                OptionChipRow(
                     values = listOf<String?>(null) + efforts.map { it.value },
                     selected = options.reasoningEffort,
                     label = { effort -> effort ?: "默认" },
@@ -2800,7 +2513,7 @@ private fun TurnOptionsSheet(
                 )
             }
             Text("审批者", style = MaterialTheme.typography.labelLarge)
-            OptionRow(
+            OptionChipRow(
                 values = listOf<ApprovalReviewer?>(null) + ApprovalReviewer.entries,
                 selected = options.approvalsReviewer,
                 label = { it?.let { value -> stringResource(value.displayLabelRes) }
@@ -2809,7 +2522,7 @@ private fun TurnOptionsSheet(
             )
             options.approvalsReviewer?.let { SettingDescription(stringResource(it.displayDescriptionRes)) }
             Text("审批策略", style = MaterialTheme.typography.labelLarge)
-            OptionRow(
+            OptionChipRow(
                 values = listOf<ApprovalPolicy?>(null) + ApprovalPolicy.entries,
                 selected = options.approvalPolicy,
                 label = { it?.let { value -> stringResource(value.displayLabelRes) }
@@ -2818,7 +2531,7 @@ private fun TurnOptionsSheet(
             )
             options.approvalPolicy?.let { SettingDescription(stringResource(it.displayDescriptionRes)) }
             Text("沙箱", style = MaterialTheme.typography.labelLarge)
-            OptionRow(
+            OptionChipRow(
                 values = listOf<SandboxMode?>(null) + SandboxMode.entries,
                 selected = options.sandboxMode,
                 label = { it?.let { value -> stringResource(value.displayLabelRes) }
@@ -2852,7 +2565,7 @@ private fun TurnOptionsSheet(
                 )
                 model?.serviceTiers?.takeIf(List<*>::isNotEmpty)?.let { tiers ->
                     Text("服务层级", style = MaterialTheme.typography.labelLarge)
-                    OptionRow(
+                    OptionChipRow(
                         values = listOf<String?>(null) + tiers.map { it.value },
                         selected = options.serviceTier,
                         label = { tier -> tiers.firstOrNull { it.value == tier }?.label ?: "默认" },
@@ -2867,7 +2580,7 @@ private fun TurnOptionsSheet(
                     singleLine = true,
                 )
                 Text("推理摘要", style = MaterialTheme.typography.labelLarge)
-                OptionRow(
+                OptionChipRow(
                     values = listOf<ReasoningSummary?>(null) + ReasoningSummary.entries,
                     selected = options.reasoningSummary,
                     label = { it?.let { value -> stringResource(value.displayLabelRes) }
@@ -2876,7 +2589,7 @@ private fun TurnOptionsSheet(
                 )
                 if (model == null || model.supportsPersonality) {
                     Text("人格", style = MaterialTheme.typography.labelLarge)
-                    OptionRow(
+                    OptionChipRow(
                         values = listOf<Personality?>(null) + Personality.entries,
                         selected = options.personality,
                         label = { it?.let { value -> stringResource(value.displayLabelRes) }
@@ -2940,34 +2653,6 @@ private fun TurnOptionsSheet(
             Spacer(Modifier.height(12.dp))
         }
     }
-}
-
-@Composable
-private fun <T> OptionRow(
-    values: List<T>,
-    selected: T,
-    label: @Composable (T) -> String,
-    onSelect: (T) -> Unit,
-) {
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
-        values.forEach { item ->
-            FilterChip(
-                selected = item == selected,
-                onClick = { onSelect(item) },
-                label = { Text(label(item)) },
-                modifier = Modifier.padding(end = 8.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun SettingDescription(text: String, critical: Boolean = false) {
-    Text(
-        text,
-        style = MaterialTheme.typography.bodySmall,
-        color = if (critical) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-    )
 }
 
 @Composable
@@ -3306,7 +2991,7 @@ private fun ReviewDialog(
         title = { Text("代码审查") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                OptionRow(
+                OptionChipRow(
                     values = ReviewType.entries,
                     selected = type,
                     label = { it.label },
@@ -3368,7 +3053,7 @@ private fun GoalDialog(
                     minLines = 3,
                 )
                 Text("状态", style = MaterialTheme.typography.labelLarge)
-                OptionRow(
+                OptionChipRow(
                     values = ThreadGoalStatus.entries,
                     selected = status,
                     label = { stringResource(it.displayLabelRes) },

@@ -64,7 +64,6 @@ import com.hebo.codex.domain.RemoteFileMetadata
 import com.hebo.codex.util.runSuspendCatching
 import dev.snipme.highlights.model.SyntaxLanguage
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.OutputStream
@@ -99,12 +98,15 @@ internal fun RemoteFileSheet(
     var isSaving by remember(target.path) { mutableStateOf(false) }
     var isOpening by remember(target.path) { mutableStateOf(false) }
     var actionError by remember(target.path) { mutableStateOf<String?>(null) }
-    var expansionPhase by remember(target.path) { mutableStateOf(ContentExpansionPhase.COLLAPSED) }
     var isPreviewZoomed by remember(target.path) { mutableStateOf(false) }
     val previewContentTarget = when (val preview = previewState) {
         is RemoteLoadState.Ready -> preview.value != RemotePreview.Unsupported
         RemoteLoadState.Idle, RemoteLoadState.Loading, is RemoteLoadState.Failed -> false
     }
+    val expansionPhase = rememberContentExpansionPhase(
+        expanded = previewContentTarget,
+        key = target.path,
+    )
     val previewAlpha by animateFloatAsState(
         targetValue = if (expansionPhase.bodyVisible) 1f else 0f,
         animationSpec = tween(EXPANDABLE_CONTENT_FADE_DURATION_MILLIS),
@@ -177,25 +179,6 @@ internal fun RemoteFileSheet(
         metadataState = result
         if (result is RemoteLoadState.Ready && result.value.isFile && shouldAutoPreviewRemoteFile(fileName)) {
             loadPreview()
-        }
-    }
-
-    LaunchedEffect(previewContentTarget) {
-        expansionPhase = expansionPhase.startTransition(previewContentTarget)
-        when (expansionPhase) {
-            ContentExpansionPhase.EXPANDING -> {
-                delay(EXPANDABLE_CONTENT_SIZE_ANIMATION_DURATION_MILLIS.toLong())
-                expansionPhase = expansionPhase.settle()
-            }
-
-            ContentExpansionPhase.COLLAPSING -> {
-                delay(EXPANDABLE_CONTENT_FADE_DURATION_MILLIS.toLong())
-                expansionPhase = expansionPhase.settle()
-            }
-
-            ContentExpansionPhase.COLLAPSED,
-            ContentExpansionPhase.EXPANDED,
-            -> Unit
         }
     }
 

@@ -114,7 +114,6 @@ import com.hebo.codex.domain.ConversationItem
 import com.hebo.codex.domain.ConversationItemKey
 import com.hebo.codex.domain.FileChangeKind
 import com.hebo.codex.domain.PendingServerRequest
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -780,33 +779,15 @@ private fun ActivityTimelineBody(
 ) {
     val hasDetails = activityItemHasDetails(item)
     val expansionTarget = hasDetails && expanded
-    var expansionPhase by remember(item.turnId, item.id) {
-        mutableStateOf(ContentExpansionPhase.COLLAPSED)
-    }
+    val expansionPhase = rememberContentExpansionPhase(
+        expanded = expansionTarget,
+        key = ConversationItemKey(item.turnId, item.id),
+    )
     val bodyAlpha by animateFloatAsState(
         targetValue = if (expansionPhase.bodyVisible) 1f else 0f,
         animationSpec = tween(EXPANDABLE_CONTENT_FADE_DURATION_MILLIS),
         label = "处理过程详情透明度",
     )
-
-    LaunchedEffect(expansionTarget) {
-        expansionPhase = expansionPhase.startTransition(expansionTarget)
-        when (expansionPhase) {
-            ContentExpansionPhase.EXPANDING -> {
-                delay(EXPANDABLE_CONTENT_SIZE_ANIMATION_DURATION_MILLIS.toLong())
-                expansionPhase = expansionPhase.settle()
-            }
-
-            ContentExpansionPhase.COLLAPSING -> {
-                delay(EXPANDABLE_CONTENT_FADE_DURATION_MILLIS.toLong())
-                expansionPhase = expansionPhase.settle()
-            }
-
-            ContentExpansionPhase.COLLAPSED,
-            ContentExpansionPhase.EXPANDED,
-            -> Unit
-        }
-    }
 
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
         Box(

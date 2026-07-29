@@ -31,28 +31,87 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+data class ThreadFilter(
+    val searchTerm: String = "",
+    val showArchived: Boolean = false,
+) {
+    val isRecent: Boolean
+        get() = searchTerm.isBlank() && !showArchived
+}
+
+enum class ThreadFeedLoadState {
+    IDLE,
+    LOADING,
+    REFRESHING,
+    APPENDING,
+}
+
+data class ThreadFeed(
+    val threads: List<ThreadSummary> = emptyList(),
+    val nextCursor: String? = null,
+    val loadState: ThreadFeedLoadState = ThreadFeedLoadState.IDLE,
+) {
+    val projects: List<RecentProject>
+        get() = groupRecentProjects(threads)
+}
+
+data class ThreadQuery(
+    val serverId: String,
+    val filter: ThreadFilter = ThreadFilter(),
+)
+
 data class HomeUiState(
     val servers: List<ServerProfile> = emptyList(),
     val activeServerId: String? = null,
     val connectionStatuses: Map<String, ConnectionStatus> = emptyMap(),
-    val threads: List<ThreadSummary> = emptyList(),
-    val recentThreads: List<ThreadSummary> = emptyList(),
-    val projects: List<RecentProject> = emptyList(),
-    val recentProjects: List<RecentProject> = emptyList(),
+    val filter: ThreadFilter = ThreadFilter(),
+    val recentFeed: ThreadFeed = ThreadFeed(),
+    val filteredFeed: ThreadFeed = ThreadFeed(),
     val models: List<ModelOption> = emptyList(),
     val serverNotices: List<ConversationNotice> = emptyList(),
     val threadAttention: Map<String, ThreadAttentionState> = emptyMap(),
     val drafts: List<DraftSummary> = emptyList(),
-    val searchTerm: String = "",
-    val showArchived: Boolean = false,
-    val nextCursor: String? = null,
-    val recentNextCursor: String? = null,
-    val isLoading: Boolean = false,
-    val isRefreshing: Boolean = false,
-    val isLoadingMore: Boolean = false,
-    val isLoadingMoreRecentProjects: Boolean = false,
     val errorMessage: UserFacingError? = null,
 ) {
+    val visibleFeed: ThreadFeed
+        get() = if (filter.isRecent) recentFeed else filteredFeed
+
+    val threads: List<ThreadSummary>
+        get() = visibleFeed.threads
+
+    val recentThreads: List<ThreadSummary>
+        get() = recentFeed.threads
+
+    val projects: List<RecentProject>
+        get() = visibleFeed.projects
+
+    val recentProjects: List<RecentProject>
+        get() = recentFeed.projects
+
+    val searchTerm: String
+        get() = filter.searchTerm
+
+    val showArchived: Boolean
+        get() = filter.showArchived
+
+    val nextCursor: String?
+        get() = visibleFeed.nextCursor
+
+    val recentNextCursor: String?
+        get() = recentFeed.nextCursor
+
+    val isLoading: Boolean
+        get() = visibleFeed.loadState == ThreadFeedLoadState.LOADING
+
+    val isRefreshing: Boolean
+        get() = visibleFeed.loadState == ThreadFeedLoadState.REFRESHING
+
+    val isLoadingMore: Boolean
+        get() = visibleFeed.loadState == ThreadFeedLoadState.APPENDING
+
+    val isLoadingMoreRecentProjects: Boolean
+        get() = recentFeed.loadState == ThreadFeedLoadState.APPENDING
+
     val activeServer: ServerProfile?
         get() = servers.singleOrNull { it.id == activeServerId }
 
@@ -73,6 +132,7 @@ class HomeViewModel(
     private val mutableEvents = Channel<HomeEvent>(Channel.BUFFERED)
     private var refreshJob: Job? = null
     private var searchJob: Job? = null
+    private var appendJob: Job? = null
     private var recentProjectsJob: Job? = null
 
     val state: StateFlow<HomeUiState> = mutableState
@@ -115,38 +175,26 @@ class HomeViewModel(
             repository.activeServerId.collect { serverId ->
                 refreshJob?.cancel()
                 searchJob?.cancel()
+                appendJob?.cancel()
                 recentProjectsJob?.cancel()
                 if (serverId == null) {
                     mutableState.update {
                         it.copy(
-                            threads = emptyList(),
-                            recentThreads = emptyList(),
-                            projects = emptyList(),
-                            recentProjects = emptyList(),
+                            activeServerId = null,
+                            filter = ThreadFilter(),
+                            recentFeed = ThreadFeed(),
+                            filteredFeed = ThreadFeed(),
                             models = emptyList(),
-                            nextCursor = null,
-                            recentNextCursor = null,
-                            isLoading = false,
-                            isRefreshing = false,
-                            isLoadingMore = false,
-                            isLoadingMoreRecentProjects = false,
                         )
                     }
                 } else {
                     mutableState.update {
                         it.copy(
-                            threads = emptyList(),
-                            recentThreads = emptyList(),
-                            projects = emptyList(),
-                            recentProjects = emptyList(),
+                            activeServerId = serverId,
+                            filter = ThreadFilter(),
+                            recentFeed = ThreadFeed(),
+                            filteredFeed = ThreadFeed(),
                             models = emptyList(),
-                            searchTerm = "",
-                            showArchived = false,
-                            nextCursor = null,
-                            recentNextCursor = null,
-                            isRefreshing = false,
-                            isLoadingMore = false,
-                            isLoadingMoreRecentProjects = false,
                         )
                     }
                     requestLoad(serverId)
@@ -163,7 +211,7 @@ class HomeViewModel(
     }
 
     fun selectServer(serverId: String) {
-        mutableState.update { it.copy(searchTerm = "") }
+        mutableState.update { it.copy(filter = ThreadFilter()) }
         viewModelScope.launch {
             runSuspendCatching { repository.selectServer(serverId) }
                 .onFailure(::showError)
@@ -194,28 +242,26 @@ class HomeViewModel(
     fun refresh() {
         val state = mutableState.value
         val serverId = state.activeServerId ?: return
-        if (state.isLoading || state.isLoadingMore) return
+        if (state.isLoading || state.isRefreshing || state.isLoadingMore) return
         requestLoad(serverId, isRefresh = true)
     }
 
     fun search(term: String) {
         refreshJob?.cancel()
         searchJob?.cancel()
+        appendJob?.cancel()
         mutableState.update {
-            val enteringSearch = it.searchTerm.isBlank() && term.isNotBlank() && !it.showArchived
+            val filter = it.filter.copy(searchTerm = term)
             it.copy(
-                threads = if (enteringSearch) emptyList() else it.threads,
-                projects = if (enteringSearch) emptyList() else it.projects,
-                searchTerm = term,
-                nextCursor = null,
-                isLoading = term.isNotBlank() || it.showArchived,
-                isRefreshing = false,
+                filter = filter,
+                filteredFeed = if (filter.isRecent) {
+                    it.filteredFeed
+                } else {
+                    ThreadFeed(loadState = ThreadFeedLoadState.LOADING)
+                },
             )
         }
-        if (term.isBlank() && !mutableState.value.showArchived) {
-            restoreRecentState()
-            return
-        }
+        if (mutableState.value.filter.isRecent) return
         val serverId = mutableState.value.activeServerId ?: return
         searchJob = viewModelScope.launch {
             delay(300)
@@ -226,38 +272,27 @@ class HomeViewModel(
     fun setArchived(show: Boolean) {
         refreshJob?.cancel()
         searchJob?.cancel()
+        appendJob?.cancel()
         mutableState.update {
-            val changingArchive = it.showArchived != show
+            val filter = it.filter.copy(showArchived = show)
             it.copy(
-                threads = if (changingArchive) emptyList() else it.threads,
-                projects = if (changingArchive) emptyList() else it.projects,
-                showArchived = show,
-                nextCursor = null,
-                isLoading = show || it.searchTerm.isNotBlank(),
-                isRefreshing = false,
+                filter = filter,
+                filteredFeed = if (filter.isRecent) {
+                    it.filteredFeed
+                } else {
+                    ThreadFeed(loadState = ThreadFeedLoadState.LOADING)
+                },
             )
         }
-        if (!show && mutableState.value.searchTerm.isBlank()) {
-            restoreRecentState()
-        } else {
-            reloadThreads()
-        }
+        if (!mutableState.value.filter.isRecent) reloadThreads()
     }
 
     fun showRecent() {
         searchJob?.cancel()
         refreshJob?.cancel()
+        appendJob?.cancel()
         mutableState.update {
-            it.copy(
-                threads = it.recentThreads,
-                projects = it.recentProjects,
-                searchTerm = "",
-                showArchived = false,
-                nextCursor = it.recentNextCursor,
-                isLoading = false,
-                isRefreshing = false,
-                isLoadingMore = false,
-            )
+            it.copy(filter = ThreadFilter())
         }
         mutableState.value.activeServerId?.let(::requestLoad)
     }
@@ -266,40 +301,38 @@ class HomeViewModel(
         val state = mutableState.value
         val serverId = state.activeServerId ?: return
         val cursor = state.nextCursor ?: return
-        val recentQuery = !state.showArchived && state.searchTerm.isBlank()
-        if (state.isLoading || state.isLoadingMore || (recentQuery && state.isLoadingMoreRecentProjects)) return
-        viewModelScope.launch {
-            mutableState.update { it.copy(isLoadingMore = true, errorMessage = null) }
-            runSuspendCatching {
-                repository.threadPage(
-                    serverId = serverId,
-                    cursor = cursor,
-                    archived = state.showArchived,
-                    searchTerm = state.searchTerm,
-                )
-            }.onSuccess { page ->
-                val current = mutableState.value
-                if (
-                    current.activeServerId == serverId &&
-                    current.searchTerm == state.searchTerm &&
-                    current.showArchived == state.showArchived
-                ) {
-                    mutableState.update { current ->
-                        val threads = (current.threads + page.data).distinctBy(ThreadSummary::id)
-                        val projects = groupRecentProjects(threads)
-                        val recentQuery = !state.showArchived && state.searchTerm.isBlank()
-                        current.copy(
-                            threads = threads,
-                            recentThreads = if (recentQuery) threads else current.recentThreads,
-                            projects = projects,
-                            recentProjects = if (recentQuery) projects else current.recentProjects,
+        if (state.isLoading || state.isRefreshing || state.isLoadingMore) return
+        val query = ThreadQuery(serverId, state.filter)
+        appendJob = viewModelScope.launch {
+            updateFeed(query) { it.copy(loadState = ThreadFeedLoadState.APPENDING) }
+            mutableState.update { it.copy(errorMessage = null) }
+            try {
+                runSuspendCatching {
+                    repository.threadPage(
+                        serverId = serverId,
+                        cursor = cursor,
+                        archived = query.filter.showArchived,
+                        searchTerm = query.filter.searchTerm,
+                    )
+                }.onSuccess { page ->
+                    updateFeed(query) { feed ->
+                        feed.copy(
+                            threads = (feed.threads + page.data).distinctBy(ThreadSummary::id),
                             nextCursor = page.nextCursor,
-                            recentNextCursor = if (recentQuery) page.nextCursor else current.recentNextCursor,
                         )
                     }
+                }.onFailure { error ->
+                    if (mutableState.value.isVisible(query)) showError(error)
                 }
-            }.onFailure(::showError)
-            mutableState.update { it.copy(isLoadingMore = false) }
+            } finally {
+                updateFeed(query) { feed ->
+                    if (feed.loadState == ThreadFeedLoadState.APPENDING) {
+                        feed.copy(loadState = ThreadFeedLoadState.IDLE)
+                    } else {
+                        feed
+                    }
+                }
+            }
         }
     }
 
@@ -307,44 +340,31 @@ class HomeViewModel(
         val state = mutableState.value
         val serverId = state.activeServerId ?: return
         val cursor = state.recentNextCursor ?: return
-        val showingRecent = !state.showArchived && state.searchTerm.isBlank()
-        if (
-            state.isLoadingMoreRecentProjects ||
-            (showingRecent && (state.isLoading || state.isLoadingMore))
-        ) {
-            return
-        }
+        if (state.recentFeed.loadState != ThreadFeedLoadState.IDLE) return
+        val query = ThreadQuery(serverId)
         recentProjectsJob = viewModelScope.launch {
-            mutableState.update { it.copy(isLoadingMoreRecentProjects = true, errorMessage = null) }
+            updateFeed(query) { it.copy(loadState = ThreadFeedLoadState.APPENDING) }
+            mutableState.update { it.copy(errorMessage = null) }
             try {
                 runSuspendCatching {
                     repository.threadPage(serverId = serverId, cursor = cursor)
                 }.onSuccess { page ->
-                    mutableState.update { current ->
-                        if (current.activeServerId != serverId || current.recentNextCursor != cursor) {
-                            current
-                        } else {
-                            val recentThreads = (current.recentThreads + page.data)
-                                .distinctBy(ThreadSummary::id)
-                            val recentProjects = groupRecentProjects(recentThreads)
-                            val currentShowsRecent = !current.showArchived && current.searchTerm.isBlank()
-                            current.copy(
-                                threads = if (currentShowsRecent) recentThreads else current.threads,
-                                recentThreads = recentThreads,
-                                projects = if (currentShowsRecent) recentProjects else current.projects,
-                                recentProjects = recentProjects,
-                                nextCursor = if (currentShowsRecent) page.nextCursor else current.nextCursor,
-                                recentNextCursor = page.nextCursor,
-                            )
-                        }
+                    updateFeed(query) { feed ->
+                        if (feed.nextCursor != cursor) return@updateFeed feed
+                        feed.copy(
+                            threads = (feed.threads + page.data).distinctBy(ThreadSummary::id),
+                            nextCursor = page.nextCursor,
+                        )
                     }
-                }.onFailure(::showError)
+                }.onFailure { error ->
+                    if (mutableState.value.activeServerId == serverId) showError(error)
+                }
             } finally {
-                mutableState.update {
-                    if (it.activeServerId == serverId) {
-                        it.copy(isLoadingMoreRecentProjects = false)
+                updateFeed(query) { feed ->
+                    if (feed.loadState == ThreadFeedLoadState.APPENDING) {
+                        feed.copy(loadState = ThreadFeedLoadState.IDLE)
                     } else {
-                        it
+                        feed
                     }
                 }
             }
@@ -412,65 +432,42 @@ class HomeViewModel(
         mutableState.update { it.copy(errorMessage = null) }
     }
 
-    private suspend fun loadThreads(serverId: String, isRefresh: Boolean) {
-        mutableState.update {
+    private suspend fun loadThreads(query: ThreadQuery, isRefresh: Boolean) {
+        updateFeed(query) {
             it.copy(
-                isLoading = true,
-                isRefreshing = isRefresh,
-                errorMessage = null,
+                loadState = if (isRefresh) ThreadFeedLoadState.REFRESHING else ThreadFeedLoadState.LOADING,
             )
         }
-        val query = mutableState.value
-        runSuspendCatching {
-            repository.threadPage(
-                serverId = serverId,
-                archived = query.showArchived,
-                searchTerm = query.searchTerm,
-            )
-        }.onSuccess { page ->
-            val current = mutableState.value
-            if (
-                current.activeServerId == serverId &&
-                current.searchTerm == query.searchTerm &&
-                current.showArchived == query.showArchived
-            ) {
-                mutableState.update {
-                    val projects = groupRecentProjects(page.data)
-                    val recentQuery = !query.showArchived && query.searchTerm.isBlank()
-                    it.copy(
+        mutableState.update { it.copy(errorMessage = null) }
+        try {
+            runSuspendCatching {
+                repository.threadPage(
+                    serverId = query.serverId,
+                    archived = query.filter.showArchived,
+                    searchTerm = query.filter.searchTerm,
+                )
+            }.onSuccess { page ->
+                updateFeed(query) {
+                    ThreadFeed(
                         threads = page.data,
-                        recentThreads = if (recentQuery) page.data else it.recentThreads,
-                        projects = projects,
-                        recentProjects = if (recentQuery) projects else it.recentProjects,
                         nextCursor = page.nextCursor,
-                        recentNextCursor = if (recentQuery) page.nextCursor else it.recentNextCursor,
+                        loadState = ThreadFeedLoadState.IDLE,
                     )
                 }
+            }.onFailure { error ->
+                if (mutableState.value.isVisible(query)) showError(error)
             }
-        }.onFailure(::showError)
-        mutableState.update {
-            if (
-                it.activeServerId == serverId &&
-                it.searchTerm == query.searchTerm &&
-                it.showArchived == query.showArchived
-            ) {
-                it.copy(isLoading = false, isRefreshing = false)
-            } else {
-                it
+        } finally {
+            updateFeed(query) { feed ->
+                if (
+                    feed.loadState == ThreadFeedLoadState.LOADING ||
+                    feed.loadState == ThreadFeedLoadState.REFRESHING
+                ) {
+                    feed.copy(loadState = ThreadFeedLoadState.IDLE)
+                } else {
+                    feed
+                }
             }
-        }
-    }
-
-    private fun restoreRecentState() {
-        mutableState.update {
-            it.copy(
-                threads = it.recentThreads,
-                projects = it.recentProjects,
-                nextCursor = it.recentNextCursor,
-                isLoading = false,
-                isRefreshing = false,
-                isLoadingMore = false,
-            )
         }
     }
 
@@ -484,8 +481,17 @@ class HomeViewModel(
     }
 
     private fun requestLoad(serverId: String, isRefresh: Boolean = false) {
+        val state = mutableState.value
+        if (state.activeServerId != serverId) return
+        val query = ThreadQuery(serverId, state.filter)
         refreshJob?.cancel()
-        refreshJob = viewModelScope.launch { loadThreads(serverId, isRefresh) }
+        appendJob?.cancel()
+        if (query.filter.isRecent) recentProjectsJob?.cancel()
+        refreshJob = viewModelScope.launch { loadThreads(query, isRefresh) }
+    }
+
+    private fun updateFeed(query: ThreadQuery, transform: (ThreadFeed) -> ThreadFeed) {
+        mutableState.update { it.withFeed(query, transform) }
     }
 
     private fun showError(error: Throwable) {
@@ -507,5 +513,22 @@ class HomeViewModel(
         ): ViewModelProvider.Factory = viewModelFactory {
             initializer { HomeViewModel(repository, draftRepository) }
         }
+    }
+}
+
+internal fun HomeUiState.isVisible(query: ThreadQuery): Boolean =
+    activeServerId == query.serverId && filter == query.filter
+
+internal fun HomeUiState.withFeed(
+    query: ThreadQuery,
+    transform: (ThreadFeed) -> ThreadFeed,
+): HomeUiState {
+    if (activeServerId != query.serverId) return this
+    return if (query.filter.isRecent) {
+        copy(recentFeed = transform(recentFeed))
+    } else if (filter == query.filter) {
+        copy(filteredFeed = transform(filteredFeed))
+    } else {
+        this
     }
 }

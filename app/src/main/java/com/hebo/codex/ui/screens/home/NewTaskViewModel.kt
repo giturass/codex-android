@@ -11,7 +11,6 @@ import com.hebo.codex.domain.DraftAttachment
 import com.hebo.codex.domain.DraftKey
 import com.hebo.codex.domain.DraftRepository
 import com.hebo.codex.domain.DraftTarget
-import com.hebo.codex.domain.FeatureArea
 import com.hebo.codex.domain.FeatureEntry
 import com.hebo.codex.domain.ModelOption
 import com.hebo.codex.domain.ThreadOptions
@@ -20,11 +19,10 @@ import com.hebo.codex.domain.UserInputPart
 import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.domain.newDraftRevision
 import com.hebo.codex.domain.quickPhraseInput
-import com.hebo.codex.ui.screens.chat.availableInputResources
+import com.hebo.codex.domain.loadInputResources
 import com.hebo.codex.util.runSuspendCatching
 import com.hebo.codex.util.toUserFacingError
 import java.util.UUID
-import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -149,36 +147,17 @@ class NewTaskViewModel(
         viewModelScope.launch {
             mutableState.update { it.copy(isLoadingResources = true) }
             val cwd = current.cwd.takeIf(String::isNotBlank)
-            val skillsDeferred = async {
-                runSuspendCatching {
-                    repository.featureCatalog(serverId, FeatureArea.SKILLS, cwd, forceRefresh = forceRefresh)
-                }
-            }
-            val appsDeferred = async {
-                runSuspendCatching {
-                    repository.featureCatalog(serverId, FeatureArea.APPS, cwd, forceRefresh = forceRefresh)
-                }
-            }
-            val pluginsDeferred = async {
-                runSuspendCatching {
-                    repository.featureCatalog(serverId, FeatureArea.PLUGINS, cwd, forceRefresh = forceRefresh)
-                }
-            }
-            val skills = skillsDeferred.await()
-            val apps = appsDeferred.await()
-            val plugins = pluginsDeferred.await()
-            val failure = skills.exceptionOrNull()
-                ?: apps.exceptionOrNull()
-                ?: plugins.exceptionOrNull()
+            val result = loadInputResources(
+                repository = repository,
+                serverId = serverId,
+                cwd = cwd,
+                forceRefresh = forceRefresh,
+            )
             mutableState.update {
                 it.copy(
-                    inputResources = availableInputResources(
-                        skills = skills.getOrNull()?.entries.orEmpty(),
-                        apps = apps.getOrNull()?.entries.orEmpty(),
-                        plugins = plugins.getOrNull()?.entries.orEmpty(),
-                    ),
+                    inputResources = result.entries,
                     isLoadingResources = false,
-                    errorMessage = failure?.toUserFacingError("无法加载输入资源"),
+                    errorMessage = result.failure?.toUserFacingError("无法加载输入资源"),
                 )
             }
         }
