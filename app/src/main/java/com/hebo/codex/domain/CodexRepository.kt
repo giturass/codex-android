@@ -25,6 +25,7 @@ import com.hebo.codex.data.remote.requiredString
 import com.hebo.codex.util.runSuspendCatching
 import com.hebo.codex.util.serverError
 import com.hebo.codex.util.toUserFacingError
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -59,10 +60,7 @@ class CodexRepository(
     private val applicationScope: CoroutineScope,
     private val notifyConversation: (ConversationNotification) -> Unit = {},
 ) {
-    private val connectionMutex = Mutex()
     private val conversationMutex = Mutex()
-    private val connections = ConcurrentHashMap<String, AppServerConnection>()
-    private val connectionObservers = mutableMapOf<String, List<Job>>()
     private val conversations = ConcurrentHashMap<ConversationKey, MutableStateFlow<ConversationState>>()
     private val conversationLeases = ConversationLeaseRegistry<ConversationKey>()
     private val pendingResumeGoalSnapshots = ConcurrentHashMap.newKeySet<ConversationKey>()
@@ -75,6 +73,31 @@ class CodexRepository(
     private val mutableServerNotices = MutableStateFlow<Map<String, List<ConversationNotice>>>(emptyMap())
     private val threadAttentionRevision = AtomicLong()
     private val mutableThreadAttention = MutableStateFlow<Map<String, Map<String, ThreadAttentionState>>>(emptyMap())
+    private val connections = ConnectionCoordinator(
+        scope = applicationScope,
+        isAvailable = { managed ->
+            managed.connection.status.value is ConnectionStatus.Connected
+        },
+        openConnection = ::establishConnection,
+        closeConnection = ::closeManagedConnection,
+        onConnecting = { serverId ->
+            clearConnectionState(serverId)
+            mutableConnectionStatuses.updateValue(serverId, ConnectionStatus.Connecting)
+        },
+        onConnected = { serverId, managed ->
+            managed.observers = observeConnection(serverId, managed)
+            mutableConnectionStatuses.updateValue(serverId, ConnectionStatus.Connected)
+        },
+        onFailed = { serverId, error ->
+            mutableConnectionStatuses.updateValue(
+                serverId,
+                ConnectionStatus.Failed(error.toUserFacingError("连接服务器失败")),
+            )
+        },
+        onCancelled = { serverId ->
+            mutableConnectionStatuses.updateValue(serverId, ConnectionStatus.Disconnected)
+        },
+    )
 
     val serverSettings: StateFlow<ServerSettings> = serverStore.settings.stateIn(
         scope = applicationScope,
@@ -137,10 +160,8 @@ class CodexRepository(
         serverStore.updateServer(profile, normalizedToken)
         serverSettings.first { stored -> stored.servers.singleOrNull { it.id == serverId } == profile }
 
-        connectionMutex.withLock {
-            closeConnectionLocked(serverId)
-        }
-        mutableConnectionStatuses.updateValue(serverId, ConnectionStatus.Disconnected)
+        connections.close(serverId)
+        clearConnectionState(serverId)
         conversations.entries
             .filter { it.key.serverId == serverId }
             .forEach { (_, conversation) ->
@@ -154,22 +175,24 @@ class CodexRepository(
     }
 
     suspend fun selectServer(serverId: String) {
+        val previousServerId = serverStore.settings.first().activeServerId
         serverStore.selectServer(serverId)
+        if (previousServerId != null && previousServerId != serverId) {
+            connections.cancelAttempt(previousServerId)
+        }
         connect(serverId)
     }
 
     suspend fun removeServer(serverId: String) {
-        connectionMutex.withLock {
-            closeConnectionLocked(serverId)
-        }
-        mutableConnectionStatuses.updateValue(serverId, ConnectionStatus.Disconnected)
+        connections.close(serverId)
+        clearConnectionState(serverId)
         conversations.keys.filter { it.serverId == serverId }.forEach { conversations.remove(it) }
         pendingItemUpdates.keys.removeIf { it.serverId == serverId }
         serverStore.removeServer(serverId)
     }
 
     suspend fun connect(serverId: String) {
-        api(serverId)
+        api(serverId, retryFailed = true)
     }
 
     suspend fun threadPage(
@@ -650,13 +673,13 @@ class CodexRepository(
     suspend fun configuration(serverId: String, cwd: String?): ServerConfiguration =
         StableFeatureApi(api(serverId)).configuration(cwd)
 
-    private suspend fun api(serverId: String): AppServerApi = connectionMutex.withLock {
-        val existing = connections[serverId]
-        if (existing?.status?.value is ConnectionStatus.Connected) return@withLock AppServerApi(existing)
-        closeConnectionLocked(serverId)
+    private suspend fun api(
+        serverId: String,
+        retryFailed: Boolean = false,
+    ): AppServerApi = AppServerApi(connections.connection(serverId, retryFailed).connection)
 
+    private suspend fun establishConnection(serverId: String): ManagedConnection {
         val server = awaitServer(serverId)
-        mutableConnectionStatuses.updateValue(serverId, ConnectionStatus.Connecting)
         val connection = clientFactory.create(
             endpoint = server.webSocketUrl,
             token = serverStore.readToken(serverId),
@@ -664,19 +687,15 @@ class CodexRepository(
         )
         try {
             connection.connect()
-            connections[serverId] = connection
             val api = AppServerApi(connection)
             restoreConversations(serverId, server, api)
             check(connection.status.value is ConnectionStatus.Connected) { "服务器连接已中断" }
-            observeConnection(serverId, connection)
-            mutableConnectionStatuses.updateValue(serverId, ConnectionStatus.Connected)
-            api
+            return ManagedConnection(connection)
+        } catch (error: CancellationException) {
+            connection.abort()
+            throw error
         } catch (error: Throwable) {
-            connection.close()
-            mutableConnectionStatuses.updateValue(
-                serverId,
-                ConnectionStatus.Failed(error.toUserFacingError("连接服务器失败")),
-            )
+            connection.abort()
             throw error
         }
     }
@@ -685,14 +704,22 @@ class CodexRepository(
         val connection = clientFactory.create(endpoint, token, applicationScope.coroutineContext)
         try {
             connection.connect()
-        } finally {
             connection.close()
+        } catch (error: CancellationException) {
+            connection.abort()
+            throw error
+        } catch (error: Throwable) {
+            connection.abort()
+            throw error
         }
     }
 
-    private fun closeConnectionLocked(serverId: String) {
-        connectionObservers.remove(serverId)?.forEach { it.cancel() }
-        connections.remove(serverId)?.close()
+    private fun closeManagedConnection(managed: ManagedConnection) {
+        managed.observers.forEach(Job::cancel)
+        managed.connection.close()
+    }
+
+    private fun clearConnectionState(serverId: String) {
         pendingResumeGoalSnapshots.removeIf { it.serverId == serverId }
         clearServerPendingRequests(serverId)
     }
@@ -726,14 +753,21 @@ class CodexRepository(
             }
     }
 
-    private fun observeConnection(serverId: String, connection: AppServerConnection) {
+    private fun observeConnection(
+        serverId: String,
+        managed: ManagedConnection,
+    ): List<Job> {
+        val connection = managed.connection
         val statusObserver = applicationScope.launch {
             connection.status.collect { status ->
-                mutableConnectionStatuses.updateValue(serverId, status)
+                if (connections.isCurrent(serverId, managed)) {
+                    mutableConnectionStatuses.updateValue(serverId, status)
+                }
             }
         }
         val eventObserver = applicationScope.launch {
             connection.events.collect { event ->
+                if (!connections.isCurrent(serverId, managed)) return@collect
                 try {
                     handleServerEvent(serverId, connection, event)
                 } catch (error: Throwable) {
@@ -746,7 +780,7 @@ class CodexRepository(
                 }
             }
         }
-        connectionObservers[serverId] = listOf(statusObserver, eventObserver)
+        return listOf(statusObserver, eventObserver)
     }
 
     private fun handleServerEvent(
@@ -1270,7 +1304,11 @@ class CodexRepository(
             ProtocolMapper.threadSnapshot(api(key.serverId).readThread(key.threadId))
         }
         return firstResult.getOrElse { error ->
-            if (connections[key.serverId]?.status?.value is ConnectionStatus.Connected) throw error
+            if (
+                connections.current(key.serverId)?.connection?.status?.value is ConnectionStatus.Connected
+            ) {
+                throw error
+            }
             ProtocolMapper.threadSnapshot(api(key.serverId).readThread(key.threadId))
         }
     }
@@ -1384,7 +1422,7 @@ class CodexRepository(
     ) {
         val route = pendingRequestRoutes[key] ?: error("服务端请求已失效")
         check(route.threadId == threadId) { "服务端请求不属于当前会话" }
-        val connection = connections[serverId] ?: error("服务器未连接")
+        val connection = connections.current(serverId)?.connection ?: error("服务器未连接")
         connection.respond(route.id, result)
         pendingRequestRoutes.remove(key)
         val conversation = conversations[ConversationKey(serverId, threadId)] ?: return
@@ -1494,6 +1532,11 @@ class CodexRepository(
     )
 
     private data class PendingRequestRoute(val id: JsonPrimitive, val threadId: String)
+
+    private class ManagedConnection(
+        val connection: AppServerConnection,
+        var observers: List<Job> = emptyList(),
+    )
 
     private companion object {
         const val LOG_TAG = "CodexRepository"

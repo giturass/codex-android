@@ -7,6 +7,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -69,7 +70,13 @@ class AppServerConnection(
             .header("Authorization", "Bearer $token")
             .build()
         webSocket = okHttpClient.newWebSocket(request, Listener())
-        withTimeout(CONNECT_TIMEOUT_MILLIS) { ready.await() }
+        try {
+            withTimeout(CONNECT_TIMEOUT_MILLIS) { ready.await() }
+        } catch (error: TimeoutCancellationException) {
+            val connectionError = ConnectionException("连接超时", error)
+            failConnection(connectionError)
+            throw connectionError
+        }
     }
 
     suspend fun request(method: String, params: JsonObject? = null): JsonElement {
@@ -111,9 +118,23 @@ class AppServerConnection(
     }
 
     fun close() {
+        terminate(abort = false)
+    }
+
+    fun abort() {
+        terminate(abort = true)
+    }
+
+    private fun terminate(abort: Boolean) {
         if (!closed.compareAndSet(false, true)) return
         val error = ProtocolException("连接已关闭")
-        if (::webSocket.isInitialized) webSocket.close(NORMAL_CLOSURE, "client closed")
+        if (::webSocket.isInitialized) {
+            if (abort) {
+                webSocket.cancel()
+            } else {
+                webSocket.close(NORMAL_CLOSURE, "client closed")
+            }
+        }
         if (!ready.isCompleted) ready.completeExceptionally(error)
         failPending(error)
         eventChannel.close()
