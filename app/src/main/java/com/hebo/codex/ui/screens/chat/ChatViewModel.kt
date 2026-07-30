@@ -313,6 +313,21 @@ class ChatViewModel(
         }
     }
 
+    suspend fun runShellCommand(command: String): Boolean {
+        val current = mutableState.value
+        if (current.connectionStatus !is ConnectionStatus.Connected) {
+            showError(IllegalStateException("服务器已断开"))
+            return false
+        }
+        if (current.conversation?.isRunning == true) {
+            showError(IllegalStateException("当前任务结束后才能执行 Shell 命令"))
+            return false
+        }
+        return runSuspendCatching {
+            repository.runShellCommand(serverId, threadId, command)
+        }.onFailure(::showError).isSuccess
+    }
+
     suspend fun getRemoteFileMetadata(path: String): RemoteFileMetadata =
         repository.getRemoteFileMetadata(serverId, path)
 

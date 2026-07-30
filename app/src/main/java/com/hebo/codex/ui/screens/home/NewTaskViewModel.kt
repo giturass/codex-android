@@ -20,6 +20,9 @@ import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.domain.newDraftRevision
 import com.hebo.codex.domain.quickPhraseInput
 import com.hebo.codex.domain.loadInputResources
+import com.hebo.codex.ui.screens.chat.isShellCommandInput
+import com.hebo.codex.ui.screens.chat.shellCommandBlockReason
+import com.hebo.codex.ui.screens.chat.shellCommandFromInput
 import com.hebo.codex.util.runSuspendCatching
 import com.hebo.codex.util.toUserFacingError
 import java.util.UUID
@@ -177,6 +180,22 @@ class NewTaskViewModel(
     fun startConversation() {
         val current = mutableState.value
         if (current.isCreatingConversation || current.isLoadingDraft) return
+        if (isShellCommandInput(current.message)) {
+            val command = shellCommandFromInput(current.message)
+            val validationError = shellCommandBlockReason(
+                message = current.message,
+                attachmentCount = current.attachments.size,
+                isRunning = false,
+            ) ?: if (command == null) "Shell 命令不能为空" else null
+            if (validationError != null) {
+                showError(IllegalArgumentException(validationError))
+                return
+            }
+            submitConversation(current, consumesDraft = true) { serverId, threadId ->
+                repository.runShellCommand(serverId, threadId, requireNotNull(command))
+            }
+            return
+        }
         val input = buildList {
             current.message.takeIf(String::isNotBlank)?.let { add(UserInputPart.Text(it)) }
             addAll(current.attachments.map(DraftAttachment::input))
@@ -185,19 +204,24 @@ class NewTaskViewModel(
             showError(IllegalArgumentException("请输入任务内容"))
             return
         }
-        submitConversation(current, input, consumesDraft = true)
+        submitConversation(current, consumesDraft = true) { serverId, threadId ->
+            repository.sendMessage(serverId, threadId, input, current.options.toTurnOptions())
+        }
     }
 
     fun sendQuickPhrase(content: String) {
         val current = mutableState.value
         if (current.isCreatingConversation || current.isLoadingDraft) return
-        submitConversation(current, quickPhraseInput(content), consumesDraft = false)
+        val input = quickPhraseInput(content)
+        submitConversation(current, consumesDraft = false) { serverId, threadId ->
+            repository.sendMessage(serverId, threadId, input, current.options.toTurnOptions())
+        }
     }
 
     private fun submitConversation(
         submission: NewTaskUiState,
-        input: List<UserInputPart>,
         consumesDraft: Boolean,
+        submit: suspend (serverId: String, threadId: String) -> Unit,
     ) {
         val serverId = submission.serverId ?: return
         if (submission.cwd.isBlank()) {
@@ -217,7 +241,7 @@ class NewTaskViewModel(
             createdThreadId = threadId
 
             runSuspendCatching {
-                repository.sendMessage(serverId, threadId, input, submission.options.toTurnOptions())
+                submit(serverId, threadId)
             }
                 .onSuccess {
                     if (consumesDraft) {

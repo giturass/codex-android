@@ -75,6 +75,7 @@ import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PriorityHigh
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Terminal
@@ -150,6 +151,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.hebo.codex.R
 import com.hebo.codex.domain.ActivityStatus
+import com.hebo.codex.domain.AgentMessagePhase
 import com.hebo.codex.domain.ApprovalDecision
 import com.hebo.codex.domain.ApprovalPolicy
 import com.hebo.codex.domain.ApprovalReviewer
@@ -206,7 +208,11 @@ import dev.chrisbanes.haze.HazeTint
 import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
+import com.mikepenz.markdown.compose.components.MarkdownComponentModel
+import com.mikepenz.markdown.compose.components.MarkdownComponents
 import com.mikepenz.markdown.compose.components.markdownComponents
+import com.mikepenz.markdown.compose.elements.MarkdownCodeFence
+import com.mikepenz.markdown.compose.elements.MarkdownHighlightedCode
 import com.mikepenz.markdown.compose.elements.MarkdownTable
 import com.mikepenz.markdown.compose.elements.MarkdownTableHeader
 import com.mikepenz.markdown.compose.elements.MarkdownTableRow
@@ -218,9 +224,22 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.max
 
-private val highlightedMarkdownComponents = markdownComponents(
+private fun chatMarkdownComponents(
+    onRunShellCommand: (suspend (String) -> Boolean)?,
+    shellCommandDisabled: Boolean,
+): MarkdownComponents = markdownComponents(
     codeBlock = highlightedCodeBlock,
-    codeFence = highlightedCodeFence,
+    codeFence = if (onRunShellCommand == null) {
+        highlightedCodeFence
+    } else {
+        { model ->
+            ExecutableMarkdownCodeFence(
+                model = model,
+                shellCommandDisabled = shellCommandDisabled,
+                onRunShellCommand = onRunShellCommand,
+            )
+        }
+    },
     table = { model ->
         MarkdownTable(
             content = model.content,
@@ -505,6 +524,9 @@ fun ChatScreen(
                                 cwd = conversation.cwd,
                                 onOpenRemoteFile = { remoteFileTarget = it },
                                 onLinkError = showLinkError,
+                                shellCommandDisabled = conversation.isRunning ||
+                                    state.connectionStatus !is ConnectionStatus.Connected,
+                                onRunShellCommand = viewModel::runShellCommand,
                                 onOpenActivityDetails = { activityDetailsRowKey = row.key },
                             )
                             is ConversationRow.ActivityGroup -> ActivityGroupCard(
@@ -1173,12 +1195,21 @@ private fun ConversationItemView(
     cwd: String,
     onOpenRemoteFile: (RemoteFileTarget) -> Unit,
     onLinkError: (String) -> Unit,
+    shellCommandDisabled: Boolean,
+    onRunShellCommand: suspend (String) -> Boolean,
     onOpenActivityDetails: () -> Unit,
 ) {
     when (item) {
         is ConversationItem.UserMessage -> UserMessage(item)
         is ConversationItem.UserShellCommand -> UserShellCommand(item, serverName)
-        is ConversationItem.AgentMessage -> AgentMessage(item, cwd, onOpenRemoteFile, onLinkError)
+        is ConversationItem.AgentMessage -> AgentMessage(
+            item = item,
+            cwd = cwd,
+            onOpenRemoteFile = onOpenRemoteFile,
+            onLinkError = onLinkError,
+            shellCommandDisabled = shellCommandDisabled,
+            onRunShellCommand = onRunShellCommand,
+        )
         is ConversationItem.Plan -> PlanSnapshot(
             item = item,
             isActive = ConversationItemKey(item.turnId, item.id) in activeItemKeys,
@@ -1332,6 +1363,8 @@ private fun AgentMessage(
     cwd: String,
     onOpenRemoteFile: (RemoteFileTarget) -> Unit,
     onLinkError: (String) -> Unit,
+    shellCommandDisabled: Boolean,
+    onRunShellCommand: suspend (String) -> Boolean,
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 2.dp)) {
         SelectionContainer {
@@ -1340,6 +1373,10 @@ private fun AgentMessage(
                 cwd = cwd,
                 onOpenRemoteFile = onOpenRemoteFile,
                 onLinkError = onLinkError,
+                onRunShellCommand = onRunShellCommand.takeIf {
+                    item.phase == AgentMessagePhase.FINAL_ANSWER
+                },
+                shellCommandDisabled = shellCommandDisabled,
             )
         }
     }
@@ -1351,12 +1388,17 @@ internal fun ChatMarkdown(
     cwd: String,
     onOpenRemoteFile: (RemoteFileTarget) -> Unit,
     onLinkError: (String) -> Unit,
+    onRunShellCommand: (suspend (String) -> Boolean)? = null,
+    shellCommandDisabled: Boolean = false,
 ) {
     val markdownState = rememberMarkdownState(content = content, retainState = true)
     val externalUriHandler = LocalUriHandler.current
     var pendingExternalUri by remember { mutableStateOf<String?>(null) }
     val currentOpenRemoteFile by rememberUpdatedState(onOpenRemoteFile)
     val currentLinkError by rememberUpdatedState(onLinkError)
+    val components = remember(onRunShellCommand, shellCommandDisabled) {
+        chatMarkdownComponents(onRunShellCommand, shellCommandDisabled)
+    }
     val uriHandler = remember(cwd, externalUriHandler) {
         object : UriHandler {
             override fun openUri(uri: String) {
@@ -1372,7 +1414,7 @@ internal fun ChatMarkdown(
     CompositionLocalProvider(LocalUriHandler provides uriHandler) {
         Markdown(
             markdownState = markdownState,
-            components = highlightedMarkdownComponents,
+            components = components,
             modifier = Modifier.fillMaxWidth(),
         )
     }
@@ -1388,6 +1430,74 @@ internal fun ChatMarkdown(
         )
     }
 }
+
+@Composable
+private fun ExecutableMarkdownCodeFence(
+    model: MarkdownComponentModel,
+    shellCommandDisabled: Boolean,
+    onRunShellCommand: suspend (String) -> Boolean,
+) {
+    MarkdownCodeFence(model.content, model.node, model.typography.code) { source, language, style ->
+        var confirmationOpen by remember(source, language) { mutableStateOf(false) }
+        var submitting by remember(source, language) { mutableStateOf(false) }
+        val scope = rememberCoroutineScope()
+        Column {
+            if (isExecutableShellCode(language, source)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(
+                        onClick = { confirmationOpen = true },
+                        enabled = !shellCommandDisabled && !submitting,
+                    ) {
+                        if (submitting) {
+                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Rounded.PlayArrow, contentDescription = null)
+                        }
+                        Spacer(Modifier.width(4.dp))
+                        Text(if (submitting) "执行中" else "执行")
+                    }
+                }
+            }
+            MarkdownHighlightedCode(source, language, style)
+        }
+        if (confirmationOpen) {
+            AlertDialog(
+                onDismissRequest = { confirmationOpen = false },
+                title = { Text("确认执行这段 Shell 命令？") },
+                text = { Text("命令将在服务端当前项目目录直接执行，不受 Codex 沙箱限制") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            confirmationOpen = false
+                            scope.launch {
+                                submitting = true
+                                try {
+                                    onRunShellCommand(source)
+                                } finally {
+                                    submitting = false
+                                }
+                            }
+                        },
+                    ) {
+                        Text("执行")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { confirmationOpen = false }) {
+                        Text("取消")
+                    }
+                },
+            )
+        }
+    }
+}
+
+internal fun isExecutableShellCode(language: String?, source: String): Boolean =
+    source.isNotBlank() &&
+        language?.trim()?.substringBefore(' ')?.lowercase() in setOf("bash", "sh", "zsh")
 
 @Composable
 private fun ExternalLinkConfirmationDialog(

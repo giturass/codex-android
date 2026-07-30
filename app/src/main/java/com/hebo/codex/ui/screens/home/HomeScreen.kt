@@ -88,9 +88,11 @@ import com.hebo.codex.ui.quickphrases.QuickPhraseViewModel
 import com.hebo.codex.ui.screens.chat.ComposerCommand
 import com.hebo.codex.ui.screens.chat.ConversationComposer
 import com.hebo.codex.ui.screens.chat.ConversationFloatingHeader
+import com.hebo.codex.ui.screens.chat.ShellCommandTarget
 import com.hebo.codex.ui.screens.chat.composerModelLabel
 
 private val NewTaskComposerCommands = listOf(
+    ComposerCommand.SHELL,
     ComposerCommand.PHRASE,
     ComposerCommand.SETTINGS,
     ComposerCommand.ATTACH,
@@ -195,6 +197,7 @@ fun HomeScreen(
             }
 
             else -> NewTaskContent(
+                serverName = activeServer.name,
                 message = newTaskState.message,
                 attachments = newTaskState.attachments,
                 modelLabel = composerModelLabel(newTaskState.options.model, null, state.models),
@@ -271,6 +274,7 @@ fun HomeScreen(
 
 @Composable
 private fun NewTaskContent(
+    serverName: String,
     message: String,
     attachments: List<DraftAttachment>,
     modelLabel: String,
@@ -380,7 +384,7 @@ private fun NewTaskContent(
             ConversationComposer(
                 serverId = null,
                 conversationId = null,
-                shellTarget = null,
+                shellTarget = ShellCommandTarget(serverName, cwd),
                 isRunning = false,
                 plan = null,
                 activeTurnId = null,

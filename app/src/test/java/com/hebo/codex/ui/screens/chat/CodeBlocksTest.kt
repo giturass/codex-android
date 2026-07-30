@@ -3,10 +3,21 @@ package com.hebo.codex.ui.screens.chat
 import androidx.compose.ui.text.AnnotatedString
 import com.hebo.codex.domain.FileChangeKind
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CodeBlocksTest {
+    @Test
+    fun onlyNonEmptyShellFencesAreExecutable() {
+        assertTrue(isExecutableShellCode("bash", "echo ready"))
+        assertTrue(isExecutableShellCode("sh title=setup", "make test"))
+        assertTrue(isExecutableShellCode("ZSH", "pwd"))
+        assertFalse(isExecutableShellCode("console", "$ echo ready"))
+        assertFalse(isExecutableShellCode("kotlin", "println(\"ready\")"))
+        assertFalse(isExecutableShellCode("bash", "  "))
+    }
+
     @Test
     fun classifiesWholeAddedAndDeletedFilesByChangeKind() {
         assertEquals(DiffLineKind.ADDITION, classifyDiffLine(FileChangeKind.Add, "-literal content"))
