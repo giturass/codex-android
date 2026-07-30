@@ -30,7 +30,7 @@ internal fun ConversationState.withUpdatedConversationItem(
     markActive: Boolean,
     transform: (ConversationItem) -> ConversationItem,
 ): ConversationState? {
-    val turns = history.turns.replaceConversationItem(turnId, itemId, transform) ?: return null
+    val turns = history.turns.replaceTurnItem(turnId, itemId, transform) ?: return null
     val key = ConversationItemKey(turnId, itemId)
     return copy(
         history = history.copy(turns = turns),
@@ -161,7 +161,7 @@ private fun List<ConversationTurn>.upsertConversationItem(
     }
 }
 
-private fun List<ConversationTurn>.replaceConversationItem(
+private fun List<ConversationTurn>.replaceTurnItem(
     turnId: String,
     itemId: String,
     transform: (ConversationItem) -> ConversationItem,

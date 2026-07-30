@@ -422,10 +422,10 @@ fun ChatScreen(
     val pageOverlapPx = with(density) { ChatPageOverlap.roundToPx() }
     val liveEdgeHeightPx = with(density) { 1.dp.roundToPx() }
     val history = conversation?.history
-    val showHistoryPaging = history?.let {
+    val historyPaging = history?.takeIf {
         it.olderTurnsCursor != null || it.isLoadingOlderTurns || it.olderTurnsError != null
-    } == true
-    val liveEdgeIndex = conversationRows.size + if (showHistoryPaging) 1 else 0
+    }
+    val liveEdgeIndex = conversationRows.size + if (historyPaging != null) 1 else 0
     val pagingController = rememberChatPagingController(
         conversationId = conversation?.threadId,
         isRunning = conversation?.isRunning == true,
@@ -484,11 +484,11 @@ fun ChatScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
-                if (showHistoryPaging && history != null) {
+                if (historyPaging != null) {
                     item(CHAT_HISTORY_PAGING_KEY) {
                         HistoryPagingControl(
-                            isLoading = history.isLoadingOlderTurns,
-                            error = history.olderTurnsError,
+                            isLoading = historyPaging.isLoadingOlderTurns,
+                            error = historyPaging.olderTurnsError,
                             onLoad = viewModel::loadOlderTurns,
                             onRetry = viewModel::retryOlderTurns,
                         )

@@ -1090,9 +1090,12 @@ class CodexRepository(
     private fun requireConversation(serverId: String, threadId: String): MutableStateFlow<ConversationState> =
         conversations[ConversationKey(serverId, threadId)] ?: error("会话尚未打开")
 
+    private suspend fun resumeConversation(key: ConversationKey): ThreadSnapshot =
+        resumeConversation(key, api(key.serverId))
+
     private suspend fun resumeConversation(
         key: ConversationKey,
-        api: AppServerApi = api(key.serverId),
+        api: AppServerApi,
     ): ThreadSnapshot {
         pendingResumeGoalSnapshots.add(key)
         return try {
