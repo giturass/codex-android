@@ -7,7 +7,16 @@ internal fun ConversationState.withConversationItem(
     item: ConversationItem,
     isActive: Boolean,
 ): ConversationState = copy(
-    items = items.upsertConversationItem(item),
+    history = history.copy(
+        turns = history.turns.upsertConversationItem(
+            item = item,
+            defaultStatus = if (activeTurnId == item.turnId || isRunning) {
+                ConversationTurnStatus.IN_PROGRESS
+            } else {
+                ConversationTurnStatus.COMPLETED
+            },
+        ),
+    ),
     activeItemKeys = if (isActive && item.usesTransientActivityState) {
         activeItemKeys + item.key
     } else {
@@ -21,10 +30,10 @@ internal fun ConversationState.withUpdatedConversationItem(
     markActive: Boolean,
     transform: (ConversationItem) -> ConversationItem,
 ): ConversationState? {
-    val items = items.replaceConversationItem(turnId, itemId, transform) ?: return null
+    val turns = history.turns.replaceConversationItem(turnId, itemId, transform) ?: return null
     val key = ConversationItemKey(turnId, itemId)
     return copy(
-        items = items,
+        history = history.copy(turns = turns),
         activeItemKeys = if (markActive) activeItemKeys + key else activeItemKeys,
     )
 }
@@ -39,8 +48,27 @@ internal fun ConversationState.withRestoredConversation(
     require(serverId == restored.serverId && threadId == restored.threadId) {
         "恢复状态不属于当前会话"
     }
-    val restoredTurnId = restored.activeTurnId ?: return restored
-    if (activeTurnId != restoredTurnId) return restored
+    val restoredTurnIds = restored.history.turns.mapTo(mutableSetOf(), ConversationTurn::id)
+    val firstSharedTurnIndex = history.turns.indexOfFirst { it.id in restoredTurnIds }
+    val retainedTurns = if (firstSharedTurnIndex > 0) {
+        history.turns.take(firstSharedTurnIndex)
+    } else {
+        emptyList()
+    }
+    fun mergedHistory(turns: List<ConversationTurn>) = restored.history.copy(
+        turns = retainedTurns + turns,
+        olderTurnsCursor = if (retainedTurns.isEmpty()) {
+            restored.history.olderTurnsCursor
+        } else {
+            history.olderTurnsCursor
+        },
+    )
+    val restoredTurnId = restored.activeTurnId
+    if (restoredTurnId == null || activeTurnId != restoredTurnId) {
+        return restored.copy(
+            history = mergedHistory(restored.history.turns),
+        )
+    }
 
     val restoredKeys = restored.items.mapTo(mutableSetOf(), ConversationItem::key)
     val currentItems = items.associateBy { it.key }
@@ -48,19 +76,22 @@ internal fun ConversationState.withRestoredConversation(
         key.turnId == restoredTurnId && key !in restoredKeys &&
             currentItems[key]?.usesTransientActivityState == true
     }
-    if (retainedKeys.isEmpty()) return restored
+    if (retainedKeys.isEmpty()) {
+        return restored.copy(
+            history = mergedHistory(restored.history.turns),
+        )
+    }
 
-    val restoredByKey = restored.items.associateByTo(LinkedHashMap(), ConversationItem::key)
-    val mergedItems = buildList {
-        items.forEach { current ->
-            val replacement = restoredByKey.remove(current.key)
-            if (replacement != null) add(replacement)
-            else if (current.key in retainedKeys) add(current)
-        }
-        addAll(restoredByKey.values)
+    val retainedItems = history.turns
+        .singleOrNull { it.id == restoredTurnId }
+        ?.items
+        .orEmpty()
+        .filter { it.key in retainedKeys }
+    val mergedTurns = restored.history.turns.map { turn ->
+        if (turn.id == restoredTurnId) turn.copy(items = turn.items + retainedItems) else turn
     }
     return restored.copy(
-        items = mergedItems,
+        history = mergedHistory(mergedTurns),
         activeItemKeys = restored.activeItemKeys + retainedKeys,
     )
 }
@@ -73,7 +104,7 @@ internal fun ConversationState.withRefreshedConversation(
         serverName = merged.serverName,
         title = merged.title,
         cwd = merged.cwd,
-        items = merged.items,
+        history = merged.history,
         activeItemKeys = merged.activeItemKeys,
         activeTurnId = merged.activeTurnId,
         isRunning = merged.isRunning,
@@ -110,6 +141,38 @@ internal fun List<ConversationItem>.replaceConversationItem(
     val index = indexOfFirst { item -> item.turnId == turnId && item.id == itemId }
     if (index == -1) return null
     return toMutableList().apply { set(index, transform(get(index))) }
+}
+
+private fun List<ConversationTurn>.upsertConversationItem(
+    item: ConversationItem,
+    defaultStatus: ConversationTurnStatus,
+): List<ConversationTurn> {
+    val turnIndex = indexOfFirst { it.id == item.turnId }
+    if (turnIndex == -1) {
+        return this + ConversationTurn(
+            id = item.turnId,
+            status = defaultStatus,
+            items = listOf(item),
+        )
+    }
+    return toMutableList().apply {
+        val turn = get(turnIndex)
+        set(turnIndex, turn.copy(items = turn.items.upsertConversationItem(item)))
+    }
+}
+
+private fun List<ConversationTurn>.replaceConversationItem(
+    turnId: String,
+    itemId: String,
+    transform: (ConversationItem) -> ConversationItem,
+): List<ConversationTurn>? {
+    val turnIndex = indexOfFirst { it.id == turnId }
+    if (turnIndex == -1) return null
+    val turn = get(turnIndex)
+    val updatedItems = turn.items.replaceConversationItem(turnId, itemId, transform) ?: return null
+    return toMutableList().apply {
+        set(turnIndex, turn.copy(items = updatedItems))
+    }
 }
 
 private fun ConversationItem.hasSameIdentity(other: ConversationItem): Boolean =

@@ -25,6 +25,7 @@ internal sealed interface ConversationEvent {
 
     data class TurnCompleted(
         val turnId: String,
+        val status: ConversationTurnStatus,
         val error: UserFacingError?,
     ) : ConversationEvent
 
@@ -73,6 +74,11 @@ internal fun ConversationState.reduceConversationEvent(
     is ConversationEvent.TokenUsageUpdated -> copy(tokenUsage = event.usage)
     is ConversationEvent.GoalChanged -> withGoal(event.goal, announceGoal)
     is ConversationEvent.TurnStarted -> copy(
+        history = history.copy(
+            turns = history.turns.upsertConversationTurn(
+                ConversationTurn(event.turnId, ConversationTurnStatus.IN_PROGRESS),
+            ),
+        ),
         activeItemKeys = emptySet(),
         activeTurnId = event.turnId,
         isRunning = true,
@@ -81,6 +87,11 @@ internal fun ConversationState.reduceConversationEvent(
     )
 
     is ConversationEvent.TurnCompleted -> copy(
+        history = history.copy(
+            turns = history.turns.upsertConversationTurn(
+                ConversationTurn(event.turnId, event.status),
+            ),
+        ),
         activeTurnId = null,
         isRunning = false,
         pendingRequests = emptyList(),
@@ -105,4 +116,13 @@ internal fun ConversationState.reduceConversationEvent(
     is ConversationEvent.RequestResolved -> copy(
         pendingRequests = pendingRequests.filterNot { it.requestKey == event.requestKey },
     )
+}
+
+private fun List<ConversationTurn>.upsertConversationTurn(turn: ConversationTurn): List<ConversationTurn> {
+    val index = indexOfFirst { it.id == turn.id }
+    if (index == -1) return this + turn
+    return toMutableList().apply {
+        val current = get(index)
+        set(index, turn.copy(items = current.items))
+    }
 }

@@ -10,6 +10,7 @@ import com.hebo.codex.domain.ConversationRunStatus
 import com.hebo.codex.domain.FileChangeKind
 import com.hebo.codex.domain.FileSystemAccessMode
 import com.hebo.codex.domain.FileSystemPermissionTarget
+import com.hebo.codex.domain.ThreadHistoryMode
 import com.hebo.codex.domain.ThreadRuntimeStatus
 import com.hebo.codex.domain.UserMessagePart
 import kotlinx.serialization.json.Json
@@ -24,7 +25,7 @@ class ProtocolMapperTest {
     private val json = Json
 
     @Test
-    fun mapsResumedThreadAndTranscriptItems() {
+    fun mapsPaginatedResumeAndHydratedItems() {
         val response = json.parseToJsonElement(
             """
             {
@@ -38,24 +39,48 @@ class ProtocolMapperTest {
                 "updatedAt": 200,
                 "recencyAt": 210,
                 "status": { "type": "active", "activeFlags": [] },
-                "turns": [
+                "historyMode": "paginated",
+                "turns": []
+              },
+              "initialTurnsPage": {
+                "data": [
                   {
                     "id": "turn-1",
                     "status": "inProgress",
-                    "items": [
-                      {
+                    "itemsView": "notLoaded",
+                    "items": []
+                  }
+                ],
+                "nextCursor": "older-turns"
+              }
+            }
+            """.trimIndent(),
+        ).jsonObject
+        val itemsResponse = json.parseToJsonElement(
+            """
+            {
+              "data": [
+                {
+                  "turnId": "turn-1",
+                  "item": {
                         "type": "userMessage",
                         "id": "user-1",
                         "clientId": "client-1",
                         "content": [{ "type": "text", "text": "定位空指针" }]
-                      },
-                      {
+                  }
+                },
+                {
+                  "turnId": "turn-1",
+                  "item": {
                         "type": "agentMessage",
                         "id": "agent-1",
                         "text": "正在检查",
                         "phase": "commentary"
-                      },
-                      {
+                  }
+                },
+                {
+                  "turnId": "turn-1",
+                  "item": {
                         "type": "commandExecution",
                         "id": "command-1",
                         "command": "rg null LoginViewModel.kt",
@@ -63,32 +88,59 @@ class ProtocolMapperTest {
                         "status": "completed",
                         "aggregatedOutput": "44: login(userId)",
                         "exitCode": 0
-                      }
-                    ]
                   }
-                ]
-              }
+                }
+              ],
+              "nextCursor": null
             }
             """.trimIndent(),
         ).jsonObject
 
-        val snapshot = ProtocolMapper.threadSnapshot(response)
+        val snapshot = ProtocolMapper.resumedThreadSnapshot(response)
+        val page = ProtocolMapper.threadItemPage(itemsResponse, "turn-1")
 
         assertEquals("thr-1", snapshot.summary.id)
         assertEquals("session-1", snapshot.summary.sessionId)
         assertEquals("修复登录问题", snapshot.summary.title)
         assertEquals(ThreadRuntimeStatus.ACTIVE, snapshot.summary.status)
-        assertEquals("turn-1", snapshot.activeTurnId)
-        assertEquals(3, snapshot.items.size)
+        assertEquals("older-turns", snapshot.olderTurnsCursor)
+        assertEquals("turn-1", snapshot.turns.single().id)
+        assertEquals(3, page.data.size)
         assertEquals(
             listOf(UserMessagePart.Text("定位空指针")),
-            (snapshot.items[0] as ConversationItem.UserMessage).content,
+            (page.data[0] as ConversationItem.UserMessage).content,
         )
         assertEquals(
             AgentMessagePhase.COMMENTARY,
-            (snapshot.items[1] as ConversationItem.AgentMessage).phase,
+            (page.data[1] as ConversationItem.AgentMessage).phase,
         )
-        assertEquals(ActivityStatus.COMPLETED, (snapshot.items[2] as ConversationItem.CommandExecution).status)
+        assertEquals(ActivityStatus.COMPLETED, (page.data[2] as ConversationItem.CommandExecution).status)
+    }
+
+    @Test
+    fun rejectsLegacyHistoryWithoutCompatibilityPath() {
+        val response = json.parseToJsonElement(
+            """
+            {
+              "thread": {
+                "id": "thr-legacy",
+                "sessionId": "session-legacy",
+                "preview": "旧会话",
+                "cwd": "/workspace/legacy",
+                "createdAt": 100,
+                "updatedAt": 200,
+                "status": { "type": "idle" },
+                "turns": []
+              }
+            }
+            """.trimIndent(),
+        ).jsonObject
+
+        val error = assertThrows(UnsupportedThreadHistoryModeException::class.java) {
+            ProtocolMapper.threadMetadata(response)
+        }
+
+        assertEquals(ThreadHistoryMode.LEGACY, error.historyMode)
     }
 
     @Test

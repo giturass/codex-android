@@ -96,6 +96,7 @@ class ChatViewModel(
     private var draftInitialized = false
     private var conversationJob: Job? = null
     private var modelListJob: Job? = null
+    private var historyPagingJob: Job? = null
     private val draftKey = DraftKey(serverId, DraftTarget.Thread(threadId))
 
     init {
@@ -170,6 +171,34 @@ class ChatViewModel(
     fun pauseConversation() {
         conversationJob?.cancel()
         conversationJob = null
+        historyPagingJob?.cancel()
+    }
+
+    fun loadOlderTurns() = requestOlderTurns(retry = false)
+
+    fun retryOlderTurns() = requestOlderTurns(retry = true)
+
+    private fun requestOlderTurns(retry: Boolean) {
+        if (historyPagingJob != null) return
+        val history = mutableState.value.conversation?.history ?: return
+        if (
+            history.olderTurnsCursor == null ||
+            history.isLoadingOlderTurns ||
+            (!retry && history.olderTurnsError != null)
+        ) {
+            return
+        }
+        historyPagingJob = viewModelScope.launch {
+            try {
+                repository.loadOlderConversationTurns(serverId, threadId)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                showError(error)
+            } finally {
+                historyPagingJob = null
+            }
+        }
     }
 
     fun updateDraftMessage(message: String) {
@@ -293,7 +322,7 @@ class ChatViewModel(
         val conversation = current.conversation ?: return
         val turn = lastTurnId?.let { requestedTurnId ->
             requireNotNull(
-                buildForkTurns(conversation.items, conversation.activeTurnId)
+                buildForkTurns(conversation.history.turns, conversation.activeTurnId)
                     .firstOrNull { it.turnId == requestedTurnId },
             ) { "无法分叉未完成或不存在的回合：$requestedTurnId" }
         }

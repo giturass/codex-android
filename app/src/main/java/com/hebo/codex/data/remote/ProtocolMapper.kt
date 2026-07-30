@@ -10,6 +10,8 @@ import com.hebo.codex.domain.ConversationEvent
 import com.hebo.codex.domain.ConversationItem
 import com.hebo.codex.domain.ConversationItemUpdate
 import com.hebo.codex.domain.ConversationNotice
+import com.hebo.codex.domain.ConversationTurn
+import com.hebo.codex.domain.ConversationTurnStatus
 import com.hebo.codex.domain.ConversationRunStatus
 import com.hebo.codex.domain.ExecPolicyAmendment
 import com.hebo.codex.domain.FileChangeKind
@@ -19,6 +21,7 @@ import com.hebo.codex.domain.FileSystemPermissionTarget
 import com.hebo.codex.domain.NetworkPolicyAmendment
 import com.hebo.codex.domain.NetworkPolicyRuleAction
 import com.hebo.codex.domain.PendingServerRequest
+import com.hebo.codex.domain.ThreadHistoryMode
 import com.hebo.codex.domain.ThreadRuntimeStatus
 import com.hebo.codex.domain.ThreadSummary
 import com.hebo.codex.domain.TokenUsage
@@ -49,14 +52,24 @@ import kotlinx.serialization.json.longOrNull
 
 data class ThreadSnapshot(
     val summary: ThreadSummary,
-    val items: List<ConversationItem>,
-    val activeTurnId: String?,
+    val turns: List<ConversationTurn>,
+    val olderTurnsCursor: String?,
     val model: String?,
     val serviceTier: String?,
     val reasoningEffort: String?,
     val approvalPolicy: String?,
     val approvalsReviewer: String?,
     val sandbox: String?,
+)
+
+data class ThreadTurnPage(
+    val data: List<ConversationTurn>,
+    val nextCursor: String?,
+)
+
+data class ThreadItemPage(
+    val data: List<ConversationItem>,
+    val nextCursor: String?,
 )
 
 internal data class ProtocolNotification(
@@ -82,6 +95,7 @@ object ProtocolMapper {
             updatedAt = thread.requiredLong("updatedAt"),
             recencyAt = thread.optionalLong("recencyAt"),
             status = thread.requiredObject("status").toThreadStatus(),
+            historyMode = (thread.optionalString("historyMode") ?: "legacy").toThreadHistoryMode(),
             parentThreadId = thread.optionalString("parentThreadId"),
             forkedFromId = thread.optionalString("forkedFromId"),
             ephemeral = thread.optionalBoolean("ephemeral") ?: false,
@@ -90,28 +104,16 @@ object ProtocolMapper {
         )
     }
 
-    fun threadSnapshot(response: JsonObject): ThreadSnapshot {
+    fun threadMetadata(response: JsonObject): ThreadSnapshot {
         val thread = response.requiredObject("thread")
-        val turns = thread.requiredArray("turns")
-        val items = turns.flatMap { turnElement ->
-            val turn = turnElement.jsonObject
-            val turnId = turn.requiredString("id")
-            when (val status = turn.requiredString("status")) {
-                "inProgress", "completed", "interrupted", "failed" -> Unit
-                else -> throw ProtocolException("未知 turn 状态：$status")
-            }
-            turn.requiredArray("items").map { itemElement ->
-                conversationItem(itemElement.jsonObject, turnId)
-            }
+        val summary = threadSummary(thread)
+        if (summary.historyMode != ThreadHistoryMode.PAGINATED) {
+            throw UnsupportedThreadHistoryModeException(summary.historyMode)
         }
-        val activeTurnId = turns
-            .map { it.jsonObject }
-            .lastOrNull { it.requiredString("status") == "inProgress" }
-            ?.requiredString("id")
         return ThreadSnapshot(
-            summary = threadSummary(thread),
-            items = items,
-            activeTurnId = activeTurnId,
+            summary = summary,
+            turns = emptyList(),
+            olderTurnsCursor = null,
             model = response.optionalString("model"),
             serviceTier = response.optionalString("serviceTier"),
             reasoningEffort = response.optionalString("reasoningEffort"),
@@ -120,6 +122,47 @@ object ProtocolMapper {
             sandbox = response["sandbox"].compactText().ifEmpty { null },
         )
     }
+
+    fun resumedThreadSnapshot(response: JsonObject): ThreadSnapshot {
+        val metadata = threadMetadata(response)
+        val page = response.requiredObject("initialTurnsPage").toThreadTurnPage()
+        return metadata.copy(
+            turns = page.data,
+            olderTurnsCursor = page.nextCursor,
+        )
+    }
+
+    fun threadTurnPage(response: JsonObject): ThreadTurnPage = response.toThreadTurnPage()
+
+    fun threadItemPage(response: JsonObject, expectedTurnId: String): ThreadItemPage {
+        val items = response.requiredArray("data").map { entryElement ->
+            val entry = entryElement.jsonObject
+            val turnId = entry.requiredString("turnId")
+            if (turnId != expectedTurnId) {
+                throw ProtocolException("thread/items/list 返回了其他回合的项目：$turnId")
+            }
+            conversationItem(entry.requiredObject("item"), turnId)
+        }
+        return ThreadItemPage(
+            data = items,
+            nextCursor = response.optionalString("nextCursor"),
+        )
+    }
+
+    private fun JsonObject.toThreadTurnPage(): ThreadTurnPage = ThreadTurnPage(
+        data = requiredArray("data").map { element ->
+            val turn = element.jsonObject
+            val itemsView = turn.requiredString("itemsView")
+            if (itemsView != "notLoaded" || turn.requiredArray("items").isNotEmpty()) {
+                throw ProtocolException("分页回合必须使用 itemsView=notLoaded")
+            }
+            ConversationTurn(
+                id = turn.requiredString("id"),
+                status = turn.requiredString("status").toConversationTurnStatus(),
+            )
+        },
+        nextCursor = optionalString("nextCursor"),
+    )
 
     fun activeTurnPlan(params: JsonObject): ActiveTurnPlan = ActiveTurnPlan(
         turnId = params.requiredString("turnId"),
@@ -328,6 +371,7 @@ object ProtocolMapper {
             val turn = params.requiredObject("turn")
             ConversationEvent.TurnCompleted(
                 turnId = turn.requiredString("id"),
+                status = turn.requiredString("status").toConversationTurnStatus(),
                 error = (turn["error"] as? JsonObject)?.optionalString("message")
                     ?.let { serverError("任务执行失败", it) },
             )
@@ -847,6 +891,20 @@ object ProtocolMapper {
         "active" -> ThreadRuntimeStatus.ACTIVE
         "systemError" -> ThreadRuntimeStatus.SYSTEM_ERROR
         else -> throw ProtocolException("未知会话状态：${requiredString("type")}")
+    }
+
+    private fun String.toThreadHistoryMode(): ThreadHistoryMode = when (this) {
+        "legacy" -> ThreadHistoryMode.LEGACY
+        "paginated" -> ThreadHistoryMode.PAGINATED
+        else -> throw ProtocolException("未知历史格式：$this")
+    }
+
+    private fun String.toConversationTurnStatus(): ConversationTurnStatus = when (this) {
+        "inProgress" -> ConversationTurnStatus.IN_PROGRESS
+        "completed" -> ConversationTurnStatus.COMPLETED
+        "interrupted" -> ConversationTurnStatus.INTERRUPTED
+        "failed" -> ConversationTurnStatus.FAILED
+        else -> throw ProtocolException("未知 turn 状态：$this")
     }
 
     private fun collabActivityTitle(tool: String): String = when (tool) {

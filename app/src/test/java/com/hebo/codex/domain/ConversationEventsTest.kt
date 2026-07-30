@@ -33,7 +33,11 @@ class ConversationEventsTest {
         )
 
         val result = state.reduceConversationEvent(
-            ConversationEvent.TurnCompleted("turn-1", error),
+            ConversationEvent.TurnCompleted(
+                turnId = "turn-1",
+                status = ConversationTurnStatus.FAILED,
+                error = error,
+            ),
         )
 
         assertNull(result.activeTurnId)
@@ -41,12 +45,21 @@ class ConversationEventsTest {
         assertNull(result.plan)
         assertEquals(error, result.errorMessage)
         assertTrue(result.activeItemKeys.isEmpty())
+        assertEquals(ConversationTurnStatus.FAILED, result.history.turns.single().status)
     }
 
     @Test
     fun `条目增量通过类型化更新应用`() {
         val state = conversationState().copy(
-            items = listOf(ConversationItem.AgentMessage("item-1", "turn-1", "开始")),
+            history = ConversationHistory(
+                turns = listOf(
+                    ConversationTurn(
+                        id = "turn-1",
+                        status = ConversationTurnStatus.IN_PROGRESS,
+                        items = listOf(ConversationItem.AgentMessage("item-1", "turn-1", "开始")),
+                    ),
+                ),
+            ),
         )
         val event = ConversationEvent.ItemChanged(
             method = "item/agentMessage/delta",

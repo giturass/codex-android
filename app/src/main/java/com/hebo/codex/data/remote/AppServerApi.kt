@@ -119,6 +119,7 @@ class AppServerApi(
         buildJsonObject {
             put("cwd", cwd)
             put("serviceName", CLIENT_NAME)
+            put("historyMode", "paginated")
             options.model?.let { put("model", it) }
             options.modelProvider?.let { put("modelProvider", it) }
             options.serviceTier?.let { put("serviceTier", it) }
@@ -139,14 +140,50 @@ class AppServerApi(
 
     suspend fun resumeThread(threadId: String): JsonObject = connection.request(
         "thread/resume",
-        buildJsonObject { put("threadId", threadId) },
+        buildJsonObject {
+            put("threadId", threadId)
+            put("excludeTurns", true)
+            put(
+                "initialTurnsPage",
+                buildJsonObject {
+                    put("limit", THREAD_TURN_PAGE_LIMIT)
+                    put("sortDirection", "desc")
+                    put("itemsView", "notLoaded")
+                },
+            )
+        },
     ).jsonObject
 
     suspend fun readThread(threadId: String): JsonObject = request(
         StableRpcMethod.THREAD_READ,
         buildJsonObject {
             put("threadId", threadId)
-            put("includeTurns", true)
+        },
+    ).jsonObject
+
+    suspend fun listThreadTurns(threadId: String, cursor: String): JsonObject = connection.request(
+        "thread/turns/list",
+        buildJsonObject {
+            put("threadId", threadId)
+            put("cursor", cursor)
+            put("limit", THREAD_TURN_PAGE_LIMIT)
+            put("sortDirection", "desc")
+            put("itemsView", "notLoaded")
+        },
+    ).jsonObject
+
+    suspend fun listThreadItems(
+        threadId: String,
+        turnId: String,
+        cursor: String? = null,
+    ): JsonObject = connection.request(
+        "thread/items/list",
+        buildJsonObject {
+            put("threadId", threadId)
+            put("turnId", turnId)
+            put("limit", THREAD_ITEM_PAGE_LIMIT)
+            put("sortDirection", "asc")
+            cursor?.let { put("cursor", it) }
         },
     ).jsonObject
 
@@ -155,6 +192,7 @@ class AppServerApi(
         buildJsonObject {
             put("threadId", threadId)
             lastTurnId?.let { put("lastTurnId", it) }
+            put("excludeTurns", true)
         },
     ).jsonObject
 
@@ -367,6 +405,8 @@ class AppServerApi(
 
     private companion object {
         const val THREAD_PAGE_LIMIT = 50
+        const val THREAD_TURN_PAGE_LIMIT = 25
+        const val THREAD_ITEM_PAGE_LIMIT = 100
         const val CLIENT_NAME = "codex_android"
         private const val MAX_REMOTE_PREVIEW_MEBIBYTES = 16
         private const val MAX_REMOTE_PREVIEW_BYTES = MAX_REMOTE_PREVIEW_MEBIBYTES * 1024 * 1024

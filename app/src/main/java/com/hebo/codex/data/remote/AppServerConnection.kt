@@ -154,6 +154,12 @@ class AppServerConnection(
                         put("version", BuildConfig.VERSION_NAME)
                     },
                 )
+                put(
+                    "capabilities",
+                    buildJsonObject {
+                        put("experimentalApi", true)
+                    },
+                )
             },
         )
         if (result !is JsonObject) throw ProtocolException("initialize 响应不是对象")

@@ -1,6 +1,7 @@
 package com.hebo.codex.ui.components
 
 import com.hebo.codex.domain.ThreadAttention
+import com.hebo.codex.domain.ThreadHistoryMode
 import com.hebo.codex.domain.ThreadRuntimeStatus
 import com.hebo.codex.domain.ThreadSummary
 import org.junit.Assert.assertEquals
@@ -41,5 +42,6 @@ class DrawerThreadStatusTest {
         updatedAt = 1,
         recencyAt = null,
         status = status,
+        historyMode = ThreadHistoryMode.PAGINATED,
     )
 }

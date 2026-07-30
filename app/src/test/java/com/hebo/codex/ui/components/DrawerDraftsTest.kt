@@ -4,6 +4,7 @@ import com.hebo.codex.domain.DraftKey
 import com.hebo.codex.domain.DraftSummary
 import com.hebo.codex.domain.DraftTarget
 import com.hebo.codex.domain.RecentProject
+import com.hebo.codex.domain.ThreadHistoryMode
 import com.hebo.codex.domain.ThreadRuntimeStatus
 import com.hebo.codex.domain.ThreadSummary
 import org.junit.Assert.assertEquals
@@ -113,5 +114,6 @@ class DrawerDraftsTest {
         updatedAt = 1,
         recencyAt = 1,
         status = ThreadRuntimeStatus.IDLE,
+        historyMode = ThreadHistoryMode.PAGINATED,
     )
 }

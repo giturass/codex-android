@@ -1,31 +1,27 @@
 package com.hebo.codex.ui.screens.chat
 
 import com.hebo.codex.domain.ConversationItem
+import com.hebo.codex.domain.ConversationTurn
 import com.hebo.codex.domain.UserMessagePart
 
 internal data class ForkTurn(
     val turnId: String,
-    val number: Int,
     val title: String,
     val attachmentCount: Int,
 )
 
 internal fun buildForkTurns(
-    items: List<ConversationItem>,
+    turns: List<ConversationTurn>,
     activeTurnId: String?,
-): List<ForkTurn> = items
-    .filter { it.turnId != "pending" }
-    .groupBy(ConversationItem::turnId)
-    .entries
-    .mapIndexedNotNull { index, (turnId, turnItems) ->
-        if (turnId == activeTurnId) return@mapIndexedNotNull null
-        val input = turnItems
+): List<ForkTurn> = turns
+    .filter { it.id != "pending" && it.id != activeTurnId }
+    .map { turn ->
+        val input = turn.items
             .filterIsInstance<ConversationItem.UserMessage>()
             .flatMap(ConversationItem.UserMessage::content)
-        val shellCommand = turnItems.filterIsInstance<ConversationItem.UserShellCommand>().lastOrNull()
+        val shellCommand = turn.items.filterIsInstance<ConversationItem.UserShellCommand>().lastOrNull()
         ForkTurn(
-            turnId = turnId,
-            number = index + 1,
+            turnId = turn.id,
             title = if (input.isNotEmpty()) {
                 input.forkTurnTitle()
             } else {
@@ -38,7 +34,7 @@ internal fun buildForkTurns(
 internal fun forkAnnouncement(title: String, turn: ForkTurn?): String = if (turn == null) {
     "已从“$title”的最新状态创建分叉"
 } else {
-    "已从“$title”的第 ${turn.number} 轮创建分叉"
+    "已从“$title”的所选历史回合创建分叉"
 }
 
 private fun List<UserMessagePart>.forkTurnTitle(): String {

@@ -117,6 +117,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
@@ -249,7 +250,9 @@ private val highlightedMarkdownComponents = markdownComponents(
 )
 
 private const val CHAT_LIST_END_KEY = "chat-list-end"
+private const val CHAT_HISTORY_PAGING_KEY = "chat-history-paging"
 private const val CHAT_LIST_PAGE_RUNWAY_KEY = "chat-list-page-runway"
+private const val HISTORY_LOAD_THRESHOLD_ITEMS = 2
 private const val PLAN_STEP_PROGRESS_FADE_DURATION_MILLIS = 150
 private val ChatPageOverlap = 64.dp
 private val ConversationHeaderItemMinHeight = 48.dp
@@ -286,9 +289,9 @@ fun ChatScreen(
             activeTurnId = conversation?.activeTurnId,
         )
     }
-    val forkTurns = remember(conversation?.items, conversation?.activeTurnId) {
+    val forkTurns = remember(conversation?.history?.turns, conversation?.activeTurnId) {
         buildForkTurns(
-            items = conversation?.items.orEmpty(),
+            turns = conversation?.history?.turns.orEmpty(),
             activeTurnId = conversation?.activeTurnId,
         )
     }
@@ -418,7 +421,11 @@ fun ChatScreen(
     val bottomContentPaddingPx = with(density) { bottomContentPadding.roundToPx() }
     val pageOverlapPx = with(density) { ChatPageOverlap.roundToPx() }
     val liveEdgeHeightPx = with(density) { 1.dp.roundToPx() }
-    val liveEdgeIndex = conversationRows.size
+    val history = conversation?.history
+    val showHistoryPaging = history?.let {
+        it.olderTurnsCursor != null || it.isLoadingOlderTurns || it.olderTurnsError != null
+    } == true
+    val liveEdgeIndex = conversationRows.size + if (showHistoryPaging) 1 else 0
     val pagingController = rememberChatPagingController(
         conversationId = conversation?.threadId,
         isRunning = conversation?.isRunning == true,
@@ -429,6 +436,22 @@ fun ChatScreen(
         liveEdgeHeightPx = liveEdgeHeightPx,
     )
     val pageRunwayHeight = with(density) { pagingController.pageRunwayHeightPx.toDp() }
+    LaunchedEffect(
+        conversation?.threadId,
+        history?.olderTurnsCursor,
+        history?.olderTurnsError,
+        pagingController.listState,
+    ) {
+        if (history?.olderTurnsCursor == null || history.olderTurnsError != null) return@LaunchedEffect
+        snapshotFlow {
+            pagingController.listState.isScrollInProgress to
+                pagingController.listState.firstVisibleItemIndex
+        }.collect { (isScrolling, firstVisibleItemIndex) ->
+            if (isScrolling && firstVisibleItemIndex <= HISTORY_LOAD_THRESHOLD_ITEMS) {
+                viewModel.loadOlderTurns()
+            }
+        }
+    }
 
     Box(Modifier.fillMaxSize()) {
         when {
@@ -461,6 +484,16 @@ fun ChatScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
+                if (showHistoryPaging && history != null) {
+                    item(CHAT_HISTORY_PAGING_KEY) {
+                        HistoryPagingControl(
+                            isLoading = history.isLoadingOlderTurns,
+                            error = history.olderTurnsError,
+                            onLoad = viewModel::loadOlderTurns,
+                            onRetry = viewModel::retryOlderTurns,
+                        )
+                    }
+                }
                 itemsIndexed(conversationRows, key = { _, row -> row.key }) { index, row ->
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         when (row) {
@@ -827,6 +860,40 @@ fun ChatScreen(
                 showTurnOptions = false
             },
         )
+    }
+}
+
+@Composable
+private fun HistoryPagingControl(
+    isLoading: Boolean,
+    error: UserFacingError?,
+    onLoad: () -> Unit,
+    onRetry: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        when {
+            isLoading -> {
+                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "正在加载更早内容",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            error != null -> TextButton(onClick = onRetry) {
+                Text("${error.summary}，点击重试")
+            }
+
+            else -> TextButton(onClick = onLoad) {
+                Text("加载更早内容")
+            }
+        }
     }
 }
 
@@ -2718,7 +2785,7 @@ private fun ForkConversationSheet(
             if (canForkLatest) {
                 ForkSelectionCard(
                     title = "从最新状态继续",
-                    supportingText = "包含当前全部 ${turns.size} 个已完成回合",
+                    supportingText = "包含当前会话的全部已完成回合",
                     selected = lastTurnId == null,
                     onClick = { lastTurnId = null },
                 )
@@ -2739,9 +2806,10 @@ private fun ForkConversationSheet(
                 items(turns.asReversed(), key = ForkTurn::turnId) { turn ->
                     ForkSelectionCard(
                         title = turn.title,
-                        supportingText = buildString {
-                            append("第 ${turn.number} 轮")
-                            if (turn.attachmentCount > 0) append(" · ${turn.attachmentCount} 个附件")
+                        supportingText = if (turn.attachmentCount > 0) {
+                            "${turn.attachmentCount} 个附件"
+                        } else {
+                            "已完成的历史回合"
                         },
                         selected = lastTurnId == turn.turnId,
                         onClick = { lastTurnId = turn.turnId },

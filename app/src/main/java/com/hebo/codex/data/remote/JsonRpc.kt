@@ -1,5 +1,6 @@
 package com.hebo.codex.data.remote
 
+import com.hebo.codex.domain.ThreadHistoryMode
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -25,6 +26,10 @@ class RpcException(
 ) : Exception(message)
 
 class ProtocolException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+class UnsupportedThreadHistoryModeException(
+    val historyMode: ThreadHistoryMode,
+) : Exception("不支持 ${historyMode.name.lowercase()} 历史格式")
 
 class ConnectionException(
     message: String,

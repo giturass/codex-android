@@ -38,12 +38,18 @@ data class ThreadSummary(
     val updatedAt: Long,
     val recencyAt: Long?,
     val status: ThreadRuntimeStatus,
+    val historyMode: ThreadHistoryMode,
     val parentThreadId: String? = null,
     val forkedFromId: String? = null,
     val ephemeral: Boolean = false,
     val modelProvider: String = "",
     val source: String = "",
 )
+
+enum class ThreadHistoryMode {
+    LEGACY,
+    PAGINATED,
+}
 
 data class ThreadPage(
     val data: List<ThreadSummary>,
@@ -114,7 +120,7 @@ data class ConversationState(
     val threadId: String,
     val title: String,
     val cwd: String,
-    val items: List<ConversationItem> = emptyList(),
+    val history: ConversationHistory = ConversationHistory(),
     val activeItemKeys: Set<ConversationItemKey> = emptySet(),
     val activeTurnId: String? = null,
     val isRunning: Boolean = false,
@@ -131,7 +137,32 @@ data class ConversationState(
     val approvalsReviewer: String? = null,
     val sandbox: String? = null,
     val errorMessage: UserFacingError? = null,
+) {
+    val items: List<ConversationItem>
+        get() = history.items
+}
+
+data class ConversationHistory(
+    val turns: List<ConversationTurn> = emptyList(),
+    val olderTurnsCursor: String? = null,
+    val isLoadingOlderTurns: Boolean = false,
+    val olderTurnsError: UserFacingError? = null,
+) {
+    val items: List<ConversationItem> = turns.flatMap(ConversationTurn::items)
+}
+
+data class ConversationTurn(
+    val id: String,
+    val status: ConversationTurnStatus,
+    val items: List<ConversationItem> = emptyList(),
 )
+
+enum class ConversationTurnStatus {
+    IN_PROGRESS,
+    COMPLETED,
+    INTERRUPTED,
+    FAILED,
+}
 
 data class ConversationItemKey(
     val turnId: String,

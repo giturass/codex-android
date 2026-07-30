@@ -3,6 +3,7 @@ package com.hebo.codex.util
 import com.hebo.codex.data.remote.ConnectionException
 import com.hebo.codex.data.remote.ProtocolException
 import com.hebo.codex.data.remote.RpcException
+import com.hebo.codex.data.remote.UnsupportedThreadHistoryModeException
 import com.hebo.codex.domain.UserFacingError
 import kotlinx.serialization.json.JsonNull
 import java.io.IOException
@@ -32,6 +33,10 @@ fun Throwable.toUserFacingError(defaultSummary: String = "操作失败"): UserFa
     is ProtocolException -> UserFacingError(
         summary = "服务器返回了无法识别的数据",
         technicalDetails = message,
+    )
+
+    is UnsupportedThreadHistoryModeException -> UserFacingError(
+        summary = "当前会话使用 legacy 历史格式，无法加载完整历史",
     )
 
     is SocketTimeoutException -> UserFacingError("连接服务器超时", message)

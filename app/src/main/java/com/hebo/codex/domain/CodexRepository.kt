@@ -7,6 +7,7 @@ import com.hebo.codex.data.remote.AppServerApi
 import com.hebo.codex.data.remote.AppServerClientFactory
 import com.hebo.codex.data.remote.AppServerConnection
 import com.hebo.codex.data.remote.ProtocolMapper
+import com.hebo.codex.data.remote.ProtocolException
 import com.hebo.codex.data.remote.ServerEvent
 import com.hebo.codex.data.remote.StableFeatureApi
 import com.hebo.codex.data.remote.StableRpcMethod
@@ -20,6 +21,9 @@ import com.hebo.codex.util.toUserFacingError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -30,7 +34,9 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonElement
@@ -57,6 +63,8 @@ class CodexRepository(
     private val pendingResumeGoalSnapshots = ConcurrentHashMap.newKeySet<ConversationKey>()
     private val pendingItemUpdates = ConcurrentHashMap<ItemRoute, MutableList<PendingItemUpdate>>()
     private val pendingRequestRoutes = ConcurrentHashMap<String, PendingRequestRoute>()
+    private val conversationEventBuffers = ConcurrentHashMap<ConversationKey, ConversationEventBuffer>()
+    private val historyPagingMutexes = ConcurrentHashMap<ConversationKey, Mutex>()
     private val mutableConnectionStatuses = MutableStateFlow<Map<String, ConnectionStatus>>(emptyMap())
     private val mutableThreadRevisions = MutableStateFlow<Map<String, Long>>(emptyMap())
     private val mutableFeatureRevisions = MutableStateFlow<Map<String, Long>>(emptyMap())
@@ -179,6 +187,8 @@ class CodexRepository(
         clearConnectionState(serverId)
         conversations.keys.filter { it.serverId == serverId }.forEach { conversations.remove(it) }
         pendingItemUpdates.keys.removeIf { it.serverId == serverId }
+        conversationEventBuffers.keys.removeIf { it.serverId == serverId }
+        historyPagingMutexes.keys.removeIf { it.serverId == serverId }
         serverStore.removeServer(serverId)
     }
 
@@ -220,7 +230,7 @@ class CodexRepository(
     ): String {
         val normalizedCwd = cwd.trim()
         require(normalizedCwd.isNotEmpty()) { "请输入服务端项目路径" }
-        val snapshot = ProtocolMapper.threadSnapshot(api(serverId).startThread(normalizedCwd, options))
+        val snapshot = ProtocolMapper.threadMetadata(api(serverId).startThread(normalizedCwd, options))
         val profile = awaitServer(serverId)
         val state = snapshot.toConversationState(profile)
         conversations[ConversationKey(serverId, snapshot.summary.id)] = MutableStateFlow(state)
@@ -237,9 +247,23 @@ class CodexRepository(
                     refreshConversation(key, existing)
                     existing
                 } else {
-                    val snapshot = resumeConversation(key)
-                    MutableStateFlow(snapshot.toConversationState(awaitServer(serverId))).also {
-                        conversations[key] = it
+                    val profile = awaitServer(serverId)
+                    val created = MutableStateFlow(
+                        ConversationState(
+                            serverId = profile.id,
+                            serverName = profile.name,
+                            threadId = threadId,
+                            title = "正在加载会话",
+                            cwd = "",
+                        ),
+                    )
+                    conversations[key] = created
+                    try {
+                        refreshConversation(key, created, failOnError = true)
+                        created
+                    } catch (error: Throwable) {
+                        conversations.remove(key, created)
+                        throw error
                     }
                 }
             } catch (error: Throwable) {
@@ -249,6 +273,68 @@ class CodexRepository(
         }
         markThreadViewed(serverId, threadId)
         return conversation
+    }
+
+    suspend fun loadOlderConversationTurns(serverId: String, threadId: String): Boolean {
+        val key = ConversationKey(serverId, threadId)
+        val state = requireConversation(serverId, threadId)
+        val pagingMutex = historyPagingMutexes.computeIfAbsent(key) { Mutex() }
+        return pagingMutex.withLock {
+            val cursor = state.value.history.olderTurnsCursor ?: return@withLock false
+            state.updateState { current ->
+                current.copy(
+                    history = current.history.copy(
+                        isLoadingOlderTurns = true,
+                        olderTurnsError = null,
+                    ),
+                )
+            }
+            try {
+                val api = api(serverId)
+                val page = ProtocolMapper.threadTurnPage(api.listThreadTurns(threadId, cursor))
+                if (page.nextCursor != null && page.nextCursor == cursor) {
+                    throw ProtocolException("thread/turns/list 返回了未推进的游标")
+                }
+                val hydratedTurns = hydrateTurns(api, threadId, page.data).asReversed()
+                var inserted = false
+                state.updateState { current ->
+                    if (current.history.olderTurnsCursor != cursor) return@updateState current
+                    val loadedTurnIds = current.history.turns.mapTo(mutableSetOf(), ConversationTurn::id)
+                    val olderTurns = hydratedTurns.filter { it.id !in loadedTurnIds }
+                    inserted = olderTurns.isNotEmpty()
+                    current.copy(
+                        history = current.history.copy(
+                            turns = olderTurns + current.history.turns,
+                            olderTurnsCursor = page.nextCursor,
+                            isLoadingOlderTurns = false,
+                            olderTurnsError = null,
+                        ),
+                    )
+                }
+                inserted
+            } catch (error: CancellationException) {
+                state.updateState { current ->
+                    current.copy(
+                        history = current.history.copy(isLoadingOlderTurns = false),
+                    )
+                }
+                throw error
+            } catch (error: Throwable) {
+                state.updateState { current ->
+                    if (current.history.olderTurnsCursor != cursor) {
+                        current
+                    } else {
+                        current.copy(
+                            history = current.history.copy(
+                                isLoadingOlderTurns = false,
+                                olderTurnsError = error.toUserFacingError("无法加载更早内容"),
+                            ),
+                        )
+                    }
+                }
+                false
+            }
+        }
     }
 
     suspend fun sendMessage(
@@ -285,10 +371,7 @@ class CodexRepository(
                 result.requiredString("turnId")
             }
             state.updateState { current ->
-                current.copy(
-                    activeTurnId = turnId,
-                    isRunning = true,
-                )
+                current.reduceConversationEvent(ConversationEvent.TurnStarted(turnId))
             }
         } catch (error: Throwable) {
             state.updateState { current ->
@@ -337,7 +420,7 @@ class CodexRepository(
     }
 
     suspend fun forkConversation(serverId: String, threadId: String, lastTurnId: String? = null): String {
-        val snapshot = ProtocolMapper.threadSnapshot(api(serverId).forkThread(threadId, lastTurnId))
+        val snapshot = ProtocolMapper.threadMetadata(api(serverId).forkThread(threadId, lastTurnId))
         conversations[ConversationKey(serverId, snapshot.summary.id)] =
             MutableStateFlow(snapshot.toConversationState(awaitServer(serverId)))
         bumpThreadRevision(serverId)
@@ -366,6 +449,8 @@ class CodexRepository(
         val key = ConversationKey(serverId, threadId)
         conversations.remove(key)
         removePendingItemUpdates(key)
+        conversationEventBuffers.remove(key)
+        historyPagingMutexes.remove(key)
         bumpThreadRevision(serverId)
     }
 
@@ -385,6 +470,8 @@ class CodexRepository(
         val key = ConversationKey(serverId, threadId)
         conversations.remove(key)
         removePendingItemUpdates(key)
+        conversationEventBuffers.remove(key)
+        historyPagingMutexes.remove(key)
         removePendingRequests(serverId, threadId)
         bumpThreadRevision(serverId)
     }
@@ -492,6 +579,8 @@ class CodexRepository(
         conversations.remove(key, conversation)
         pendingResumeGoalSnapshots.remove(key)
         removePendingItemUpdates(key)
+        conversationEventBuffers.remove(key)
+        historyPagingMutexes.remove(key)
         removePendingRequests(key.serverId, key.threadId)
     }
 
@@ -724,10 +813,10 @@ class CodexRepository(
             .filter { it.key.serverId == serverId }
             .forEach { (key, state) ->
                 pendingResumeGoalSnapshots.add(key)
-                runSuspendCatching { ProtocolMapper.threadSnapshot(api.resumeThread(key.threadId)) }
+                runSuspendCatching { resumeConversation(key, api) }
                     .onSuccess { snapshot ->
                         state.updateState { current ->
-                            current.withRestoredConversation(snapshot.toConversationState(server))
+                            current.withRefreshedConversation(snapshot.toConversationState(server))
                         }
                         removeRestoredItemUpdates(key, state.value)
                     }
@@ -833,6 +922,16 @@ class CodexRepository(
         val threadId = notification.threadId ?: return
         val event = notification.conversationEvent ?: return
         val key = ConversationKey(serverId, threadId)
+        if (tryBufferConversationEvent(key, event)) return
+        applyConversationEvent(serverId, threadId, event)
+    }
+
+    private fun applyConversationEvent(
+        serverId: String,
+        threadId: String,
+        event: ConversationEvent,
+    ) {
+        val key = ConversationKey(serverId, threadId)
         val state = conversations[key]
         when (event) {
             is ConversationEvent.StatusChanged -> {
@@ -857,6 +956,8 @@ class CodexRepository(
                 }
                 pendingResumeGoalSnapshots.remove(key)
                 removePendingItemUpdates(key)
+                conversationEventBuffers.remove(key)
+                historyPagingMutexes.remove(key)
                 conversations.remove(key)
             }
 
@@ -989,10 +1090,16 @@ class CodexRepository(
     private fun requireConversation(serverId: String, threadId: String): MutableStateFlow<ConversationState> =
         conversations[ConversationKey(serverId, threadId)] ?: error("会话尚未打开")
 
-    private suspend fun resumeConversation(key: ConversationKey): ThreadSnapshot {
+    private suspend fun resumeConversation(
+        key: ConversationKey,
+        api: AppServerApi = api(key.serverId),
+    ): ThreadSnapshot {
         pendingResumeGoalSnapshots.add(key)
         return try {
-            ProtocolMapper.threadSnapshot(api(key.serverId).resumeThread(key.threadId))
+            val snapshot = ProtocolMapper.resumedThreadSnapshot(api.resumeThread(key.threadId))
+            snapshot.copy(
+                turns = hydrateTurns(api, key.threadId, snapshot.turns).asReversed(),
+            )
         } catch (error: Throwable) {
             pendingResumeGoalSnapshots.remove(key)
             throw error
@@ -1002,33 +1109,96 @@ class CodexRepository(
     private suspend fun refreshConversation(
         key: ConversationKey,
         state: MutableStateFlow<ConversationState>,
+        failOnError: Boolean = false,
     ) {
-        val snapshot = runSuspendCatching {
-            readConversationSnapshot(key)
-        }.getOrElse { error ->
-            state.updateState { current ->
+        val buffer = beginConversationEventBuffer(key)
+        try {
+            val snapshot = resumeConversation(key)
+            val server = awaitServer(key.serverId)
+            completeConversationRefresh(key, state, buffer) { current ->
+                current.withRefreshedConversation(snapshot.toConversationState(server))
+            }
+            removeRestoredItemUpdates(key, state.value)
+        } catch (error: CancellationException) {
+            completeConversationRefresh(key, state, buffer) { it }
+            throw error
+        } catch (error: Throwable) {
+            completeConversationRefresh(key, state, buffer) { current ->
                 current.copy(errorMessage = error.toUserFacingError("刷新会话失败"))
             }
-            return
+            if (failOnError) throw error
         }
-        val server = awaitServer(key.serverId)
-        state.updateState { current ->
-            current.withRefreshedConversation(snapshot.toConversationState(server))
-        }
-        removeRestoredItemUpdates(key, state.value)
     }
 
-    private suspend fun readConversationSnapshot(key: ConversationKey): ThreadSnapshot {
-        val firstResult = runSuspendCatching {
-            ProtocolMapper.threadSnapshot(api(key.serverId).readThread(key.threadId))
-        }
-        return firstResult.getOrElse { error ->
-            if (
-                connections.current(key.serverId)?.connection?.status?.value is ConnectionStatus.Connected
-            ) {
-                throw error
+    private suspend fun hydrateTurns(
+        api: AppServerApi,
+        threadId: String,
+        turns: List<ConversationTurn>,
+    ): List<ConversationTurn> = coroutineScope {
+        val semaphore = Semaphore(TURN_HYDRATION_CONCURRENCY)
+        turns.map { turn ->
+            async {
+                semaphore.withPermit {
+                    turn.copy(items = loadAllTurnItems(api, threadId, turn.id))
+                }
             }
-            ProtocolMapper.threadSnapshot(api(key.serverId).readThread(key.threadId))
+        }.awaitAll()
+    }
+
+    private suspend fun loadAllTurnItems(
+        api: AppServerApi,
+        threadId: String,
+        turnId: String,
+    ): List<ConversationItem> {
+        val items = mutableListOf<ConversationItem>()
+        var cursor: String? = null
+        do {
+            val page = ProtocolMapper.threadItemPage(
+                response = api.listThreadItems(threadId, turnId, cursor),
+                expectedTurnId = turnId,
+            )
+            items += page.data
+            if (page.nextCursor != null && page.nextCursor == cursor) {
+                throw ProtocolException("thread/items/list 返回了未推进的游标")
+            }
+            cursor = page.nextCursor
+        } while (cursor != null)
+        return items
+    }
+
+    private fun beginConversationEventBuffer(key: ConversationKey): ConversationEventBuffer {
+        val buffer = ConversationEventBuffer()
+        check(conversationEventBuffers.putIfAbsent(key, buffer) == null) {
+            "会话正在恢复：${key.threadId}"
+        }
+        return buffer
+    }
+
+    private fun completeConversationRefresh(
+        key: ConversationKey,
+        state: MutableStateFlow<ConversationState>,
+        buffer: ConversationEventBuffer,
+        transform: (ConversationState) -> ConversationState,
+    ) {
+        synchronized(buffer) {
+            state.updateState(transform)
+            buffer.events.forEach { event ->
+                applyConversationEvent(key.serverId, key.threadId, event)
+            }
+            buffer.accepting = false
+            conversationEventBuffers.remove(key, buffer)
+        }
+    }
+
+    private fun tryBufferConversationEvent(
+        key: ConversationKey,
+        event: ConversationEvent,
+    ): Boolean {
+        val buffer = conversationEventBuffers[key] ?: return false
+        synchronized(buffer) {
+            if (!buffer.accepting) return false
+            buffer.events += event
+            return true
         }
     }
 
@@ -1048,8 +1218,11 @@ class CodexRepository(
             threadId = summary.id,
             title = summary.title,
             cwd = summary.cwd,
-            items = items,
-            activeTurnId = activeTurnId,
+            history = ConversationHistory(
+                turns = turns,
+                olderTurnsCursor = olderTurnsCursor,
+            ),
+            activeTurnId = turns.lastOrNull { it.status == ConversationTurnStatus.IN_PROGRESS }?.id,
             isRunning = summary.status == ThreadRuntimeStatus.ACTIVE,
             model = model,
             serviceTier = serviceTier,
@@ -1227,6 +1400,11 @@ class CodexRepository(
 
     private data class PendingRequestRoute(val id: JsonPrimitive, val threadId: String)
 
+    private class ConversationEventBuffer {
+        val events = mutableListOf<ConversationEvent>()
+        var accepting = true
+    }
+
     private class ManagedConnection(
         val connection: AppServerConnection,
         var observers: List<Job> = emptyList(),
@@ -1237,6 +1415,7 @@ class CodexRepository(
         const val METHOD_NOT_FOUND = -32601
         const val INVALID_REQUEST = -32600
         const val SERVER_LOAD_TIMEOUT_MILLIS = 5_000L
+        const val TURN_HYDRATION_CONCURRENCY = 4
         val SUPPORTED_SERVER_REQUESTS = setOf(
             "item/commandExecution/requestApproval",
             "item/fileChange/requestApproval",

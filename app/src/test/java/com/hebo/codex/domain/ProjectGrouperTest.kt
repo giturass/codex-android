@@ -33,5 +33,6 @@ class ProjectGrouperTest {
         updatedAt = updatedAt,
         recencyAt = null,
         status = ThreadRuntimeStatus.NOT_LOADED,
+        historyMode = ThreadHistoryMode.PAGINATED,
     )
 }

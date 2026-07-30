@@ -1,5 +1,6 @@
 package com.hebo.codex.ui.screens.home
 
+import com.hebo.codex.domain.ThreadHistoryMode
 import com.hebo.codex.domain.ThreadRuntimeStatus
 import com.hebo.codex.domain.ThreadSummary
 import org.junit.Assert.assertEquals
@@ -66,5 +67,6 @@ class HomeUiStateTest {
         updatedAt = 1,
         recencyAt = 1,
         status = ThreadRuntimeStatus.IDLE,
+        historyMode = ThreadHistoryMode.PAGINATED,
     )
 }

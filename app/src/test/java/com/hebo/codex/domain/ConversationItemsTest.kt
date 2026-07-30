@@ -135,6 +135,28 @@ class ConversationItemsTest {
     }
 
     @Test
+    fun `前台刷新保留已分页加载的更早回合和游标`() {
+        val older = agentMessage("item-old", "turn-old", "更早内容")
+        val recent = agentMessage("item-recent", "turn-recent", "最近内容")
+        val current = conversationState(items = listOf(older, recent)).copy(
+            history = conversationState(items = listOf(older, recent)).history.copy(
+                olderTurnsCursor = "older-cursor",
+            ),
+        )
+        val refreshedRecent = recent.copy(text = "最近内容已刷新")
+        val refreshed = conversationState(items = listOf(refreshedRecent)).copy(
+            history = conversationState(items = listOf(refreshedRecent)).history.copy(
+                olderTurnsCursor = "initial-cursor",
+            ),
+        )
+
+        val merged = current.withRestoredConversation(refreshed)
+
+        assertEquals(listOf(older, refreshedRecent), merged.items)
+        assertEquals("older-cursor", merged.history.olderTurnsCursor)
+    }
+
+    @Test
     fun `恢复快照不保留缺失的显式状态条目`() {
         val command = command("command-1", ActivityStatus.IN_PROGRESS)
         val streaming = agentMessage("agent-1", "turn-1", "正在生成")
@@ -219,7 +241,21 @@ class ConversationItemsTest {
         threadId = "thread",
         title = "会话",
         cwd = "/project",
-        items = items,
+        history = ConversationHistory(
+            turns = items
+                .groupBy(ConversationItem::turnId)
+                .map { (turnId, turnItems) ->
+                    ConversationTurn(
+                        id = turnId,
+                        status = if (turnId == activeTurnId) {
+                            ConversationTurnStatus.IN_PROGRESS
+                        } else {
+                            ConversationTurnStatus.COMPLETED
+                        },
+                        items = turnItems,
+                    )
+                },
+        ),
         activeTurnId = activeTurnId,
         activeItemKeys = activeItemKeys,
     )
