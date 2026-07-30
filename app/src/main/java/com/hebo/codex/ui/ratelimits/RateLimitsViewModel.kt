@@ -24,8 +24,11 @@ data class RateLimitsUiState(
     val usage: AccountUsage? = null,
     val updatedAt: Long? = null,
     val isRefreshing: Boolean = false,
+    val isResetting: Boolean = false,
     val errorMessage: UserFacingError? = null,
     val usageErrorMessage: UserFacingError? = null,
+    val resetMessage: String? = null,
+    val resetErrorMessage: UserFacingError? = null,
 )
 
 class RateLimitsViewModel(
@@ -33,6 +36,7 @@ class RateLimitsViewModel(
 ) : ViewModel() {
     private val mutableState = MutableStateFlow<Map<String, RateLimitsUiState>>(emptyMap())
     private val refreshJobs = mutableMapOf<String, Job>()
+    private val resetJobs = mutableMapOf<String, Job>()
     private val refreshGenerations = mutableMapOf<String, Long>()
     private val observedRevisions = mutableMapOf<String, Long>()
 
@@ -60,6 +64,8 @@ class RateLimitsViewModel(
                 isRefreshing = true,
                 errorMessage = null,
                 usageErrorMessage = null,
+                resetMessage = null,
+                resetErrorMessage = null,
             ))
         }
         refreshJobs[serverId] = viewModelScope.launch {
@@ -84,8 +90,44 @@ class RateLimitsViewModel(
         }
     }
 
+    fun consumeRateLimitReset(serverId: String, creditId: String?) {
+        if (resetJobs[serverId]?.isActive == true) return
+        mutableState.update { current ->
+            current + (serverId to current.getOrDefault(serverId, RateLimitsUiState()).copy(
+                isResetting = true,
+                resetMessage = null,
+                resetErrorMessage = null,
+            ))
+        }
+        resetJobs[serverId] = viewModelScope.launch {
+            runSuspendCatching { repository.consumeRateLimitReset(serverId, creditId) }
+                .onSuccess { result ->
+                    refresh(serverId)
+                    mutableState.update { current ->
+                        current + (serverId to current.getOrDefault(serverId, RateLimitsUiState()).copy(
+                            resetMessage = result.message,
+                        ))
+                    }
+                }
+                .onFailure { error ->
+                    mutableState.update { current ->
+                        current + (serverId to current.getOrDefault(serverId, RateLimitsUiState()).copy(
+                            resetErrorMessage = error.toUserFacingError("无法重置限额"),
+                        ))
+                    }
+                }
+            mutableState.update { current ->
+                current + (serverId to current.getOrDefault(serverId, RateLimitsUiState()).copy(
+                    isResetting = false,
+                ))
+            }
+            resetJobs.remove(serverId)
+        }
+    }
+
     override fun onCleared() {
         refreshJobs.values.forEach(Job::cancel)
+        resetJobs.values.forEach(Job::cancel)
     }
 
     companion object {

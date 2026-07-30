@@ -18,12 +18,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -46,6 +49,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hebo.codex.domain.AccountRateLimit
 import com.hebo.codex.domain.AccountRateLimits
+import com.hebo.codex.domain.RateLimitResetCredit
+import com.hebo.codex.domain.RateLimitResetCredits
+import com.hebo.codex.domain.RateLimitResetCreditStatus
 import com.hebo.codex.domain.RateLimitWindow
 import com.hebo.codex.ui.components.AnchoredDetailsPopup
 import com.hebo.codex.ui.components.CompactDailyTokenUsageChart
@@ -53,6 +59,7 @@ import com.hebo.codex.ui.components.DAILY_TOKEN_USAGE_DAY_COUNT
 import com.hebo.codex.ui.components.RemainingLinearProgressIndicator
 import com.hebo.codex.ui.components.relativeTime
 import com.hebo.codex.ui.formatDateTime
+import com.hebo.codex.ui.formatCount
 import com.hebo.codex.ui.formatPercent
 import com.hebo.codex.ui.theme.statusColors
 import kotlinx.coroutines.delay
@@ -90,13 +97,20 @@ internal enum class RateLimitEmphasis {
     CRITICAL,
 }
 
+private data class RateLimitResetTarget(
+    val creditId: String?,
+    val title: String,
+)
+
 @Composable
 fun RateLimitIndicator(
     state: RateLimitsUiState,
     onRefresh: () -> Unit,
+    onConsumeResetCredit: (String?) -> Unit,
 ) {
     val windows = state.rateLimits?.codexWindows() ?: return
     var showDetails by remember { mutableStateOf(false) }
+    var resetTarget by remember { mutableStateOf<RateLimitResetTarget?>(null) }
     val featured = windows.featured
     val featuredRemaining = featured.window.remainingPercent()
     val featuredColor = rateLimitWindowColor(featured)
@@ -121,7 +135,30 @@ fun RateLimitIndicator(
                 state = state,
                 windows = windows,
                 onRefresh = onRefresh,
+                onRequestReset = { resetTarget = it },
                 onDismiss = { showDetails = false },
+            )
+        }
+        resetTarget?.let { target ->
+            AlertDialog(
+                onDismissRequest = { resetTarget = null },
+                title = { Text("使用限额重置") },
+                text = { Text("确认使用“${target.title}”重置当前 Codex 限额？") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            resetTarget = null
+                            onConsumeResetCredit(target.creditId)
+                        },
+                    ) {
+                        Text("确认使用")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { resetTarget = null }) {
+                        Text("取消")
+                    }
+                },
             )
         }
     }
@@ -213,6 +250,7 @@ private fun RateLimitDetailsPopup(
     state: RateLimitsUiState,
     windows: CodexRateLimitWindows,
     onRefresh: () -> Unit,
+    onRequestReset: (RateLimitResetTarget) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var nowEpochSeconds by remember { mutableLongStateOf(Instant.now().epochSecond) }
@@ -244,6 +282,14 @@ private fun RateLimitDetailsPopup(
             }
             HorizontalDivider()
             TokenUsageDetails(state)
+            state.rateLimits?.resetCredits?.let { resetCredits ->
+                HorizontalDivider()
+                RateLimitResetDetails(
+                    resetCredits = resetCredits,
+                    state = state,
+                    onRequestReset = onRequestReset,
+                )
+            }
             state.errorMessage?.let { error ->
                 Text(
                     text = "额度刷新失败：${error.summary}",
@@ -321,7 +367,7 @@ private fun TokenUsageDetails(state: RateLimitsUiState) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Token 用量", style = MaterialTheme.typography.labelLarge)
+            Text("Token 历史消耗", style = MaterialTheme.typography.labelLarge)
             Text(
                 "最近 $DAILY_TOKEN_USAGE_DAY_COUNT 天",
                 style = MaterialTheme.typography.labelMedium,
@@ -354,6 +400,147 @@ private fun TokenUsageDetails(state: RateLimitsUiState) {
             )
         }
     }
+}
+
+@Composable
+private fun RateLimitResetDetails(
+    resetCredits: RateLimitResetCredits,
+    state: RateLimitsUiState,
+    onRequestReset: (RateLimitResetTarget) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("限额重置", style = MaterialTheme.typography.labelLarge)
+            Text(
+                "可用 ${formatCount(resetCredits.availableCount)} 次",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        val credits = resetCredits.credits
+        when {
+            credits == null -> {
+                Text(
+                    "服务端仅提供可用次数，将自动选择可用额度",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (resetCredits.availableCount > 0L) {
+                    ResetCreditButton(
+                        enabled = !state.isResetting,
+                        isResetting = state.isResetting,
+                        onClick = {
+                            onRequestReset(RateLimitResetTarget(null, "一次可用额度"))
+                        },
+                    )
+                }
+            }
+
+            credits.isEmpty() -> Text(
+                "暂无可用的限额重置",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            else -> credits.forEachIndexed { index, credit ->
+                if (index > 0) HorizontalDivider()
+                RateLimitResetCreditDetails(
+                    credit = credit,
+                    isResetting = state.isResetting,
+                    onRequestReset = onRequestReset,
+                )
+            }
+        }
+
+        state.resetMessage?.let { message ->
+            Text(
+                message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        state.resetErrorMessage?.let { error ->
+            Text(
+                "限额重置失败：${error.summary}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RateLimitResetCreditDetails(
+    credit: RateLimitResetCredit,
+    isResetting: Boolean,
+    onRequestReset: (RateLimitResetTarget) -> Unit,
+) {
+    val title = credit.title ?: "限额重置额度"
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(title, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            Text(
+                credit.status.resetStatusLabel(),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        credit.description?.let { description ->
+            Text(
+                description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Text(
+            credit.expiresAt?.let { "有效期至 ${formatDateTime(it)}" } ?: "长期有效",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (credit.status == RateLimitResetCreditStatus.AVAILABLE) {
+            ResetCreditButton(
+                enabled = !isResetting,
+                isResetting = isResetting,
+                onClick = {
+                    onRequestReset(RateLimitResetTarget(credit.id, title))
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ResetCreditButton(
+    enabled: Boolean,
+    isResetting: Boolean,
+    onClick: () -> Unit,
+) {
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+    ) {
+        if (isResetting) {
+            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(8.dp))
+        }
+        Text(if (isResetting) "正在重置" else "立即使用")
+    }
+}
+
+private fun RateLimitResetCreditStatus.resetStatusLabel(): String = when (this) {
+    RateLimitResetCreditStatus.AVAILABLE -> "可用"
+    RateLimitResetCreditStatus.REDEEMING -> "使用中"
+    RateLimitResetCreditStatus.REDEEMED -> "已使用"
+    RateLimitResetCreditStatus.UNKNOWN -> "未知状态"
 }
 
 internal fun rateLimitEmphasis(remainingPercent: Double): RateLimitEmphasis = when {

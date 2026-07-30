@@ -171,13 +171,16 @@ class StableFeatureApi(
         api.request(StableRpcMethod.ACCOUNT_LOGOUT)
     }
 
-    suspend fun consumeRateLimitReset(creditId: String?): FeatureActionResult = api.request(
-        StableRpcMethod.ACCOUNT_RATE_LIMIT_RESET,
-        buildJsonObject {
-            put("idempotencyKey", java.util.UUID.randomUUID().toString())
-            creditId?.takeIf(String::isNotBlank)?.let { put("creditId", it) }
-        },
-    ).toResult("额度重置请求已提交")
+    suspend fun consumeRateLimitReset(creditId: String?): FeatureActionResult {
+        val response = api.request(
+            StableRpcMethod.ACCOUNT_RATE_LIMIT_RESET,
+            buildJsonObject {
+                put("idempotencyKey", java.util.UUID.randomUUID().toString())
+                creditId?.takeIf(String::isNotBlank)?.let { put("creditId", it) }
+            },
+        )
+        return response.toResult(rateLimitResetOutcomeMessage(response.jsonObject.requiredString("outcome")))
+    }
 
     suspend fun sendCreditsNudge(creditType: String): FeatureActionResult {
         require(creditType == "credits" || creditType == "usage_limit") {
@@ -779,4 +782,12 @@ class StableFeatureApi(
         val SHARE_OPTION_KEYS = setOf("remotePluginId", "discoverability", "shareTargets")
         val PRETTY_JSON = Json { prettyPrint = true }
     }
+}
+
+internal fun rateLimitResetOutcomeMessage(outcome: String): String = when (outcome) {
+    "reset" -> "限额已重置"
+    "nothingToReset" -> "当前没有需要重置的限额"
+    "noCredit" -> "没有可用的限额重置额度"
+    "alreadyRedeemed" -> "该重置额度已使用"
+    else -> throw ProtocolException("未知的限额重置结果：$outcome")
 }

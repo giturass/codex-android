@@ -298,6 +298,7 @@ fun ChatScreen(
     onNewTask: (String) -> Unit,
     onOpenConversation: (String, String?) -> Unit,
     onRefreshRateLimits: () -> Unit,
+    onConsumeRateLimitReset: (String?) -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val quickPhraseState by quickPhraseViewModel.state.collectAsStateWithLifecycle()
@@ -602,6 +603,7 @@ fun ChatScreen(
                     onOpenGoal = { dialog = ChatDialog.Goal },
                 ),
                 onRefreshRateLimits = onRefreshRateLimits,
+                onConsumeRateLimitReset = onConsumeRateLimitReset,
                 shadowElevation = 1.dp,
                 modifier = Modifier.onSizeChanged { topControlsHeightPx = it.height },
             )
@@ -948,6 +950,7 @@ internal fun ConversationFloatingHeader(
     onOpenAttention: (String) -> Unit,
     actions: ConversationHeaderActions?,
     onRefreshRateLimits: () -> Unit,
+    onConsumeRateLimitReset: (String?) -> Unit,
     shadowElevation: Dp = 2.dp,
     modifier: Modifier = Modifier,
 ) {
@@ -1021,6 +1024,7 @@ internal fun ConversationFloatingHeader(
                     RateLimitIndicator(
                         state = rateLimitsState,
                         onRefresh = onRefreshRateLimits,
+                        onConsumeResetCredit = onConsumeRateLimitReset,
                     )
                     if (actions != null) {
                         IconButton(onClick = actions.onNewTask) {

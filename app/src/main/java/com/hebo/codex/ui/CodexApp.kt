@@ -367,6 +367,11 @@ fun CodexApp(
                         onRefreshRateLimits = {
                             homeState.activeServerId?.let(rateLimitsViewModel::refresh)
                         },
+                        onConsumeRateLimitReset = { creditId ->
+                            homeState.activeServerId?.let { serverId ->
+                                rateLimitsViewModel.consumeRateLimitReset(serverId, creditId)
+                            }
+                        },
                         onShowError = ::showUserFacingError,
                     )
                 }
@@ -405,6 +410,9 @@ fun CodexApp(
                             openConversation(route.serverId, threadId, announcement)
                         },
                         onRefreshRateLimits = { rateLimitsViewModel.refresh(route.serverId) },
+                        onConsumeRateLimitReset = { creditId ->
+                            rateLimitsViewModel.consumeRateLimitReset(route.serverId, creditId)
+                        },
                     )
                 }
                 composable<ServerHubRoute> { entry ->

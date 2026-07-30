@@ -118,6 +118,7 @@ fun HomeScreen(
     onOpenConversation: (String) -> Unit,
     onAddServer: () -> Unit,
     onRefreshRateLimits: () -> Unit,
+    onConsumeRateLimitReset: (String?) -> Unit,
     onShowError: suspend (UserFacingError) -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -220,6 +221,7 @@ fun HomeScreen(
                 onToggleNavigation = onToggleNavigation,
                 onOpenConversation = onOpenConversation,
                 onRefreshRateLimits = onRefreshRateLimits,
+                onConsumeRateLimitReset = onConsumeRateLimitReset,
                 onLoadResources = newTaskViewModel::loadInputResources,
                 onMessageChange = newTaskViewModel::updateMessage,
                 onAddAttachment = newTaskViewModel::addAttachment,
@@ -295,6 +297,7 @@ private fun NewTaskContent(
     onToggleNavigation: () -> Unit,
     onOpenConversation: (String) -> Unit,
     onRefreshRateLimits: () -> Unit,
+    onConsumeRateLimitReset: (String?) -> Unit,
     onLoadResources: (Boolean) -> Unit,
     onMessageChange: (String) -> Unit,
     onAddAttachment: (UserInputPart, String?) -> Unit,
@@ -369,6 +372,7 @@ private fun NewTaskContent(
             onOpenAttention = onOpenConversation,
             actions = null,
             onRefreshRateLimits = onRefreshRateLimits,
+            onConsumeRateLimitReset = onConsumeRateLimitReset,
             modifier = Modifier.align(Alignment.TopCenter),
         )
 
