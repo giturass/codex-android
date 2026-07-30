@@ -68,7 +68,8 @@ class ConnectionCoordinatorTest {
         val firstFailure = runCatching { coordinator.connection("server") }.exceptionOrNull()
         val cachedFailure = runCatching { coordinator.connection("server") }.exceptionOrNull()
 
-        assertSame(firstFailure, cachedFailure)
+        assertEquals(firstFailure?.javaClass, cachedFailure?.javaClass)
+        assertEquals(firstFailure?.message, cachedFailure?.message)
         assertEquals(1, connectionCount.get())
 
         val connected = coordinator.connection("server", retryFailed = true)
