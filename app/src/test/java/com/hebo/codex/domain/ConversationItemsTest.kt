@@ -235,28 +235,36 @@ class ConversationItemsTest {
         items: List<ConversationItem> = emptyList(),
         activeTurnId: String? = null,
         activeItemKeys: Set<ConversationItemKey> = emptySet(),
-    ) = ConversationState(
-        serverId = "server",
-        serverName = "服务器",
-        threadId = "thread",
-        title = "会话",
-        cwd = "/project",
-        history = ConversationHistory(
-            turns = items
-                .groupBy(ConversationItem::turnId)
-                .map { (turnId, turnItems) ->
-                    ConversationTurn(
-                        id = turnId,
-                        status = if (turnId == activeTurnId) {
-                            ConversationTurnStatus.IN_PROGRESS
-                        } else {
-                            ConversationTurnStatus.COMPLETED
-                        },
-                        items = turnItems,
-                    )
-                },
-        ),
-        activeTurnId = activeTurnId,
-        activeItemKeys = activeItemKeys,
-    )
+    ): ConversationState {
+        val turns = items
+            .groupBy(ConversationItem::turnId)
+            .map { (turnId, turnItems) ->
+                ConversationTurn(
+                    id = turnId,
+                    status = if (turnId == activeTurnId) {
+                        ConversationTurnStatus.IN_PROGRESS
+                    } else {
+                        ConversationTurnStatus.COMPLETED
+                    },
+                    items = turnItems,
+                )
+            }
+            .let { groupedTurns ->
+                if (activeTurnId == null || groupedTurns.any { it.id == activeTurnId }) {
+                    groupedTurns
+                } else {
+                    groupedTurns + ConversationTurn(activeTurnId, ConversationTurnStatus.IN_PROGRESS)
+                }
+            }
+        return ConversationState(
+            serverId = "server",
+            serverName = "服务器",
+            threadId = "thread",
+            title = "会话",
+            cwd = "/project",
+            history = ConversationHistory(turns = turns),
+            activeTurnId = activeTurnId,
+            activeItemKeys = activeItemKeys,
+        )
+    }
 }

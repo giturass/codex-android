@@ -80,7 +80,7 @@ class ConnectionCoordinatorTest {
     private fun kotlinx.coroutines.test.TestScope.coordinator(
         openConnection: suspend (String) -> FakeConnection,
     ) = ConnectionCoordinator(
-        scope = this,
+        scope = backgroundScope,
         isAvailable = { !it.closed },
         openConnection = openConnection,
         closeConnection = { it.closed = true },
