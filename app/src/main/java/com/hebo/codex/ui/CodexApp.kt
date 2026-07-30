@@ -19,7 +19,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,7 +39,6 @@ import com.hebo.codex.ConversationTarget
 import com.hebo.codex.R
 import com.hebo.codex.domain.CodexRepository
 import com.hebo.codex.domain.DraftRepository
-import com.hebo.codex.domain.DraftTarget
 import com.hebo.codex.domain.QuickPhraseRepository
 import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.ui.components.CodexNavigationDrawer
@@ -72,7 +70,6 @@ private val WideDrawerThreshold = CodexNavigationDrawerWidth + MainContentMinWid
 
 @Serializable
 internal data class NewTaskRoute(
-    val draftId: String,
     val serverId: String? = null,
     val cwd: String? = null,
 )
@@ -127,11 +124,6 @@ fun CodexApp(
                 threadId = requireNotNull(arguments.getString("threadId")),
             )
 
-            arguments.getString("draftId") != null -> DrawerActiveTarget.NewTaskDraft(
-                serverId = serverId,
-                draftId = requireNotNull(arguments.getString("draftId")),
-            )
-
             else -> null
         }
     }
@@ -147,11 +139,9 @@ fun CodexApp(
     fun openNewTask(
         serverId: String? = null,
         cwd: String? = null,
-        draftId: String = NewTaskViewModel.newDraftId(),
     ) {
         navController.navigate(
             NewTaskRoute(
-                draftId = draftId,
                 serverId = serverId,
                 cwd = cwd?.takeIf(String::isNotBlank),
             ),
@@ -270,18 +260,6 @@ fun CodexApp(
                     dismissModalDrawer()
                     homeState.activeServerId?.let { openConversation(it, threadId) }
                 },
-                onOpenDraft = { draft ->
-                    dismissModalDrawer()
-                    when (val target = draft.key.target) {
-                        is DraftTarget.NewTask -> openNewTask(
-                            serverId = draft.key.serverId,
-                            cwd = draft.cwd,
-                            draftId = target.id,
-                        )
-
-                        is DraftTarget.Thread -> openConversation(draft.key.serverId, target.id)
-                    }
-                },
                 onDeleteDraft = homeViewModel::deleteDraft,
                 onNewProjectTask = { cwd ->
                     dismissModalDrawer()
@@ -320,21 +298,18 @@ fun CodexApp(
                 },
             )
         }
-        val initialDraftId = rememberSaveable { NewTaskViewModel.newDraftId() }
         val content: @Composable () -> Unit = {
             NavHost(
                 navController = navController,
-                startDestination = NewTaskRoute(draftId = initialDraftId),
+                startDestination = NewTaskRoute(),
             ) {
                 composable<NewTaskRoute> { entry ->
                     val route = entry.toRoute<NewTaskRoute>()
                     val newTaskViewModel: NewTaskViewModel = viewModel(
-                        key = "new-task:${route.serverId.orEmpty()}:${route.draftId}",
                         factory = NewTaskViewModel.factory(
                             repository = repository,
                             draftRepository = draftRepository,
                             serverId = route.serverId,
-                            draftId = route.draftId,
                             initialCwd = route.cwd,
                         ),
                     )

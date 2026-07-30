@@ -846,6 +846,9 @@ fun ChatScreen(
                     Column {
                         PendingRequestCard(
                             request = request,
+                            cwd = conversation.cwd,
+                            onOpenRemoteFile = { remoteFileTarget = it },
+                            onLinkError = showLinkError,
                             onApproval = viewModel::respondToApproval,
                             onExecPolicy = viewModel::respondToApprovalWithExecPolicy,
                             onNetworkPolicy = viewModel::respondToApprovalWithNetworkPolicy,
@@ -1612,6 +1615,9 @@ private fun pendingRequestSummary(request: PendingServerRequest): String = when 
 @Composable
 private fun PendingRequestCard(
     request: PendingServerRequest,
+    cwd: String,
+    onOpenRemoteFile: (RemoteFileTarget) -> Unit,
+    onLinkError: (String) -> Unit,
     onApproval: (String, ApprovalDecision) -> Unit,
     onExecPolicy: (String, String) -> Unit,
     onNetworkPolicy: (String, String) -> Unit,
@@ -1627,9 +1633,13 @@ private fun PendingRequestCard(
             onNetworkPolicy = { amendment -> onNetworkPolicy(request.requestKey, amendment) },
         )
 
-        is PendingServerRequest.Questions -> QuestionsCard(request) { answers ->
-            onQuestions(request.requestKey, answers)
-        }
+        is PendingServerRequest.Questions -> QuestionsCard(
+            request = request,
+            cwd = cwd,
+            onOpenRemoteFile = onOpenRemoteFile,
+            onLinkError = onLinkError,
+            onSubmit = { answers -> onQuestions(request.requestKey, answers) },
+        )
 
         is PendingServerRequest.McpElicitation -> McpElicitationCard(request) { action, content ->
             onMcp(request.requestKey, action, content)
@@ -1719,6 +1729,9 @@ private fun ApprovalCard(
 @Composable
 private fun QuestionsCard(
     request: PendingServerRequest.Questions,
+    cwd: String,
+    onOpenRemoteFile: (RemoteFileTarget) -> Unit,
+    onLinkError: (String) -> Unit,
     onSubmit: (Map<String, List<String>>) -> Unit,
 ) {
     var answers by remember(request.requestKey) { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
@@ -1749,7 +1762,14 @@ private fun QuestionsCard(
             Text("Codex 需要你的回答", style = MaterialTheme.typography.titleMedium)
             request.questions.forEach { question ->
                 Text(question.header, style = MaterialTheme.typography.labelLarge)
-                Text(question.question)
+                SelectionContainer {
+                    ChatMarkdown(
+                        content = question.question,
+                        cwd = cwd,
+                        onOpenRemoteFile = onOpenRemoteFile,
+                        onLinkError = onLinkError,
+                    )
+                }
                 if (question.options.isNotEmpty()) {
                     question.options.forEach { option ->
                         val selected = question.id !in otherQuestions &&

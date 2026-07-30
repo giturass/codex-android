@@ -125,7 +125,6 @@ fun CodexNavigationDrawer(
     isWideLayout: Boolean,
     onNewConversation: () -> Unit,
     onOpenConversation: (String) -> Unit,
-    onOpenDraft: (DraftSummary) -> Unit,
     onDeleteDraft: (DraftKey) -> Unit,
     onNewProjectTask: (String) -> Unit,
     onSearch: (String) -> Unit,
@@ -165,7 +164,6 @@ fun CodexNavigationDrawer(
             activeTarget = activeTarget,
             onNewConversation = onNewConversation,
             onOpenConversation = onOpenConversation,
-            onOpenDraft = onOpenDraft,
             onDeleteDraft = onDeleteDraft,
             onNewProjectTask = onNewProjectTask,
             onSearch = onSearch,
@@ -213,11 +211,6 @@ sealed interface DrawerActiveTarget {
         override val serverId: String,
         val threadId: String,
     ) : DrawerActiveTarget
-
-    data class NewTaskDraft(
-        override val serverId: String,
-        val draftId: String,
-    ) : DrawerActiveTarget
 }
 
 private data class ThreadActionSelection(
@@ -246,7 +239,6 @@ private fun ColumnScope.DrawerContent(
     activeTarget: DrawerActiveTarget?,
     onNewConversation: () -> Unit,
     onOpenConversation: (String) -> Unit,
-    onOpenDraft: (DraftSummary) -> Unit,
     onDeleteDraft: (DraftKey) -> Unit,
     onNewProjectTask: (String) -> Unit,
     onSearch: (String) -> Unit,
@@ -269,20 +261,12 @@ private fun ColumnScope.DrawerContent(
     var groupByProject by rememberSaveable { mutableStateOf(false) }
     var expandedProjects by remember(activeServer?.id) { mutableStateOf(emptySet<String>()) }
     var selectedThread by remember(activeServer?.id) { mutableStateOf<ThreadActionSelection?>(null) }
-    var selectedDraft by remember(activeServer?.id) { mutableStateOf<DraftSummary?>(null) }
     val recentListState = key(activeServer?.id, DrawerPage.RECENT) { rememberLazyListState() }
     val searchListState = key(activeServer?.id, DrawerPage.SEARCH) { rememberLazyListState() }
     val drawerListState = when (drawerPage) {
         DrawerPage.RECENT -> recentListState
         DrawerPage.SEARCH -> searchListState
     }
-    val currentDraftKeys: Set<DraftKey> = remember(drafts) {
-        drafts.mapTo(mutableSetOf()) { it.key }
-    }
-    val visibleProjects = remember(projects, drafts) {
-        projectsWithoutDrafts(projects, drafts)
-    }
-    var previousDraftKeys by remember(activeServer?.id) { mutableStateOf(currentDraftKeys) }
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
 
@@ -299,13 +283,6 @@ private fun ColumnScope.DrawerContent(
 
     fun leaveTransientPage() {
         showRecent()
-    }
-
-    LaunchedEffect(currentDraftKeys) {
-        if (hasNewDraft(previousDraftKeys, drafts)) {
-            recentListState.requestScrollToItem(0)
-        }
-        previousDraftKeys = currentDraftKeys
     }
 
     val activeThreadId = (activeTarget as? DrawerActiveTarget.Thread)
@@ -335,37 +312,9 @@ private fun ColumnScope.DrawerContent(
             modifier = Modifier.weight(1f),
             contentPadding = listContentPadding,
         ) {
-            val visibleDrafts = drafts
-            val visibleRecentThreads = threadsWithoutDrafts(recentThreads, visibleDrafts)
-            val recentThreadsById = recentThreads.associateBy(ThreadSummary::id)
+            val threadDrafts = threadDraftsById(drafts)
+            val unlistedDrafts = unlistedThreadDrafts(recentThreads, drafts)
             if (activeServer != null && drawerPage == DrawerPage.RECENT) {
-                if (visibleDrafts.isNotEmpty()) {
-                    item("drafts-title") { DrawerSectionTitle("草稿") }
-                    items(visibleDrafts, key = { it.drawerKey }) { draft ->
-                        DrawerDraftItem(
-                            draft = draft,
-                            thread = (draft.key.target as? DraftTarget.Thread)?.id?.let(recentThreadsById::get),
-                            attention = (draft.key.target as? DraftTarget.Thread)?.id
-                                ?.let(threadAttention::get)
-                                ?.attention,
-                            selected = isDraftSelected(draft, activeTarget),
-                            onClick = {
-                                leaveTransientPage()
-                                onOpenDraft(draft)
-                            },
-                            onThreadMenu = {
-                                val target = draft.key.target as DraftTarget.Thread
-                                selectedThread = ThreadActionSelection(
-                                    threadId = target.id,
-                                    title = draft.contextTitle,
-                                    archived = false,
-                                    draftKey = draft.key,
-                                )
-                            },
-                            onDelete = { selectedDraft = draft },
-                        )
-                    }
-                }
                 item("recent-title") {
                     DrawerRecentHeader(
                         groupByProject = groupByProject,
@@ -379,6 +328,26 @@ private fun ColumnScope.DrawerContent(
                             }
                         },
                         onRefresh = onRefresh,
+                    )
+                }
+                items(unlistedDrafts, key = { "draft-thread:${it.key.target.id}" }) { draft ->
+                    val threadId = draft.key.target.id
+                    DrawerDraftThreadItem(
+                        draft = draft,
+                        attention = threadAttention[threadId]?.attention,
+                        selected = isThreadSelected(activeServer.id, threadId, activeTarget),
+                        onClick = {
+                            leaveTransientPage()
+                            onOpenConversation(threadId)
+                        },
+                        onMenu = {
+                            selectedThread = ThreadActionSelection(
+                                threadId = threadId,
+                                title = draft.contextTitle,
+                                archived = false,
+                                draftKey = draft.key,
+                            )
+                        },
                     )
                 }
             }
@@ -410,8 +379,10 @@ private fun ColumnScope.DrawerContent(
                             item("search-empty") { DrawerEmptyMessage("没有匹配的会话") }
                         }
                         items(threads, key = ThreadSummary::id) { thread ->
+                            val draft = threadDrafts[thread.id]
                             DrawerThreadItem(
                                 thread = thread,
+                                draft = draft,
                                 attention = threadAttention[thread.id]?.attention,
                                 selected = isThreadSelected(activeServer.id, thread.id, activeTarget),
                                 showProject = true,
@@ -424,6 +395,7 @@ private fun ColumnScope.DrawerContent(
                                         threadId = thread.id,
                                         title = thread.title,
                                         archived = showArchived,
+                                        draftKey = draft?.key,
                                     )
                                 },
                             )
@@ -432,12 +404,12 @@ private fun ColumnScope.DrawerContent(
                 }
 
                 activeServer != null && groupByProject -> {
-                    if (!isLoading && visibleProjects.isEmpty()) {
+                    if (!isLoading && projects.isEmpty() && unlistedDrafts.isEmpty()) {
                         item("grouped-empty") {
-                            DrawerEmptyMessage(if (visibleDrafts.isEmpty()) "还没有会话" else "没有其他最近会话")
+                            DrawerEmptyMessage("还没有会话")
                         }
                     }
-                    items(visibleProjects, key = RecentProject::path) { project ->
+                    items(projects, key = RecentProject::path) { project ->
                         val expanded = project.path in expandedProjects
                         val active = project.threads.any { it.id == activeThreadId }
                         Column {
@@ -459,8 +431,10 @@ private fun ColumnScope.DrawerContent(
                             )
                             if (expanded) {
                                 project.threads.forEach { thread ->
+                                    val draft = threadDrafts[thread.id]
                                     DrawerThreadItem(
                                         thread = thread,
+                                        draft = draft,
                                         attention = threadAttention[thread.id]?.attention,
                                         selected = isThreadSelected(activeServer.id, thread.id, activeTarget),
                                         showProject = false,
@@ -473,6 +447,7 @@ private fun ColumnScope.DrawerContent(
                                                 threadId = thread.id,
                                                 title = thread.title,
                                                 archived = false,
+                                                draftKey = draft?.key,
                                             )
                                         },
                                     )
@@ -483,14 +458,16 @@ private fun ColumnScope.DrawerContent(
                 }
 
                 activeServer != null -> {
-                    if (!isLoading && visibleRecentThreads.isEmpty()) {
+                    if (!isLoading && recentThreads.isEmpty() && unlistedDrafts.isEmpty()) {
                         item("recent-empty") {
-                            DrawerEmptyMessage(if (visibleDrafts.isEmpty()) "还没有会话" else "没有其他最近会话")
+                            DrawerEmptyMessage("还没有会话")
                         }
                     }
-                    items(visibleRecentThreads, key = ThreadSummary::id) { thread ->
+                    items(recentThreads, key = ThreadSummary::id) { thread ->
+                        val draft = threadDrafts[thread.id]
                         DrawerThreadItem(
                             thread = thread,
+                            draft = draft,
                             attention = threadAttention[thread.id]?.attention,
                             selected = isThreadSelected(activeServer.id, thread.id, activeTarget),
                             showProject = true,
@@ -500,6 +477,7 @@ private fun ColumnScope.DrawerContent(
                                     threadId = thread.id,
                                     title = thread.title,
                                     archived = false,
+                                    draftKey = draft?.key,
                                 )
                             },
                         )
@@ -599,26 +577,6 @@ private fun ColumnScope.DrawerContent(
                     onDeleteDraft(draftKey)
                     selectedThread = null
                 }
-            },
-        )
-    }
-    selectedDraft?.let { draft ->
-        AlertDialog(
-            onDismissRequest = { selectedDraft = null },
-            title = { Text("删除草稿？") },
-            text = { Text("删除后无法恢复：${draft.preview}") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        onDeleteDraft(draft.key)
-                        selectedDraft = null
-                    },
-                ) {
-                    Text("删除")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { selectedDraft = null }) { Text("取消") }
             },
         )
     }
@@ -942,26 +900,25 @@ private fun ProjectHeader(
     }
 }
 
-internal fun threadsWithoutDrafts(
+internal fun threadDraftsById(
+    drafts: List<DraftSummary>,
+): Map<String, DraftSummary> = buildMap {
+    drafts.forEach { draft ->
+        val threadId = (draft.key.target as? DraftTarget.Thread)?.id ?: return@forEach
+        put(threadId, draft)
+    }
+}
+
+internal fun unlistedThreadDrafts(
     threads: List<ThreadSummary>,
     drafts: List<DraftSummary>,
-): List<ThreadSummary> {
-    val draftedThreadIds = drafts.mapNotNullTo(mutableSetOf()) { draft ->
-        (draft.key.target as? DraftTarget.Thread)?.id
+): List<DraftSummary> {
+    val listedThreadIds = threads.mapTo(mutableSetOf(), ThreadSummary::id)
+    return drafts.filter { draft ->
+        val threadId = (draft.key.target as? DraftTarget.Thread)?.id
+        threadId != null && threadId !in listedThreadIds
     }
-    return threads.filterNot { it.id in draftedThreadIds }
 }
-
-internal fun projectsWithoutDrafts(
-    projects: List<RecentProject>,
-    drafts: List<DraftSummary>,
-): List<RecentProject> = projects.mapNotNull { project ->
-    project.copy(threads = threadsWithoutDrafts(project.threads, drafts))
-        .takeIf { it.threads.isNotEmpty() }
-}
-
-internal fun hasNewDraft(previousKeys: Set<DraftKey>, drafts: List<DraftSummary>): Boolean =
-    drafts.any { it.key !in previousKeys }
 
 internal fun isThreadSelected(
     serverId: String,
@@ -971,64 +928,42 @@ internal fun isThreadSelected(
     activeTarget.serverId == serverId &&
     activeTarget.threadId == threadId
 
-internal fun isDraftSelected(draft: DraftSummary, activeTarget: DrawerActiveTarget?): Boolean =
-    activeTarget?.serverId == draft.key.serverId && when (val target = draft.key.target) {
-        is DraftTarget.NewTask -> activeTarget is DrawerActiveTarget.NewTaskDraft &&
-            activeTarget.draftId == target.id
-
-        is DraftTarget.Thread -> activeTarget is DrawerActiveTarget.Thread &&
-            activeTarget.threadId == target.id
-    }
-
-private val DraftSummary.drawerKey: String
-    get() = when (val target = key.target) {
-        is DraftTarget.NewTask -> "draft:${key.serverId}:new:${target.id}"
-        is DraftTarget.Thread -> "draft:${key.serverId}:thread:${target.id}"
-    }
-
 @Composable
-private fun DrawerDraftItem(
+private fun DrawerDraftThreadItem(
     draft: DraftSummary,
-    thread: ThreadSummary?,
     attention: ThreadAttention?,
     selected: Boolean,
     onClick: () -> Unit,
-    onThreadMenu: () -> Unit,
-    onDelete: () -> Unit,
+    onMenu: () -> Unit,
 ) {
-    val isThreadDraft = draft.key.target is DraftTarget.Thread
-    val effectiveAttention = attention ?: thread?.let { effectiveThreadAttention(it, null) }
     DrawerConversationItem(
-        title = draft.preview,
+        title = draft.contextTitle,
         subtitle = buildList {
-            add(draft.contextTitle)
             draft.cwd.takeIf(String::isNotBlank)?.let { add(projectName(it)) }
+            draft.preview.takeIf(String::isNotBlank)?.let { add("草稿：$it") }
             add(relativeTime(draft.updatedAtMillis / 1_000))
         }.joinToString(" · "),
         selected = selected,
         nested = false,
         onClick = onClick,
-        onLongClickLabel = if (isThreadDraft) "会话操作" else "删除草稿",
-        onLongClick = if (isThreadDraft) onThreadMenu else onDelete,
+        onLongClickLabel = "会话操作",
+        onLongClick = onMenu,
         leadingContent = {
             Icon(
                 Icons.Rounded.EditNote,
-                contentDescription = null,
+                contentDescription = "有未发送草稿",
                 modifier = Modifier.size(22.dp),
-                tint = MaterialTheme.colorScheme.primary,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         },
-        trailingContent = if (isThreadDraft) {
-            { ThreadStatusIndicator(effectiveAttention) }
-        } else {
-            null
-        },
+        trailingContent = { ThreadStatusIndicator(attention) },
     )
 }
 
 @Composable
 private fun DrawerThreadItem(
     thread: ThreadSummary,
+    draft: DraftSummary? = null,
     attention: ThreadAttention?,
     selected: Boolean,
     showProject: Boolean,
@@ -1050,6 +985,16 @@ private fun DrawerThreadItem(
         onClick = onClick,
         onLongClickLabel = "会话操作",
         onLongClick = onMenu,
+        leadingContent = draft?.let {
+            {
+                Icon(
+                    Icons.Rounded.EditNote,
+                    contentDescription = "有未发送草稿",
+                    modifier = Modifier.size(22.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
         trailingContent = { ThreadStatusIndicator(effectiveAttention) },
     )
 }

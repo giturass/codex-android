@@ -227,7 +227,7 @@ internal fun rememberChatPagingController(
             )
         }.collectLatest { resolution ->
             when (resolution) {
-                ChatUserScrollResolution.IN_PROGRESS -> showReturnToOutput = false
+                ChatUserScrollResolution.IN_PROGRESS -> Unit
                 ChatUserScrollResolution.FOLLOW_OUTPUT -> {
                     showReturnToOutput = false
                     autoFollow = true

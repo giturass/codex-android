@@ -9,7 +9,6 @@ class NewTaskRouteTest {
     @Test
     fun projectContextSurvivesSerialization() {
         val route = NewTaskRoute(
-            draftId = "draft-1",
             serverId = "server-1",
             cwd = "/home/user/Idea Projects/codex-android",
         )

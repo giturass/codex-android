@@ -3,7 +3,6 @@ package com.hebo.codex.ui.components
 import com.hebo.codex.domain.DraftKey
 import com.hebo.codex.domain.DraftSummary
 import com.hebo.codex.domain.DraftTarget
-import com.hebo.codex.domain.RecentProject
 import com.hebo.codex.domain.ThreadHistoryMode
 import com.hebo.codex.domain.ThreadRuntimeStatus
 import com.hebo.codex.domain.ThreadSummary
@@ -14,70 +13,29 @@ import org.junit.Test
 
 class DrawerDraftsTest {
     @Test
-    fun draftedThreadsAreRemovedFromRecentList() {
-        val drafted = thread("thread-1")
-        val regular = thread("thread-2")
-
-        assertEquals(
-            listOf(regular),
-            threadsWithoutDrafts(listOf(drafted, regular), listOf(draft(DraftTarget.Thread(drafted.id)))),
-        )
-    }
-
-    @Test
-    fun emptyProjectsDisappearAfterDraftDeduplication() {
-        val drafted = thread("thread-1")
-        val project = RecentProject("/workspace/app", "app", 1, listOf(drafted))
-
-        assertEquals(
-            emptyList<RecentProject>(),
-            projectsWithoutDrafts(listOf(project), listOf(draft(DraftTarget.Thread(drafted.id)))),
-        )
-    }
-
-    @Test
-    fun onlyAddedDraftKeysAreDetected() {
-        val existing = draft(DraftTarget.Thread("thread-1"))
-        val added = draft(DraftTarget.NewTask("draft-1"))
-
-        assertFalse(hasNewDraft(setOf(existing.key), listOf(existing.copy(preview = "已更新"))))
-        assertFalse(hasNewDraft(setOf(existing.key, added.key), listOf(existing)))
-        assertTrue(hasNewDraft(setOf(existing.key), listOf(existing, added)))
-    }
-
-    @Test
-    fun draftSelectionMatchesTargetTypeAndServer() {
-        val newTaskDraft = draft(DraftTarget.NewTask("draft-1"))
+    fun threadDraftsAreIndexedByConversation() {
         val threadDraft = draft(DraftTarget.Thread("thread-1"))
+        val newTaskDraft = draft(DraftTarget.NewTask("draft-1"))
 
-        assertTrue(
-            isDraftSelected(
-                newTaskDraft,
-                DrawerActiveTarget.NewTaskDraft("server-1", "draft-1"),
-            ),
-        )
-        assertTrue(
-            isDraftSelected(
-                threadDraft,
-                DrawerActiveTarget.Thread("server-1", "thread-1"),
-            ),
-        )
-        assertFalse(
-            isDraftSelected(
-                threadDraft,
-                DrawerActiveTarget.Thread("server-2", "thread-1"),
-            ),
-        )
-        assertFalse(
-            isDraftSelected(
-                newTaskDraft,
-                DrawerActiveTarget.Thread("server-1", "draft-1"),
-            ),
+        assertEquals(
+            mapOf("thread-1" to threadDraft),
+            threadDraftsById(listOf(threadDraft, newTaskDraft)),
         )
     }
 
     @Test
-    fun threadSelectionMatchesThreadTargetExactly() {
+    fun onlyDraftsMissingFromRecentConversationsAreListedSeparately() {
+        val listed = draft(DraftTarget.Thread("thread-1"))
+        val unlisted = draft(DraftTarget.Thread("thread-2"))
+
+        assertEquals(
+            listOf(unlisted),
+            unlistedThreadDrafts(listOf(thread("thread-1")), listOf(listed, unlisted)),
+        )
+    }
+
+    @Test
+    fun threadSelectionMatchesThreadAndServer() {
         assertTrue(
             isThreadSelected(
                 "server-1",
@@ -89,7 +47,7 @@ class DrawerDraftsTest {
             isThreadSelected(
                 "server-1",
                 "thread-1",
-                DrawerActiveTarget.NewTaskDraft("server-1", "thread-1"),
+                DrawerActiveTarget.Thread("server-2", "thread-1"),
             ),
         )
     }

@@ -8,9 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.hebo.codex.domain.CodexRepository
 import com.hebo.codex.domain.ConversationDraft
 import com.hebo.codex.domain.DraftAttachment
-import com.hebo.codex.domain.DraftKey
 import com.hebo.codex.domain.DraftRepository
-import com.hebo.codex.domain.DraftTarget
 import com.hebo.codex.domain.FeatureEntry
 import com.hebo.codex.domain.ModelOption
 import com.hebo.codex.domain.ThreadOptions
@@ -42,7 +40,6 @@ data class NewTaskUiState(
     val options: ThreadOptions = ThreadOptions(),
     val attachments: List<DraftAttachment> = emptyList(),
     val inputResources: List<FeatureEntry> = emptyList(),
-    val isLoadingDraft: Boolean = true,
     val isLoadingResources: Boolean = false,
     val isCreatingConversation: Boolean = false,
     val errorMessage: UserFacingError? = null,
@@ -56,8 +53,7 @@ class NewTaskViewModel(
     private val repository: CodexRepository,
     private val draftRepository: DraftRepository,
     private val routeServerId: String?,
-    private val draftId: String,
-    private val initialCwd: String?,
+    initialCwd: String?,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(NewTaskUiState(cwd = initialCwd.orEmpty()))
     private val mutableEvents = Channel<NewTaskEvent>(Channel.BUFFERED)
@@ -69,43 +65,7 @@ class NewTaskViewModel(
     init {
         viewModelScope.launch {
             val serverId = routeServerId ?: repository.activeServerId.filterNotNull().first()
-            val key = DraftKey(serverId, DraftTarget.NewTask(draftId))
-            runSuspendCatching { draftRepository.load(key) }
-                .onSuccess { restored ->
-                    require(restored == null || restored is ConversationDraft.NewTask) { "草稿类型不匹配" }
-                    mutableState.update {
-                        if (restored is ConversationDraft.NewTask) {
-                            it.copy(
-                                serverId = serverId,
-                                message = restored.message,
-                                cwd = restored.cwd,
-                                options = restored.options,
-                                attachments = restored.attachments,
-                                isLoadingDraft = false,
-                            )
-                        } else {
-                            it.copy(serverId = serverId, isLoadingDraft = false)
-                        }
-                    }
-                }
-                .onFailure { error ->
-                    mutableState.update {
-                        it.copy(
-                            serverId = serverId,
-                            isLoadingDraft = false,
-                            errorMessage = error.toUserFacingError("无法恢复草稿"),
-                        )
-                    }
-                }
-        }
-        viewModelScope.launch {
-            draftRepository.failures.collect { failure ->
-                if (failure.key == currentKey()) {
-                    mutableState.update {
-                        it.copy(errorMessage = failure.error.toUserFacingError("保存草稿失败"))
-                    }
-                }
-            }
+            mutableState.update { it.copy(serverId = serverId) }
         }
     }
 
@@ -168,7 +128,7 @@ class NewTaskViewModel(
 
     fun applyDefaultModel(model: ModelOption) {
         val current = mutableState.value
-        if (current.isLoadingDraft || current.options.model != null) return
+        if (current.options.model != null) return
         updateOptions(
             current.options.copy(
                 model = model.model,
@@ -179,7 +139,7 @@ class NewTaskViewModel(
 
     fun startConversation() {
         val current = mutableState.value
-        if (current.isCreatingConversation || current.isLoadingDraft) return
+        if (current.isCreatingConversation) return
         if (isShellCommandInput(current.message)) {
             val command = shellCommandFromInput(current.message)
             val validationError = shellCommandBlockReason(
@@ -191,7 +151,7 @@ class NewTaskViewModel(
                 showError(IllegalArgumentException(validationError))
                 return
             }
-            submitConversation(current, consumesDraft = true) { serverId, threadId ->
+            submitConversation(current, clearsEditor = true) { serverId, threadId ->
                 repository.runShellCommand(serverId, threadId, requireNotNull(command))
             }
             return
@@ -204,23 +164,23 @@ class NewTaskViewModel(
             showError(IllegalArgumentException("请输入任务内容"))
             return
         }
-        submitConversation(current, consumesDraft = true) { serverId, threadId ->
+        submitConversation(current, clearsEditor = true) { serverId, threadId ->
             repository.sendMessage(serverId, threadId, input, current.options.toTurnOptions())
         }
     }
 
     fun sendQuickPhrase(content: String) {
         val current = mutableState.value
-        if (current.isCreatingConversation || current.isLoadingDraft) return
+        if (current.isCreatingConversation) return
         val input = quickPhraseInput(content)
-        submitConversation(current, consumesDraft = false) { serverId, threadId ->
+        submitConversation(current, clearsEditor = false) { serverId, threadId ->
             repository.sendMessage(serverId, threadId, input, current.options.toTurnOptions())
         }
     }
 
     private fun submitConversation(
         submission: NewTaskUiState,
-        consumesDraft: Boolean,
+        clearsEditor: Boolean,
         submit: suspend (serverId: String, threadId: String) -> Unit,
     ) {
         val serverId = submission.serverId ?: return
@@ -244,16 +204,8 @@ class NewTaskViewModel(
                 submit(serverId, threadId)
             }
                 .onSuccess {
-                    if (consumesDraft) {
-                        runSuspendCatching { draftRepository.delete(currentDraft(submission).key) }
-                            .onFailure { error ->
-                                mutableState.update {
-                                    it.copy(errorMessage = error.toUserFacingError("清理草稿失败"))
-                                }
-                            }
-                    }
                     createdThreadId = null
-                    if (consumesDraft) {
+                    if (clearsEditor) {
                         mutableState.update {
                             it.copy(message = "", attachments = emptyList(), isCreatingConversation = false)
                         }
@@ -261,7 +213,7 @@ class NewTaskViewModel(
                     mutableEvents.send(NewTaskEvent.OpenConversation(serverId, threadId))
                 }
                 .onFailure { sendError ->
-                    if (consumesDraft) {
+                    if (clearsEditor) {
                         migrateDraftToConversation(
                             submission = submission,
                             threadId = threadId,
@@ -294,7 +246,6 @@ class NewTaskViewModel(
         )
         runSuspendCatching {
             draftRepository.save(threadDraft)
-            draftRepository.delete(currentDraft(submission).key)
         }.onSuccess {
             createdThreadId = null
             mutableState.update {
@@ -311,39 +262,12 @@ class NewTaskViewModel(
         }
     }
 
-    fun flushDraft() {
-        currentKey()?.let(draftRepository::flush)
-    }
-
     fun clearError() {
         mutableState.update { it.copy(errorMessage = null) }
     }
 
-    override fun onCleared() {
-        flushDraft()
-    }
-
     private fun updateEditor(transform: (NewTaskUiState) -> NewTaskUiState) {
         mutableState.update(transform)
-        val current = mutableState.value
-        if (!current.isLoadingDraft && current.serverId != null) {
-            draftRepository.schedule(currentDraft(current))
-        }
-    }
-
-    private fun currentDraft(state: NewTaskUiState): ConversationDraft.NewTask = ConversationDraft.NewTask(
-        serverId = requireNotNull(state.serverId),
-        draftId = draftId,
-        message = state.message,
-        cwd = state.cwd,
-        options = state.options,
-        attachments = state.attachments,
-        updatedAtMillis = System.currentTimeMillis(),
-        revision = newDraftRevision(),
-    )
-
-    private fun currentKey(): DraftKey? = mutableState.value.serverId?.let { serverId ->
-        DraftKey(serverId, DraftTarget.NewTask(draftId))
     }
 
     private fun showError(error: Throwable) {
@@ -351,17 +275,14 @@ class NewTaskViewModel(
     }
 
     companion object {
-        fun newDraftId(): String = UUID.randomUUID().toString()
-
         fun factory(
             repository: CodexRepository,
             draftRepository: DraftRepository,
             serverId: String?,
-            draftId: String,
             initialCwd: String?,
         ): ViewModelProvider.Factory = viewModelFactory {
             initializer {
-                NewTaskViewModel(repository, draftRepository, serverId, draftId, initialCwd)
+                NewTaskViewModel(repository, draftRepository, serverId, initialCwd)
             }
         }
     }

@@ -116,7 +116,9 @@ data class HomeUiState(
         get() = servers.singleOrNull { it.id == activeServerId }
 
     val activeDrafts: List<DraftSummary>
-        get() = drafts.filter { it.key.serverId == activeServerId }
+        get() = drafts.filter {
+            it.key.serverId == activeServerId && it.key.target is DraftTarget.Thread
+        }
 }
 
 sealed interface HomeEvent {

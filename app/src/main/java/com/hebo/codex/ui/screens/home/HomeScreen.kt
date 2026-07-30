@@ -133,9 +133,6 @@ fun HomeScreen(
         viewModel.reloadThreads()
         onPauseOrDispose {}
     }
-    LifecycleResumeEffect(newTaskViewModel) {
-        onPauseOrDispose { newTaskViewModel.flushDraft() }
-    }
     LifecycleResumeEffect(state.activeServerId) {
         onRefreshRateLimits()
         onPauseOrDispose {}
@@ -144,17 +141,15 @@ fun HomeScreen(
     LaunchedEffect(
         state.activeServerId,
         state.projects,
-        newTaskState.isLoadingDraft,
         newTaskState.cwd,
     ) {
-        if (!newTaskState.isLoadingDraft && newTaskState.cwd.isBlank()) {
+        if (newTaskState.cwd.isBlank()) {
             state.projects.firstOrNull()?.path?.let(newTaskViewModel::updateCwd)
         }
     }
     LaunchedEffect(
         state.activeServerId,
         state.models,
-        newTaskState.isLoadingDraft,
         newTaskState.options.model,
     ) {
         state.models.firstOrNull { it.isDefault && !it.hidden }
@@ -213,7 +208,7 @@ fun HomeScreen(
                 connectionStatus = state.connectionStatuses[state.activeServerId]
                     ?: ConnectionStatus.Disconnected,
                 isLoadingResources = newTaskState.isLoadingResources,
-                isCreating = newTaskState.isCreatingConversation || newTaskState.isLoadingDraft,
+                isCreating = newTaskState.serverId == null || newTaskState.isCreatingConversation,
                 rateLimitsState = rateLimitsState,
                 navigationAttention = navigationAttention(state.threadAttention),
                 navigationOpen = navigationOpen,
