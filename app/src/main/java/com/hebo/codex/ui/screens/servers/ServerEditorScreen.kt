@@ -22,6 +22,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -62,6 +63,11 @@ fun ServerEditorScreen(
     LaunchedEffect(viewModel) {
         viewModel.savedEvents.collect { onBack() }
     }
+    LaunchedEffect(viewModel) {
+        viewModel.testSucceededEvents.collect {
+            snackbarHostState.showSnackbar("服务器连接成功")
+        }
+    }
     LaunchedEffect(state.errorMessage) {
         state.errorMessage?.let { error ->
             val result = snackbarHostState.showSnackbar(
@@ -78,7 +84,7 @@ fun ServerEditorScreen(
             TopAppBar(
                 title = { Text(if (state.isEditing) "编辑服务器" else "添加服务器") },
                 navigationIcon = {
-                    IconButton(onClick = onBack, enabled = !state.isSaving) {
+                    IconButton(onClick = onBack, enabled = !state.isBusy) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
                     }
                 },
@@ -105,7 +111,7 @@ fun ServerEditorScreen(
                     label = { Text("名称") },
                     placeholder = { Text("Office Server") },
                     singleLine = true,
-                    enabled = state.isReady && !state.isSaving,
+                    enabled = state.isReady && !state.isBusy,
                 )
                 OutlinedTextField(
                     value = state.endpoint,
@@ -115,7 +121,7 @@ fun ServerEditorScreen(
                     placeholder = { Text("ws://10.150.99.201:8390") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                     singleLine = true,
-                    enabled = state.isReady && !state.isSaving,
+                    enabled = state.isReady && !state.isBusy,
                 )
                 OutlinedTextField(
                     value = stringResource(R.string.server_auth_capability_token),
@@ -123,7 +129,7 @@ fun ServerEditorScreen(
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("认证方式") },
                     readOnly = true,
-                    enabled = state.isReady && !state.isSaving,
+                    enabled = state.isReady && !state.isBusy,
                 )
                 OutlinedTextField(
                     value = state.token,
@@ -133,7 +139,7 @@ fun ServerEditorScreen(
                     visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     singleLine = true,
-                    enabled = state.isReady && !state.isSaving,
+                    enabled = state.isReady && !state.isBusy,
                     trailingIcon = {
                         IconButton(onClick = { showToken = !showToken }) {
                             Icon(
@@ -158,6 +164,24 @@ fun ServerEditorScreen(
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
+                OutlinedButton(
+                    onClick = viewModel::testConnection,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = state.canTest,
+                ) {
+                    if (state.isTesting) {
+                        Row {
+                            CircularProgressIndicator(
+                                Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Text("正在测试连接")
+                        }
+                    } else {
+                        Text("测试连接")
+                    }
+                }
                 Button(
                     onClick = viewModel::save,
                     modifier = Modifier.fillMaxWidth(),
@@ -171,10 +195,10 @@ fun ServerEditorScreen(
                                 strokeWidth = 2.dp,
                             )
                             Spacer(Modifier.width(10.dp))
-                            Text("正在测试连接")
+                            Text("正在保存")
                         }
                     } else {
-                        Text(if (state.isEditing) "测试并更新" else "测试并保存")
+                        Text(if (state.isEditing) "更新" else "保存")
                     }
                 }
             }

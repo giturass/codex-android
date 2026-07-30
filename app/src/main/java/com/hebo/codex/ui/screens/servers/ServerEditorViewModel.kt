@@ -24,10 +24,17 @@ data class ServerEditorUiState(
     val isReady: Boolean = !isEditing,
     val isLoading: Boolean = isEditing,
     val isSaving: Boolean = false,
+    val isTesting: Boolean = false,
     val errorMessage: UserFacingError? = null,
 ) {
+    val isBusy: Boolean
+        get() = isSaving || isTesting
+
     val canSave: Boolean
-        get() = isReady && !isSaving && name.isNotBlank() && endpoint.isNotBlank() && token.isNotBlank()
+        get() = isReady && !isBusy && name.isNotBlank() && endpoint.isNotBlank() && token.isNotBlank()
+
+    val canTest: Boolean
+        get() = isReady && !isBusy && endpoint.isNotBlank() && token.isNotBlank()
 }
 
 class ServerEditorViewModel(
@@ -36,9 +43,11 @@ class ServerEditorViewModel(
 ) : ViewModel() {
     private val mutableState = MutableStateFlow(ServerEditorUiState(isEditing = serverId != null))
     private val mutableEvents = Channel<Unit>(Channel.BUFFERED)
+    private val mutableTestSucceededEvents = Channel<Unit>(Channel.BUFFERED)
 
     val state: StateFlow<ServerEditorUiState> = mutableState
     val savedEvents = mutableEvents.receiveAsFlow()
+    val testSucceededEvents = mutableTestSucceededEvents.receiveAsFlow()
 
     init {
         serverId?.let(::loadServer)
@@ -76,6 +85,24 @@ class ServerEditorViewModel(
                 mutableState.update { it.copy(errorMessage = error.toUserFacingError(summary)) }
             }
             mutableState.update { it.copy(isSaving = false) }
+        }
+    }
+
+    fun testConnection() {
+        val snapshot = mutableState.value
+        if (!snapshot.canTest) return
+        viewModelScope.launch {
+            mutableState.update { it.copy(isTesting = true, errorMessage = null) }
+            runSuspendCatching {
+                repository.testServerConnection(snapshot.endpoint, snapshot.token)
+            }.onSuccess {
+                mutableTestSucceededEvents.send(Unit)
+            }.onFailure { error ->
+                mutableState.update {
+                    it.copy(errorMessage = error.toUserFacingError("测试服务器连接失败"))
+                }
+            }
+            mutableState.update { it.copy(isTesting = false) }
         }
     }
 

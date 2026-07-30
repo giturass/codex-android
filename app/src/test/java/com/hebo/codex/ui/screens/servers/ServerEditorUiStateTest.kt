@@ -41,4 +41,29 @@ class ServerEditorUiStateTest {
 
         assertFalse(state.canSave)
     }
+
+    @Test
+    fun testingConnectionDoesNotRequireServerName() {
+        val state = ServerEditorUiState(
+            isEditing = false,
+            endpoint = "wss://codex.example.com",
+            token = "secret",
+        )
+
+        assertTrue(state.canTest)
+        assertFalse(state.canSave)
+    }
+
+    @Test
+    fun testingAndSavingAreMutuallyExclusive() {
+        val ready = ServerEditorUiState(
+            isEditing = false,
+            name = "Office Server",
+            endpoint = "wss://codex.example.com",
+            token = "secret",
+        )
+
+        assertFalse(ready.copy(isTesting = true).canSave)
+        assertFalse(ready.copy(isSaving = true).canTest)
+    }
 }

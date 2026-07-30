@@ -124,7 +124,6 @@ class CodexRepository(
         val normalizedToken = token.trim()
         require(normalizedToken.isNotEmpty()) { "请输入 Token" }
 
-        testConnection(normalizedEndpoint, normalizedToken)
         val profile = ServerProfile(
             id = UUID.randomUUID().toString(),
             name = normalizedName,
@@ -154,7 +153,6 @@ class CodexRepository(
         val normalizedToken = token.trim()
         require(normalizedToken.isNotEmpty()) { "请输入 Token" }
 
-        testConnection(normalizedEndpoint, normalizedToken)
         val profile = current.copy(name = normalizedName, webSocketUrl = normalizedEndpoint)
         serverStore.updateServer(profile, normalizedToken)
         serverSettings.first { stored -> stored.servers.singleOrNull { it.id == serverId } == profile }
@@ -171,6 +169,24 @@ class CodexRepository(
                 .onSuccess { bumpThreadRevision(serverId) }
         }
         return profile
+    }
+
+    suspend fun testServerConnection(endpoint: String, token: String) {
+        val normalizedEndpoint = validateWebSocketEndpoint(endpoint)
+        val normalizedToken = token.trim()
+        require(normalizedToken.isNotEmpty()) { "请输入 Token" }
+
+        val connection = clientFactory.create(normalizedEndpoint, normalizedToken, applicationScope.coroutineContext)
+        try {
+            connection.connect()
+            connection.close()
+        } catch (error: CancellationException) {
+            connection.abort()
+            throw error
+        } catch (error: Throwable) {
+            connection.abort()
+            throw error
+        }
     }
 
     suspend fun selectServer(serverId: String) {
@@ -771,20 +787,6 @@ class CodexRepository(
             restoreConversations(serverId, server, api)
             check(connection.status.value is ConnectionStatus.Connected) { "服务器连接已中断" }
             return ManagedConnection(connection)
-        } catch (error: CancellationException) {
-            connection.abort()
-            throw error
-        } catch (error: Throwable) {
-            connection.abort()
-            throw error
-        }
-    }
-
-    private suspend fun testConnection(endpoint: String, token: String) {
-        val connection = clientFactory.create(endpoint, token, applicationScope.coroutineContext)
-        try {
-            connection.connect()
-            connection.close()
         } catch (error: CancellationException) {
             connection.abort()
             throw error
