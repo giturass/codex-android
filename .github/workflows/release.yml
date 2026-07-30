@@ -1,13 +1,13 @@
 name: Release
 
 on:
-  release:
-    types:
-      - published
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag to build and upload
+        description: Existing tag to build and publish
         required: true
         type: string
 
@@ -15,7 +15,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.event.release.tag_name || inputs.tag }}
+  group: release-${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
   cancel-in-progress: false
 
 jobs:
@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
 
     steps:
       - name: Check out release tag
@@ -73,7 +73,15 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk "codex-android-${RELEASE_TAG}.apk"
           sha256sum "codex-android-${RELEASE_TAG}.apk" > "codex-android-${RELEASE_TAG}.apk.sha256"
 
-      - name: Upload APK to release
+      - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$RELEASE_TAG" "codex-android-${RELEASE_TAG}.apk" "codex-android-${RELEASE_TAG}.apk.sha256" --clobber
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "codex-android-${RELEASE_TAG}.apk" "codex-android-${RELEASE_TAG}.apk.sha256" --clobber
+          else
+            gh release create "$RELEASE_TAG" "codex-android-${RELEASE_TAG}.apk" "codex-android-${RELEASE_TAG}.apk.sha256" \
+              --generate-notes \
+              --title "Codex Android $RELEASE_TAG" \
+              --verify-tag
+          fi
