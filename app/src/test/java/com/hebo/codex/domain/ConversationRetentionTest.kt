@@ -41,6 +41,19 @@ class ConversationRetentionTest {
     }
 
     @Test
+    fun backgroundCommandRetainsConversationWithoutObserver() {
+        val terminal = BackgroundTerminal(
+            itemId = "command-1",
+            processId = "4242",
+            command = "sleep 60",
+            cwd = "/workspace",
+            observedAtMillis = 0L,
+        )
+
+        assertTrue(conversationState(backgroundTerminals = listOf(terminal)).requiresRuntimeRetention)
+    }
+
+    @Test
     fun completedConversationCanBeReleasedWithoutObserver() {
         assertFalse(conversationState().requiresRuntimeRetention)
     }
@@ -59,6 +72,7 @@ class ConversationRetentionTest {
         activeTurnId: String? = null,
         isRunning: Boolean = false,
         pendingRequests: List<PendingServerRequest> = emptyList(),
+        backgroundTerminals: List<BackgroundTerminal> = emptyList(),
     ) = ConversationState(
         serverId = "server-1",
         serverName = "本地",
@@ -68,5 +82,6 @@ class ConversationRetentionTest {
         activeTurnId = activeTurnId,
         isRunning = isRunning,
         pendingRequests = pendingRequests,
+        backgroundTerminals = backgroundTerminals,
     )
 }

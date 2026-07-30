@@ -258,6 +258,44 @@ class ProtocolMapperTest {
     }
 
     @Test
+    fun mapsBackgroundTerminalSnapshotAndCommandProcessId() {
+        val page = ProtocolMapper.backgroundTerminalPage(
+            response = json.parseToJsonElement(
+                """{
+                  "data":[{
+                    "itemId":"command-1",
+                    "processId":"4242",
+                    "command":"sleep 60",
+                    "cwd":"/workspace",
+                    "osPid":4242,
+                    "cpuPercent":0.1,
+                    "rssKb":1024
+                  }],
+                  "nextCursor":null
+                }""",
+            ).jsonObject,
+            observedAtMillis = 12_345L,
+        )
+        val command = ProtocolMapper.conversationItem(
+            json.parseToJsonElement(
+                """{
+                  "type":"commandExecution",
+                  "id":"command-1",
+                  "command":"sleep 60",
+                  "cwd":"/workspace",
+                  "status":"inProgress",
+                  "processId":"4242"
+                }""",
+            ).jsonObject,
+            "turn-1",
+        ) as ConversationItem.CommandExecution
+
+        assertEquals("4242", page.data.single().processId)
+        assertEquals(12_345L, page.data.single().observedAtMillis)
+        assertEquals("4242", command.processId)
+    }
+
+    @Test
     fun mapsReasoningPartsWithoutFlatteningProtocolArrays() {
         val item = json.parseToJsonElement(
             """{

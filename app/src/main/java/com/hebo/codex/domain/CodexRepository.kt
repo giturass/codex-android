@@ -51,6 +51,12 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
+private sealed interface BackgroundTerminalChange {
+    data class Upsert(val terminal: BackgroundTerminal) : BackgroundTerminalChange
+    data class Remove(val itemId: String? = null, val processId: String? = null) :
+        BackgroundTerminalChange
+}
+
 class CodexRepository(
     private val serverStore: ServerStore,
     private val clientFactory: AppServerClientFactory,
@@ -64,6 +70,8 @@ class CodexRepository(
     private val pendingItemUpdates = ConcurrentHashMap<ItemRoute, MutableList<PendingItemUpdate>>()
     private val pendingRequestRoutes = ConcurrentHashMap<String, PendingRequestRoute>()
     private val conversationEventBuffers = ConcurrentHashMap<ConversationKey, ConversationEventBuffer>()
+    private val backgroundTerminalRefreshBuffers =
+        ConcurrentHashMap<ConversationKey, BackgroundTerminalRefreshBuffer>()
     private val historyPagingMutexes = ConcurrentHashMap<ConversationKey, Mutex>()
     private val mutableConnectionStatuses = MutableStateFlow<Map<String, ConnectionStatus>>(emptyMap())
     private val mutableThreadRevisions = MutableStateFlow<Map<String, Long>>(emptyMap())
@@ -204,6 +212,7 @@ class CodexRepository(
         conversations.keys.filter { it.serverId == serverId }.forEach { conversations.remove(it) }
         pendingItemUpdates.keys.removeIf { it.serverId == serverId }
         conversationEventBuffers.keys.removeIf { it.serverId == serverId }
+        backgroundTerminalRefreshBuffers.keys.removeIf { it.serverId == serverId }
         historyPagingMutexes.keys.removeIf { it.serverId == serverId }
         serverStore.removeServer(serverId)
     }
@@ -429,6 +438,16 @@ class CodexRepository(
         }
     }
 
+    suspend fun terminateBackgroundTerminal(serverId: String, threadId: String, processId: String) {
+        require(processId.isNotBlank()) { "后台命令进程 ID 不能为空" }
+        check(api(serverId).terminateBackgroundTerminal(threadId, processId)) {
+            "命令已经结束或无法终止"
+        }
+        val key = ConversationKey(serverId, threadId)
+        applyBackgroundTerminalChange(key, BackgroundTerminalChange.Remove(processId = processId))
+        releaseConversationIfUnused(key)
+    }
+
     suspend fun interrupt(serverId: String, threadId: String) {
         val state = requireConversation(serverId, threadId)
         val turnId = state.value.activeTurnId ?: return
@@ -466,6 +485,7 @@ class CodexRepository(
         conversations.remove(key)
         removePendingItemUpdates(key)
         conversationEventBuffers.remove(key)
+        backgroundTerminalRefreshBuffers.remove(key)
         historyPagingMutexes.remove(key)
         bumpThreadRevision(serverId)
     }
@@ -487,6 +507,7 @@ class CodexRepository(
         conversations.remove(key)
         removePendingItemUpdates(key)
         conversationEventBuffers.remove(key)
+        backgroundTerminalRefreshBuffers.remove(key)
         historyPagingMutexes.remove(key)
         removePendingRequests(serverId, threadId)
         bumpThreadRevision(serverId)
@@ -596,6 +617,7 @@ class CodexRepository(
         pendingResumeGoalSnapshots.remove(key)
         removePendingItemUpdates(key)
         conversationEventBuffers.remove(key)
+        backgroundTerminalRefreshBuffers.remove(key)
         historyPagingMutexes.remove(key)
         removePendingRequests(key.serverId, key.threadId)
     }
@@ -815,23 +837,32 @@ class CodexRepository(
             .filter { it.key.serverId == serverId }
             .forEach { (key, state) ->
                 pendingResumeGoalSnapshots.add(key)
-                runSuspendCatching { resumeConversation(key, api) }
-                    .onSuccess { snapshot ->
-                        state.updateState { current ->
-                            current.withRefreshedConversation(snapshot.toConversationState(server))
-                        }
-                        removeRestoredItemUpdates(key, state.value)
+                val backgroundRefresh = beginBackgroundTerminalRefresh(key)
+                val result = runSuspendCatching { resumeConversation(key, api) }
+                val snapshot = result.getOrNull()
+                if (snapshot != null) {
+                    state.updateState { current ->
+                        current.withRefreshedConversation(snapshot.toConversationState(server))
                     }
-                    .onFailure { error ->
-                        pendingResumeGoalSnapshots.remove(key)
-                        state.updateState {
-                            it.copy(
-                                activeItemKeys = emptySet(),
-                                isRunning = false,
-                                errorMessage = error.toUserFacingError("恢复会话失败"),
-                            )
-                        }
+                    removeRestoredItemUpdates(key, state.value)
+                    completeBackgroundTerminalRefresh(
+                        key = key,
+                        state = state,
+                        buffer = backgroundRefresh,
+                        result = runSuspendCatching { loadAllBackgroundTerminals(api, key.threadId) },
+                    )
+                } else {
+                    cancelBackgroundTerminalRefresh(key, backgroundRefresh)
+                    pendingResumeGoalSnapshots.remove(key)
+                    state.updateState {
+                        it.copy(
+                            activeItemKeys = emptySet(),
+                            isRunning = false,
+                            errorMessage = requireNotNull(result.exceptionOrNull())
+                                .toUserFacingError("恢复会话失败"),
+                        )
                     }
+                }
             }
     }
 
@@ -922,10 +953,21 @@ class CodexRepository(
         notification.serverNotice?.let { addServerNotice(serverId, it) }
 
         val threadId = notification.threadId ?: return
-        val event = notification.conversationEvent ?: return
         val key = ConversationKey(serverId, threadId)
+        val event = notification.conversationEvent ?: return
+        event.backgroundTerminalChange()?.let { change ->
+            backgroundTerminalRefreshBuffers[key]?.let { buffer ->
+                synchronized(buffer) {
+                    if (buffer.accepting) buffer.changes += change
+                }
+            }
+            applyBackgroundTerminalChange(key, change)
+        }
         if (tryBufferConversationEvent(key, event)) return
         applyConversationEvent(serverId, threadId, event)
+        if (event is ConversationEvent.ItemUpserted && !event.isActive) {
+            releaseConversationIfUnused(key)
+        }
     }
 
     private fun applyConversationEvent(
@@ -959,6 +1001,7 @@ class CodexRepository(
                 pendingResumeGoalSnapshots.remove(key)
                 removePendingItemUpdates(key)
                 conversationEventBuffers.remove(key)
+                backgroundTerminalRefreshBuffers.remove(key)
                 historyPagingMutexes.remove(key)
                 conversations.remove(key)
             }
@@ -1092,9 +1135,6 @@ class CodexRepository(
     private fun requireConversation(serverId: String, threadId: String): MutableStateFlow<ConversationState> =
         conversations[ConversationKey(serverId, threadId)] ?: error("会话尚未打开")
 
-    private suspend fun resumeConversation(key: ConversationKey): ThreadSnapshot =
-        resumeConversation(key, api(key.serverId))
-
     private suspend fun resumeConversation(
         key: ConversationKey,
         api: AppServerApi,
@@ -1117,17 +1157,30 @@ class CodexRepository(
         failOnError: Boolean = false,
     ) {
         val buffer = beginConversationEventBuffer(key)
+        val backgroundRefresh = beginBackgroundTerminalRefresh(key)
         try {
-            val snapshot = resumeConversation(key)
+            val targetApi = api(key.serverId)
+            val snapshot = resumeConversation(key, targetApi)
+            val backgroundTerminals = runSuspendCatching {
+                loadAllBackgroundTerminals(targetApi, key.threadId)
+            }
             val server = awaitServer(key.serverId)
             completeConversationRefresh(key, state, buffer) { current ->
                 current.withRefreshedConversation(snapshot.toConversationState(server))
             }
             removeRestoredItemUpdates(key, state.value)
+            completeBackgroundTerminalRefresh(
+                key = key,
+                state = state,
+                buffer = backgroundRefresh,
+                result = backgroundTerminals,
+            )
         } catch (error: CancellationException) {
+            cancelBackgroundTerminalRefresh(key, backgroundRefresh)
             completeConversationRefresh(key, state, buffer) { it }
             throw error
         } catch (error: Throwable) {
+            cancelBackgroundTerminalRefresh(key, backgroundRefresh)
             completeConversationRefresh(key, state, buffer) { current ->
                 current.copy(errorMessage = error.toUserFacingError("刷新会话失败"))
             }
@@ -1169,6 +1222,91 @@ class CodexRepository(
             cursor = page.nextCursor
         } while (cursor != null)
         return items
+    }
+
+    private suspend fun loadAllBackgroundTerminals(
+        api: AppServerApi,
+        threadId: String,
+    ): List<BackgroundTerminal> {
+        val terminals = mutableListOf<BackgroundTerminal>()
+        val observedAtMillis = System.currentTimeMillis()
+        var cursor: String? = null
+        do {
+            val page = ProtocolMapper.backgroundTerminalPage(
+                response = api.listBackgroundTerminals(threadId, cursor),
+                observedAtMillis = observedAtMillis,
+            )
+            terminals += page.data
+            if (page.nextCursor != null && page.nextCursor == cursor) {
+                throw ProtocolException("thread/backgroundTerminals/list 返回了未推进的游标")
+            }
+            cursor = page.nextCursor
+        } while (cursor != null)
+        return terminals
+    }
+
+    private fun beginBackgroundTerminalRefresh(key: ConversationKey): BackgroundTerminalRefreshBuffer {
+        val buffer = BackgroundTerminalRefreshBuffer()
+        backgroundTerminalRefreshBuffers.put(key, buffer)?.let { previous ->
+            synchronized(previous) { previous.accepting = false }
+        }
+        return buffer
+    }
+
+    private fun completeBackgroundTerminalRefresh(
+        key: ConversationKey,
+        state: MutableStateFlow<ConversationState>,
+        buffer: BackgroundTerminalRefreshBuffer,
+        result: Result<List<BackgroundTerminal>>,
+    ) {
+        synchronized(buffer) {
+            if (!buffer.accepting) return
+            state.updateState { current ->
+                val refreshed = result.fold(
+                    onSuccess = { terminals ->
+                        val observedAtByProcess = current.backgroundTerminals.associate {
+                            it.processId to it.observedAtMillis
+                        }
+                        current.copy(
+                            backgroundTerminals = terminals.map { terminal ->
+                                terminal.copy(
+                                    observedAtMillis = observedAtByProcess[terminal.processId]
+                                        ?: terminal.observedAtMillis,
+                                )
+                            },
+                            backgroundTerminalsLoaded = true,
+                            backgroundTerminalsError = null,
+                        )
+                    },
+                    onFailure = { error ->
+                        current.copy(
+                            backgroundTerminalsLoaded = true,
+                            backgroundTerminalsError = error.toUserFacingError("无法同步运行中的命令"),
+                        )
+                    },
+                )
+                buffer.changes.fold(refreshed, ConversationState::applyBackgroundTerminalChange)
+            }
+            buffer.accepting = false
+            backgroundTerminalRefreshBuffers.remove(key, buffer)
+        }
+    }
+
+    private fun cancelBackgroundTerminalRefresh(
+        key: ConversationKey,
+        buffer: BackgroundTerminalRefreshBuffer,
+    ) {
+        synchronized(buffer) {
+            buffer.accepting = false
+            backgroundTerminalRefreshBuffers.remove(key, buffer)
+        }
+    }
+
+    private fun applyBackgroundTerminalChange(
+        key: ConversationKey,
+        change: BackgroundTerminalChange,
+    ) {
+        conversations[key]?.updateState { current -> current.applyBackgroundTerminalChange(change) }
     }
 
     private fun beginConversationEventBuffer(key: ConversationKey): ConversationEventBuffer {
@@ -1410,6 +1548,11 @@ class CodexRepository(
         var accepting = true
     }
 
+    private class BackgroundTerminalRefreshBuffer {
+        val changes = mutableListOf<BackgroundTerminalChange>()
+        var accepting = true
+    }
+
     private class ManagedConnection(
         val connection: AppServerConnection,
         var observers: List<Job> = emptyList(),
@@ -1429,6 +1572,55 @@ class CodexRepository(
             "item/permissions/requestApproval",
         )
     }
+}
+
+private fun ConversationEvent.backgroundTerminalChange(): BackgroundTerminalChange? =
+    when (this) {
+        is ConversationEvent.ItemUpserted -> {
+            val command = item as? ConversationItem.CommandExecution ?: return null
+            if (isActive && command.status == ActivityStatus.IN_PROGRESS && command.processId != null) {
+                BackgroundTerminalChange.Upsert(
+                    BackgroundTerminal(
+                        itemId = command.id,
+                        processId = command.processId,
+                        command = command.command,
+                        cwd = command.cwd,
+                        observedAtMillis = System.currentTimeMillis(),
+                    ),
+                )
+            } else if (!isActive) {
+                BackgroundTerminalChange.Remove(itemId = command.id)
+            } else {
+                null
+            }
+        }
+
+        else -> null
+    }
+
+private fun ConversationState.applyBackgroundTerminalChange(
+    change: BackgroundTerminalChange,
+): ConversationState = when (change) {
+    is BackgroundTerminalChange.Upsert -> {
+        val observedAtMillis = backgroundTerminals
+            .firstOrNull { it.processId == change.terminal.processId }
+            ?.observedAtMillis
+            ?: change.terminal.observedAtMillis
+        copy(
+            backgroundTerminals = backgroundTerminals
+                .filterNot {
+                    it.itemId == change.terminal.itemId ||
+                        it.processId == change.terminal.processId
+                } + change.terminal.copy(observedAtMillis = observedAtMillis),
+            backgroundTerminalsError = null,
+        )
+    }
+
+    is BackgroundTerminalChange.Remove -> copy(
+        backgroundTerminals = backgroundTerminals.filterNot {
+            it.itemId == change.itemId || it.processId == change.processId
+        },
+    )
 }
 
 internal fun completedThreadAttention(

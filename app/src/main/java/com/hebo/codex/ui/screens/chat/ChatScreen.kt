@@ -153,6 +153,7 @@ import com.hebo.codex.domain.ActivityStatus
 import com.hebo.codex.domain.ApprovalDecision
 import com.hebo.codex.domain.ApprovalPolicy
 import com.hebo.codex.domain.ApprovalReviewer
+import com.hebo.codex.domain.BackgroundTerminal
 import com.hebo.codex.domain.ApprovalType
 import com.hebo.codex.domain.ConnectionStatus
 import com.hebo.codex.domain.ConversationItem
@@ -662,6 +663,10 @@ fun ChatScreen(
                             viewModel.sendQuickPhrase(content)
                         },
                         onStop = viewModel::interrupt,
+                        backgroundCommands = conversation.backgroundTerminals,
+                        backgroundCommandsError = conversation.backgroundTerminalsError,
+                        terminatingBackgroundProcessIds = state.terminatingBackgroundProcessIds,
+                        onTerminateBackgroundCommand = viewModel::terminateBackgroundCommand,
                     )
                 }
             }
@@ -1836,6 +1841,10 @@ internal fun ConversationComposer(
     onSend: () -> Unit,
     onSendQuickPhrase: (String) -> Unit,
     onStop: (() -> Unit)?,
+    backgroundCommands: List<BackgroundTerminal> = emptyList(),
+    backgroundCommandsError: UserFacingError? = null,
+    terminatingBackgroundProcessIds: Set<String> = emptySet(),
+    onTerminateBackgroundCommand: (String) -> Unit = {},
 ) {
     var dialog by remember { mutableStateOf<ComposerDialog?>(null) }
     var addMenuExpanded by remember { mutableStateOf(false) }
@@ -1914,6 +1923,12 @@ internal fun ConversationComposer(
     Column(
         Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 12.dp),
     ) {
+        BackgroundCommandsPanel(
+            commands = backgroundCommands,
+            error = backgroundCommandsError,
+            terminatingProcessIds = terminatingBackgroundProcessIds,
+            onTerminate = onTerminateBackgroundCommand,
+        )
         if (isRunning) {
             plan?.takeIf { it.steps.isNotEmpty() }?.let { visiblePlan ->
                 key(serverId, conversationId, activeTurnId) {

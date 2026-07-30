@@ -72,6 +72,7 @@ data class ChatUiState(
     val isLoading: Boolean = true,
     val isLoadingResources: Boolean = false,
     val isSendingDraft: Boolean = false,
+    val terminatingBackgroundProcessIds: Set<String> = emptySet(),
     val forkRequest: ForkRequest? = null,
     val screenError: UserFacingError? = null,
 )
@@ -287,6 +288,28 @@ class ChatViewModel(
         viewModelScope.launch {
             runSuspendCatching { repository.interrupt(serverId, threadId) }
                 .onFailure(::showError)
+        }
+    }
+
+    fun terminateBackgroundCommand(processId: String) {
+        val current = mutableState.value
+        if (processId in current.terminatingBackgroundProcessIds) return
+        mutableState.update {
+            it.copy(
+                terminatingBackgroundProcessIds = it.terminatingBackgroundProcessIds + processId,
+                screenError = null,
+            )
+        }
+        viewModelScope.launch {
+            runSuspendCatching {
+                repository.terminateBackgroundTerminal(serverId, threadId, processId)
+            }.onFailure(::showError)
+            mutableState.update {
+                it.copy(
+                    terminatingBackgroundProcessIds =
+                        it.terminatingBackgroundProcessIds - processId,
+                )
+            }
         }
     }
 

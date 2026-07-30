@@ -241,6 +241,27 @@ class AppServerApi(
         )
     }
 
+    suspend fun listBackgroundTerminals(
+        threadId: String,
+        cursor: String? = null,
+    ): JsonObject = connection.request(
+        "thread/backgroundTerminals/list",
+        buildJsonObject {
+            put("threadId", threadId)
+            put("limit", BACKGROUND_TERMINAL_PAGE_LIMIT)
+            cursor?.let { put("cursor", it) }
+        },
+    ).jsonObject
+
+    suspend fun terminateBackgroundTerminal(threadId: String, processId: String): Boolean =
+        connection.request(
+            "thread/backgroundTerminals/terminate",
+            buildJsonObject {
+                put("threadId", threadId)
+                put("processId", processId)
+            },
+        ).jsonObject.requiredBoolean("terminated")
+
     suspend fun review(
         threadId: String,
         target: ReviewTarget,
@@ -407,6 +428,7 @@ class AppServerApi(
         const val THREAD_PAGE_LIMIT = 50
         const val THREAD_TURN_PAGE_LIMIT = 25
         const val THREAD_ITEM_PAGE_LIMIT = 100
+        const val BACKGROUND_TERMINAL_PAGE_LIMIT = 100
         const val CLIENT_NAME = "codex_android"
         private const val MAX_REMOTE_PREVIEW_MEBIBYTES = 16
         private const val MAX_REMOTE_PREVIEW_BYTES = MAX_REMOTE_PREVIEW_MEBIBYTES * 1024 * 1024

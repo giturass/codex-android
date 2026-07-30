@@ -124,6 +124,9 @@ data class ConversationState(
     val activeItemKeys: Set<ConversationItemKey> = emptySet(),
     val activeTurnId: String? = null,
     val isRunning: Boolean = false,
+    val backgroundTerminals: List<BackgroundTerminal> = emptyList(),
+    val backgroundTerminalsLoaded: Boolean = false,
+    val backgroundTerminalsError: UserFacingError? = null,
     val pendingRequests: List<PendingServerRequest> = emptyList(),
     val plan: ActiveTurnPlan? = null,
     val tokenUsage: TokenUsage? = null,
@@ -141,6 +144,14 @@ data class ConversationState(
     val items: List<ConversationItem>
         get() = history.items
 }
+
+data class BackgroundTerminal(
+    val itemId: String,
+    val processId: String,
+    val command: String,
+    val cwd: String,
+    val observedAtMillis: Long,
+)
 
 data class ConversationHistory(
     val turns: List<ConversationTurn> = emptyList(),
@@ -207,6 +218,7 @@ sealed interface ConversationItem {
         val output: String,
         val exitCode: Int?,
         val status: ActivityStatus,
+        val processId: String? = null,
     ) : ConversationItem
 
     data class UserShellCommand(

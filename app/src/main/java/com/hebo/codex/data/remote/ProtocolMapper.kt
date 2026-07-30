@@ -4,6 +4,7 @@ import com.hebo.codex.domain.ActivityKind
 import com.hebo.codex.domain.ActivityStatus
 import com.hebo.codex.domain.AgentMessagePhase
 import com.hebo.codex.domain.ApprovalType
+import com.hebo.codex.domain.BackgroundTerminal
 import com.hebo.codex.domain.ChangedFile
 import com.hebo.codex.domain.CommandAction
 import com.hebo.codex.domain.ConversationEvent
@@ -69,6 +70,11 @@ data class ThreadTurnPage(
 
 data class ThreadItemPage(
     val data: List<ConversationItem>,
+    val nextCursor: String?,
+)
+
+data class BackgroundTerminalPage(
+    val data: List<BackgroundTerminal>,
     val nextCursor: String?,
 )
 
@@ -148,6 +154,23 @@ object ProtocolMapper {
             nextCursor = response.optionalString("nextCursor"),
         )
     }
+
+    fun backgroundTerminalPage(
+        response: JsonObject,
+        observedAtMillis: Long,
+    ): BackgroundTerminalPage = BackgroundTerminalPage(
+        data = response.requiredArray("data").map { element ->
+            val terminal = element.jsonObject
+            BackgroundTerminal(
+                itemId = terminal.requiredString("itemId"),
+                processId = terminal.requiredString("processId"),
+                command = terminal.requiredString("command"),
+                cwd = terminal.requiredString("cwd"),
+                observedAtMillis = observedAtMillis,
+            )
+        },
+        nextCursor = response.optionalString("nextCursor"),
+    )
 
     private fun JsonObject.toThreadTurnPage(): ThreadTurnPage = ThreadTurnPage(
         data = requiredArray("data").map { element ->
@@ -768,6 +791,7 @@ object ProtocolMapper {
                 output = output,
                 exitCode = exitCode,
                 status = status,
+                processId = item.optionalString("processId"),
             )
 
             else -> throw ProtocolException("未知命令执行来源：${item.optionalString("source")}")
