@@ -28,23 +28,16 @@ import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.Response
-import okhttp3.WebSocket
-import okhttp3.WebSocketListener
-import okio.ByteString
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.CoroutineContext
 import kotlin.random.Random
 
-class AppServerConnection(
-    private val okHttpClient: OkHttpClient,
+class AppServerConnection internal constructor(
+    private val webSocketFactory: AppServerWebSocketFactory,
     private val json: Json,
-    private val endpoint: String,
-    private val token: String,
+    private val connectTimeoutMillis: Long,
     parentContext: CoroutineContext,
 ) {
     private val scope = CoroutineScope(parentContext + SupervisorJob(parentContext[Job]))
@@ -57,7 +50,7 @@ class AppServerConnection(
     private val eventChannel = Channel<ServerEvent>(capacity = EVENT_QUEUE_CAPACITY)
     private val mutableStatus = MutableStateFlow<ConnectionStatus>(ConnectionStatus.Disconnected)
 
-    private lateinit var webSocket: WebSocket
+    private lateinit var webSocket: AppServerWebSocket
 
     val events: Flow<ServerEvent> = eventChannel.receiveAsFlow()
     val status: StateFlow<ConnectionStatus> = mutableStatus.asStateFlow()
@@ -65,13 +58,9 @@ class AppServerConnection(
     suspend fun connect() {
         check(started.compareAndSet(false, true)) { "连接对象只能启动一次" }
         mutableStatus.value = ConnectionStatus.Connecting
-        val request = Request.Builder()
-            .url(endpoint)
-            .header("Authorization", "Bearer $token")
-            .build()
-        webSocket = okHttpClient.newWebSocket(request, Listener())
+        webSocket = webSocketFactory.open(Listener())
         try {
-            withTimeout(CONNECT_TIMEOUT_MILLIS) { ready.await() }
+            withTimeout(connectTimeoutMillis) { ready.await() }
         } catch (error: TimeoutCancellationException) {
             val connectionError = ConnectionException("连接超时", error)
             failConnection(connectionError)
@@ -262,8 +251,8 @@ class AppServerConnection(
         pendingRequests.clear()
     }
 
-    private inner class Listener : WebSocketListener() {
-        override fun onOpen(webSocket: WebSocket, response: Response) {
+    private inner class Listener : AppServerWebSocketListener {
+        override fun onOpen(webSocket: AppServerWebSocket) {
             scope.launch {
                 try {
                     initialize()
@@ -273,19 +262,19 @@ class AppServerConnection(
             }
         }
 
-        override fun onMessage(webSocket: WebSocket, text: String) {
+        override fun onMessage(webSocket: AppServerWebSocket, text: String) {
             receive(text)
         }
 
-        override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+        override fun onBinaryMessage(webSocket: AppServerWebSocket) {
             failConnection(ProtocolException("服务端发送了不受支持的二进制消息"))
         }
 
-        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+        override fun onClosing(webSocket: AppServerWebSocket, code: Int, reason: String) {
             webSocket.close(code, reason)
         }
 
-        override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+        override fun onClosed(webSocket: AppServerWebSocket, code: Int, reason: String) {
             val error = ConnectionException("连接已关闭：$reason")
             if (mutableStatus.value !is ConnectionStatus.Failed) {
                 mutableStatus.value = ConnectionStatus.Disconnected
@@ -295,11 +284,10 @@ class AppServerConnection(
             eventChannel.close()
         }
 
-        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+        override fun onFailure(webSocket: AppServerWebSocket, error: Throwable, statusCode: Int?) {
             if (closed.get()) return
-            val statusCode = response?.code
-            val message = statusCode?.let { "HTTP $it" } ?: t.message ?: "WebSocket 连接失败"
-            failConnection(ConnectionException(message, t, rejected = statusCode != null))
+            val message = statusCode?.let { "HTTP $it" } ?: error.message ?: "WebSocket 连接失败"
+            failConnection(ConnectionException(message, error, rejected = statusCode != null))
         }
     }
 
@@ -307,7 +295,6 @@ class AppServerConnection(
         get() = content.toLongOrNull()
 
     private companion object {
-        const val CONNECT_TIMEOUT_MILLIS = 12_000L
         const val REQUEST_TIMEOUT_MILLIS = 30_000L
         const val NORMAL_CLOSURE = 1000
         const val SERVER_OVERLOADED = -32001

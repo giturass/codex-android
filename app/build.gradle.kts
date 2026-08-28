@@ -83,6 +83,7 @@ dependencies {
     implementation(libs.haze)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.jsch)
     implementation(libs.okhttp)
     implementation(libs.telephoto.subsampling)
     implementation(libs.androidx.room.runtime)

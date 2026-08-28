@@ -11,35 +11,35 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 @Serializable
-data class EncryptedToken(
+data class EncryptedCredential(
     val initializationVector: String,
     val ciphertext: String,
 )
 
-class TokenCipher {
+class CredentialCipher {
     private val keyStore by lazy {
         KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }
     }
 
-    fun encrypt(plaintext: String): EncryptedToken {
+    fun encrypt(plaintext: String): EncryptedCredential {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
-        return EncryptedToken(
+        return EncryptedCredential(
             initializationVector = cipher.iv.toBase64(),
             ciphertext = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8)).toBase64(),
         )
     }
 
-    fun decrypt(token: EncryptedToken): String {
+    fun decrypt(credential: EncryptedCredential): String {
         val key = keyStore.getKey(KEY_ALIAS, null) as? SecretKey
-            ?: error("设备密钥不存在，无法读取服务器 Token")
+            ?: error("设备密钥不存在，无法读取加密凭据")
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(
             Cipher.DECRYPT_MODE,
             key,
-            GCMParameterSpec(GCM_TAG_LENGTH_BITS, token.initializationVector.fromBase64()),
+            GCMParameterSpec(GCM_TAG_LENGTH_BITS, credential.initializationVector.fromBase64()),
         )
-        return cipher.doFinal(token.ciphertext.fromBase64()).toString(Charsets.UTF_8)
+        return cipher.doFinal(credential.ciphertext.fromBase64()).toString(Charsets.UTF_8)
     }
 
     private fun getOrCreateKey(): SecretKey {

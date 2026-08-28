@@ -8,7 +8,9 @@ import com.hebo.codex.data.remote.AppServerClientFactory
 import com.hebo.codex.data.remote.AppServerConnection
 import com.hebo.codex.data.remote.ProtocolMapper
 import com.hebo.codex.data.remote.ProtocolException
+import com.hebo.codex.data.remote.ResolvedProxyConnection
 import com.hebo.codex.data.remote.ServerEvent
+import com.hebo.codex.data.remote.SshHostKeyVerificationException
 import com.hebo.codex.data.remote.StableFeatureApi
 import com.hebo.codex.data.remote.StableRpcMethod
 import com.hebo.codex.data.remote.ThreadSnapshot
@@ -109,10 +111,13 @@ class CodexRepository(
     val serverSettings: StateFlow<ServerSettings> = serverStore.settings.stateIn(
         scope = applicationScope,
         started = SharingStarted.Eagerly,
-        initialValue = ServerSettings(servers = emptyList(), activeServerId = null),
+        initialValue = ServerSettings(servers = emptyList(), proxies = emptyList(), activeServerId = null),
     )
     val servers: StateFlow<List<ServerProfile>> = serverSettings
         .map { it.servers }
+        .stateIn(applicationScope, SharingStarted.Eagerly, emptyList())
+    val proxies: StateFlow<List<ProxyProfile>> = serverSettings
+        .map { it.proxies }
         .stateIn(applicationScope, SharingStarted.Eagerly, emptyList())
     val activeServerId: StateFlow<String?> = serverSettings
         .map { it.activeServerId }
@@ -124,19 +129,25 @@ class CodexRepository(
     val serverNotices: StateFlow<Map<String, List<ConversationNotice>>> = mutableServerNotices
     val threadAttention: StateFlow<Map<String, Map<String, ThreadAttentionState>>> = mutableThreadAttention
 
-    suspend fun addServer(name: String, endpoint: String, token: String): ServerProfile {
+    suspend fun addServer(
+        name: String,
+        endpoint: String,
+        token: String,
+        proxyId: String? = null,
+    ): ServerProfile {
         val normalizedName = name.trim()
         require(normalizedName.isNotEmpty()) { "请输入服务器名称" }
         require(serverStore.settings.first().servers.none { it.name == normalizedName }) { "服务器名称已存在" }
         val normalizedEndpoint = validateWebSocketEndpoint(endpoint)
-        val normalizedToken = token.trim()
-        require(normalizedToken.isNotEmpty()) { "请输入 Token" }
+        val normalizedToken = validateCapabilityToken(token)
+        require(proxyId == null || serverStore.settings.first().proxies.any { it.id == proxyId }) { "代理不存在" }
 
         val profile = ServerProfile(
             id = UUID.randomUUID().toString(),
             name = normalizedName,
             webSocketUrl = normalizedEndpoint,
             authentication = ServerAuthentication.CAPABILITY_TOKEN,
+            proxyId = proxyId,
         )
         serverStore.addServer(profile, normalizedToken)
         serverSettings.first { settings -> settings.servers.any { it.id == profile.id } }
@@ -151,17 +162,23 @@ class CodexRepository(
         token = serverStore.readToken(serverId),
     )
 
-    suspend fun updateServer(serverId: String, name: String, endpoint: String, token: String): ServerProfile {
+    suspend fun updateServer(
+        serverId: String,
+        name: String,
+        endpoint: String,
+        token: String,
+        proxyId: String? = null,
+    ): ServerProfile {
         val settings = serverStore.settings.first()
         val current = settings.servers.singleOrNull { it.id == serverId } ?: error("服务器不存在")
         val normalizedName = name.trim()
         require(normalizedName.isNotEmpty()) { "请输入服务器名称" }
         require(settings.servers.none { it.id != serverId && it.name == normalizedName }) { "服务器名称已存在" }
         val normalizedEndpoint = validateWebSocketEndpoint(endpoint)
-        val normalizedToken = token.trim()
-        require(normalizedToken.isNotEmpty()) { "请输入 Token" }
+        val normalizedToken = validateCapabilityToken(token)
+        require(proxyId == null || settings.proxies.any { it.id == proxyId }) { "代理不存在" }
 
-        val profile = current.copy(name = normalizedName, webSocketUrl = normalizedEndpoint)
+        val profile = current.copy(name = normalizedName, webSocketUrl = normalizedEndpoint, proxyId = proxyId)
         serverStore.updateServer(profile, normalizedToken)
         serverSettings.first { stored -> stored.servers.singleOrNull { it.id == serverId } == profile }
 
@@ -179,12 +196,16 @@ class CodexRepository(
         return profile
     }
 
-    suspend fun testServerConnection(endpoint: String, token: String) {
+    suspend fun testServerConnection(endpoint: String, token: String, proxyId: String? = null) {
         val normalizedEndpoint = validateWebSocketEndpoint(endpoint)
-        val normalizedToken = token.trim()
-        require(normalizedToken.isNotEmpty()) { "请输入 Token" }
+        val normalizedToken = validateCapabilityToken(token)
 
-        val connection = clientFactory.create(normalizedEndpoint, normalizedToken, applicationScope.coroutineContext)
+        val connection = clientFactory.create(
+            endpoint = normalizedEndpoint,
+            token = normalizedToken,
+            proxy = resolveProxy(proxyId),
+            parentContext = applicationScope.coroutineContext,
+        )
         try {
             connection.connect()
             connection.close()
@@ -215,6 +236,129 @@ class CodexRepository(
         backgroundTerminalRefreshBuffers.keys.removeIf { it.serverId == serverId }
         historyPagingMutexes.keys.removeIf { it.serverId == serverId }
         serverStore.removeServer(serverId)
+    }
+
+    suspend fun addProxy(
+        name: String,
+        configuration: ProxyConfiguration,
+        credential: String?,
+    ): ProxyProfile {
+        val settings = serverStore.settings.first()
+        val normalizedName = validateProxyName(name)
+        require(settings.proxies.none { it.name.equals(normalizedName, ignoreCase = true) }) { "代理名称已存在" }
+        val normalizedConfiguration = validateProxyConfiguration(configuration)
+        val normalizedCredential = validateProxyCredential(normalizedConfiguration, credential, false)
+        val profile = ProxyProfile(
+            id = UUID.randomUUID().toString(),
+            name = normalizedName,
+            version = 1,
+            configuration = normalizedConfiguration,
+            credentialConfigured = normalizedCredential != null,
+        )
+        serverStore.addProxy(profile, normalizedCredential)
+        return serverSettings.first { stored -> stored.proxies.any { it.id == profile.id } }
+            .proxies.single { it.id == profile.id }
+    }
+
+    suspend fun updateProxy(
+        proxyId: String,
+        name: String,
+        configuration: ProxyConfiguration,
+        credential: String?,
+        clearCredential: Boolean = false,
+    ): ProxyProfile {
+        val settings = serverStore.settings.first()
+        val current = settings.proxies.singleOrNull { it.id == proxyId } ?: error("代理不存在")
+        val normalizedName = validateProxyName(name)
+        require(settings.proxies.none {
+            it.id != proxyId && it.name.equals(normalizedName, ignoreCase = true)
+        }) { "代理名称已存在" }
+        val normalizedConfiguration = validateProxyConfiguration(configuration)
+        val normalizedCredential = validateProxyCredential(
+            configuration = normalizedConfiguration,
+            credential = credential,
+            existingCredentialCanBeReused = !clearCredential &&
+                current.configuration.hasSameCredentialPurpose(normalizedConfiguration) &&
+                current.credentialConfigured,
+        )
+        val retainedHostKey = current.sshHostKey?.takeIf {
+            normalizedConfiguration is ProxyConfiguration.Ssh &&
+                it.host == normalizedConfiguration.host &&
+                it.port == normalizedConfiguration.port
+        }
+        val nextVersion = current.version + 1
+        serverStore.updateProxy(
+            current.copy(
+                name = normalizedName,
+                version = nextVersion,
+                configuration = normalizedConfiguration,
+                credentialConfigured = normalizedCredential != null ||
+                    (!clearCredential && current.credentialConfigured &&
+                        current.configuration.hasSameCredentialPurpose(normalizedConfiguration)),
+                sshHostKey = retainedHostKey,
+                lastTest = null,
+            ),
+            normalizedCredential,
+            clearCredential,
+        )
+        reconnectProxyServers(proxyId)
+        return serverSettings.first { stored ->
+            stored.proxies.singleOrNull { it.id == proxyId }?.version == nextVersion
+        }.proxies.single { it.id == proxyId }
+    }
+
+    suspend fun removeProxy(proxyId: String) {
+        serverStore.removeProxy(proxyId)
+    }
+
+    suspend fun testProxy(proxyId: String, serverId: String): ProxyTestResult {
+        val settings = serverStore.settings.first()
+        val server = settings.servers.singleOrNull { it.id == serverId } ?: error("服务器不存在")
+        require(settings.proxies.any { it.id == proxyId }) { "代理不存在" }
+        val connection = clientFactory.create(
+            endpoint = server.webSocketUrl,
+            token = serverStore.readToken(serverId),
+            proxy = resolveProxy(proxyId),
+            parentContext = applicationScope.coroutineContext,
+        )
+        return try {
+            connection.connect()
+            connection.close()
+            serverStore.recordProxyTest(proxyId, true)
+            ProxyTestResult.Succeeded
+        } catch (error: CancellationException) {
+            connection.abort()
+            throw error
+        } catch (error: Throwable) {
+            connection.abort()
+            when (val hostKeyError = error.findSshHostKeyError()) {
+                is SshHostKeyVerificationException.Unknown -> {
+                    return ProxyTestResult.HostKeyConfirmationRequired(hostKeyError.observed, null)
+                }
+                is SshHostKeyVerificationException.Changed -> {
+                    return ProxyTestResult.HostKeyConfirmationRequired(hostKeyError.observed, hostKeyError.previous)
+                }
+                null -> Unit
+            }
+            serverStore.recordProxyTest(proxyId, false)
+            throw error
+        }
+    }
+
+    suspend fun confirmSshHostKey(proxyId: String, observed: SshHostKeyRecord) {
+        val proxy = serverStore.settings.first().proxies.singleOrNull { it.id == proxyId } ?: error("代理不存在")
+        val configuration = proxy.configuration as? ProxyConfiguration.Ssh ?: error("当前代理不是 SSH 代理")
+        require(observed.host == configuration.host && observed.port == configuration.port) { "SSH 主机密钥与代理地址不匹配" }
+        serverStore.confirmSshHostKey(
+            proxyId,
+            observed.copy(confirmedAtMillis = System.currentTimeMillis()),
+        )
+        reconnectProxyServers(proxyId)
+    }
+
+    suspend fun removeSshHostKey(proxyId: String) {
+        serverStore.removeSshHostKey(proxyId)
+        reconnectProxyServers(proxyId)
     }
 
     suspend fun connect(serverId: String) {
@@ -801,6 +945,7 @@ class CodexRepository(
         val connection = clientFactory.create(
             endpoint = server.webSocketUrl,
             token = serverStore.readToken(serverId),
+            proxy = resolveProxy(server.proxyId),
             parentContext = applicationScope.coroutineContext,
         )
         try {
@@ -815,6 +960,31 @@ class CodexRepository(
         } catch (error: Throwable) {
             connection.abort()
             throw error
+        }
+    }
+
+    private suspend fun resolveProxy(proxyId: String?): ResolvedProxyConnection? {
+        if (proxyId == null) return null
+        val profile = serverStore.settings.first().proxies.singleOrNull { it.id == proxyId }
+            ?: error("服务器引用的代理不存在")
+        return ResolvedProxyConnection(profile, serverStore.readProxyCredential(proxyId))
+    }
+
+    private suspend fun reconnectProxyServers(proxyId: String) {
+        val settings = serverStore.settings.first()
+        val referenced = settings.servers.filter { it.proxyId == proxyId }
+        val reconnectIds = referenced.mapNotNull { server ->
+            val status = mutableConnectionStatuses.value[server.id]
+            server.id.takeIf {
+                server.id == settings.activeServerId || status is ConnectionStatus.Connected || status is ConnectionStatus.Connecting
+            }
+        }
+        referenced.forEach { server ->
+            connections.close(server.id)
+            clearConnectionState(server.id)
+        }
+        reconnectIds.forEach { serverId ->
+            applicationScope.launch { runSuspendCatching { connect(serverId) } }
         }
     }
 
@@ -1572,6 +1742,53 @@ class CodexRepository(
             "item/permissions/requestApproval",
         )
     }
+}
+
+private fun validateProxyCredential(
+    configuration: ProxyConfiguration,
+    credential: String?,
+    existingCredentialCanBeReused: Boolean,
+): String? {
+    val acceptsCredential = configuration.requiresCredential() ||
+        configuration is ProxyConfiguration.Ssh && configuration.authentication == SshAuthentication.PRIVATE_KEY
+    if (!acceptsCredential) return null
+    val value = credential?.takeIf(String::isNotEmpty)
+    require(!configuration.requiresCredential() || value != null || existingCredentialCanBeReused) {
+        "当前认证方式需要凭据"
+    }
+    value?.let {
+        require(!it.contains('\r') && !it.contains('\n')) { "代理凭据不能换行" }
+        when (configuration) {
+            is ProxyConfiguration.HttpConnect -> {
+                if (configuration.authentication == HttpProxyAuthentication.BEARER) {
+                    require(it.all { character -> character.code in 0x21..0x7e }) { "代理令牌包含无效字符" }
+                }
+                require(it.toByteArray().size <= 8 * 1024) { "代理凭据过长" }
+            }
+            is ProxyConfiguration.Socks5 -> require(it.toByteArray().size <= 255) { "SOCKS5 密码过长" }
+            is ProxyConfiguration.Ssh -> require(it.toByteArray().size <= 8 * 1024) { "SSH 凭据过长" }
+        }
+    }
+    return value
+}
+
+private fun ProxyConfiguration.hasSameCredentialPurpose(other: ProxyConfiguration): Boolean = when {
+    this is ProxyConfiguration.HttpConnect && other is ProxyConfiguration.HttpConnect ->
+        authentication == other.authentication
+    this is ProxyConfiguration.Socks5 && other is ProxyConfiguration.Socks5 ->
+        authentication == other.authentication
+    this is ProxyConfiguration.Ssh && other is ProxyConfiguration.Ssh ->
+        authentication == other.authentication
+    else -> false
+}
+
+private fun Throwable.findSshHostKeyError(): SshHostKeyVerificationException? {
+    var current: Throwable? = this
+    while (current != null) {
+        if (current is SshHostKeyVerificationException) return current
+        current = current.cause
+    }
+    return null
 }
 
 private fun ConversationEvent.backgroundTerminalChange(): BackgroundTerminalChange? =

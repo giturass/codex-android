@@ -5,6 +5,7 @@ data class ServerProfile(
     val name: String,
     val webSocketUrl: String,
     val authentication: ServerAuthentication,
+    val proxyId: String? = null,
 )
 
 data class ServerConnectionDetails(
@@ -15,6 +16,100 @@ data class ServerConnectionDetails(
 enum class ServerAuthentication {
     CAPABILITY_TOKEN,
 }
+
+data class ProxyProfile(
+    val id: String,
+    val name: String,
+    val version: Long,
+    val configuration: ProxyConfiguration,
+    val credentialConfigured: Boolean,
+    val sshHostKey: SshHostKeyRecord? = null,
+    val lastTest: ProxyLastTest? = null,
+    val referencedServerCount: Int = 0,
+)
+
+sealed interface ProxyConfiguration {
+    data class HttpConnect(
+        val url: String,
+        val authentication: HttpProxyAuthentication,
+        val username: String? = null,
+        val headers: Map<String, String> = emptyMap(),
+        val connectTimeoutMillis: Long = DEFAULT_PROXY_CONNECT_TIMEOUT_MILLIS,
+        val tlsPolicy: ProxyTlsPolicy = ProxyTlsPolicy.STRICT,
+    ) : ProxyConfiguration
+
+    data class Socks5(
+        val host: String,
+        val port: Int,
+        val authentication: Socks5Authentication,
+        val username: String? = null,
+        val dnsResolution: Socks5DnsResolution = Socks5DnsResolution.PROXY,
+        val connectTimeoutMillis: Long = DEFAULT_PROXY_CONNECT_TIMEOUT_MILLIS,
+    ) : ProxyConfiguration
+
+    data class Ssh(
+        val host: String,
+        val port: Int = 22,
+        val username: String,
+        val authentication: SshAuthentication,
+        val privateKeyUri: String? = null,
+        val connectTimeoutMillis: Long = DEFAULT_PROXY_CONNECT_TIMEOUT_MILLIS,
+        val keepAliveIntervalMillis: Int = DEFAULT_SSH_KEEP_ALIVE_INTERVAL_MILLIS,
+        val keepAliveMaxFailures: Int = DEFAULT_SSH_KEEP_ALIVE_MAX_FAILURES,
+    ) : ProxyConfiguration
+}
+
+enum class HttpProxyAuthentication {
+    NONE,
+    BASIC,
+    BEARER,
+}
+
+enum class Socks5Authentication {
+    NONE,
+    USERNAME_PASSWORD,
+}
+
+enum class Socks5DnsResolution {
+    PROXY,
+    LOCAL,
+}
+
+enum class SshAuthentication {
+    PRIVATE_KEY,
+    PASSWORD,
+}
+
+enum class ProxyTlsPolicy {
+    STRICT,
+    ALLOW_INVALID_CERTIFICATE,
+}
+
+data class SshHostKeyRecord(
+    val host: String,
+    val port: Int,
+    val algorithm: String,
+    val sha256Fingerprint: String,
+    val confirmedAtMillis: Long,
+)
+
+data class ProxyLastTest(
+    val succeeded: Boolean,
+    val testedAtMillis: Long,
+)
+
+sealed interface ProxyTestResult {
+    data object Succeeded : ProxyTestResult
+
+    data class HostKeyConfirmationRequired(
+        val observed: SshHostKeyRecord,
+        val previous: SshHostKeyRecord?,
+    ) : ProxyTestResult
+}
+
+const val DEFAULT_PROXY_CONNECT_TIMEOUT_MILLIS = 10_000L
+const val DEFAULT_SSH_KEEP_ALIVE_INTERVAL_MILLIS = 20_000
+const val DEFAULT_SSH_KEEP_ALIVE_MAX_FAILURES = 3
 
 sealed interface ConnectionStatus {
     data object Disconnected : ConnectionStatus

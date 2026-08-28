@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -19,6 +21,9 @@ import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -47,16 +52,19 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hebo.codex.R
 import com.hebo.codex.domain.UserFacingError
+import com.hebo.codex.domain.typeLabel
 import com.hebo.codex.ui.components.UserFacingErrorDialog
 
 @Composable
 fun ServerEditorScreen(
     viewModel: ServerEditorViewModel,
     onBack: () -> Unit,
+    onManageProxies: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     var showToken by rememberSaveable { mutableStateOf(false) }
+    var proxyMenuExpanded by rememberSaveable { mutableStateOf(false) }
     var technicalError by remember { mutableStateOf<UserFacingError?>(null) }
     val detailsLabel = stringResource(R.string.common_details)
 
@@ -101,7 +109,11 @@ fun ServerEditorScreen(
             }
         } else {
             Column(
-                modifier = Modifier.fillMaxSize().padding(padding).padding(20.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 OutlinedTextField(
@@ -157,9 +169,54 @@ fun ServerEditorScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                ExposedDropdownMenuBox(
+                    expanded = proxyMenuExpanded,
+                    onExpandedChange = { if (!state.isBusy) proxyMenuExpanded = it },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    val selectedProxy = state.proxies.singleOrNull { it.id == state.proxyId }
+                    OutlinedTextField(
+                        value = selectedProxy?.name ?: "直连",
+                        onValueChange = {},
+                        modifier = Modifier
+                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                            .fillMaxWidth(),
+                        label = { Text("代理") },
+                        readOnly = true,
+                        enabled = state.isReady && !state.isBusy,
+                    )
+                    ExposedDropdownMenu(
+                        expanded = proxyMenuExpanded,
+                        onDismissRequest = { proxyMenuExpanded = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("直连") },
+                            onClick = {
+                                viewModel.updateProxy(null)
+                                proxyMenuExpanded = false
+                            },
+                        )
+                        state.proxies.forEach { proxy ->
+                            DropdownMenuItem(
+                                text = { Text("${proxy.name} · ${proxy.configuration.typeLabel()}") },
+                                onClick = {
+                                    viewModel.updateProxy(proxy.id)
+                                    proxyMenuExpanded = false
+                                },
+                            )
+                        }
+                    }
+                }
+                OutlinedButton(
+                    onClick = onManageProxies,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !state.isBusy,
+                ) {
+                    Text("管理代理")
+                }
                 if (state.endpoint.startsWith("ws://")) {
                     Text(
-                        "ws:// 不提供传输加密，仅应通过可信局域网或 SSH 端口转发使用",
+                        "ws:// 不提供端到端传输加密，仅应连接可信网络；HTTP/SOCKS 代理能够读取通信内容",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )

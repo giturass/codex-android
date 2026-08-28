@@ -7,7 +7,7 @@ import com.hebo.codex.data.local.CodexDatabase
 import com.hebo.codex.data.local.RoomDraftRepository
 import com.hebo.codex.data.local.QuickPhraseStore
 import com.hebo.codex.data.local.ServerStore
-import com.hebo.codex.data.local.TokenCipher
+import com.hebo.codex.data.local.CredentialCipher
 import com.hebo.codex.data.remote.AppServerClientFactory
 import com.hebo.codex.domain.CodexRepository
 import com.hebo.codex.domain.DraftRepository
@@ -24,7 +24,7 @@ class AppContainer(context: Context) {
     }
     private val serverStore = ServerStore(
         context = context,
-        tokenCipher = TokenCipher(),
+        credentialCipher = CredentialCipher(),
         json = json,
     )
     private val database = Room.databaseBuilder(
@@ -46,7 +46,7 @@ class AppContainer(context: Context) {
 
     val repository = CodexRepository(
         serverStore = serverStore,
-        clientFactory = AppServerClientFactory(json),
+        clientFactory = AppServerClientFactory(json, context.contentResolver),
         applicationScope = applicationScope,
         notifyConversation = notifications::notify,
     )

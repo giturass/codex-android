@@ -56,6 +56,10 @@ import com.hebo.codex.ui.screens.home.HomeScreen
 import com.hebo.codex.ui.screens.home.HomeViewModel
 import com.hebo.codex.ui.screens.home.NewTaskEvent
 import com.hebo.codex.ui.screens.home.NewTaskViewModel
+import com.hebo.codex.ui.screens.proxies.ProxyEditorScreen
+import com.hebo.codex.ui.screens.proxies.ProxyEditorViewModel
+import com.hebo.codex.ui.screens.proxies.ProxyListScreen
+import com.hebo.codex.ui.screens.proxies.ProxyListViewModel
 import com.hebo.codex.ui.screens.hub.ServerHubScreen
 import com.hebo.codex.ui.screens.hub.ServerHubViewModel
 import com.hebo.codex.ui.screens.servers.ServerEditorScreen
@@ -76,6 +80,12 @@ internal data class NewTaskRoute(
 
 @Serializable
 private data class ServerEditorRoute(val serverId: String? = null)
+
+@Serializable
+private data object ProxyListRoute
+
+@Serializable
+private data class ProxyEditorRoute(val proxyId: String? = null)
 
 @Serializable
 private data class ChatRoute(
@@ -356,7 +366,31 @@ fun CodexApp(
                         key = "server-editor:${route.serverId.orEmpty()}",
                         factory = ServerEditorViewModel.factory(repository, route.serverId),
                     )
-                    ServerEditorScreen(viewModel = viewModel, onBack = navController::popBackStack)
+                    ServerEditorScreen(
+                        viewModel = viewModel,
+                        onBack = navController::popBackStack,
+                        onManageProxies = { navController.navigate(ProxyListRoute) },
+                    )
+                }
+                composable<ProxyListRoute> {
+                    val viewModel: ProxyListViewModel = viewModel(
+                        key = "proxy-list",
+                        factory = ProxyListViewModel.factory(repository),
+                    )
+                    ProxyListScreen(
+                        viewModel = viewModel,
+                        onBack = navController::popBackStack,
+                        onAdd = { navController.navigate(ProxyEditorRoute()) },
+                        onEdit = { proxyId -> navController.navigate(ProxyEditorRoute(proxyId)) },
+                    )
+                }
+                composable<ProxyEditorRoute> { entry ->
+                    val route = entry.toRoute<ProxyEditorRoute>()
+                    val viewModel: ProxyEditorViewModel = viewModel(
+                        key = "proxy-editor:${route.proxyId.orEmpty()}",
+                        factory = ProxyEditorViewModel.factory(repository, route.proxyId),
+                    )
+                    ProxyEditorScreen(viewModel = viewModel, onBack = navController::popBackStack)
                 }
                 composable<ChatRoute> { entry ->
                     val route = entry.toRoute<ChatRoute>()

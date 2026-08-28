@@ -27,4 +27,11 @@ class EndpointValidationTest {
             validateWebSocketEndpoint("ws://codex.example.com:70000")
         }
     }
+
+    @Test
+    fun rejectsCapabilityTokenHeaderInjection() {
+        assertThrows(IllegalArgumentException::class.java) {
+            validateCapabilityToken("secret\r\nX-Injected: true")
+        }
+    }
 }

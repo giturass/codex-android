@@ -6,6 +6,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.lifecycle.viewModelScope
 import com.hebo.codex.domain.CodexRepository
+import com.hebo.codex.domain.ProxyProfile
 import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.util.runSuspendCatching
 import com.hebo.codex.util.toUserFacingError
@@ -21,6 +22,8 @@ data class ServerEditorUiState(
     val name: String = "",
     val endpoint: String = "",
     val token: String = "",
+    val proxies: List<ProxyProfile> = emptyList(),
+    val proxyId: String? = null,
     val isReady: Boolean = !isEditing,
     val isLoading: Boolean = isEditing,
     val isSaving: Boolean = false,
@@ -50,6 +53,16 @@ class ServerEditorViewModel(
     val testSucceededEvents = mutableTestSucceededEvents.receiveAsFlow()
 
     init {
+        viewModelScope.launch {
+            repository.proxies.collect { proxies ->
+                mutableState.update { state ->
+                    state.copy(
+                        proxies = proxies,
+                        proxyId = state.proxyId?.takeIf { id -> proxies.any { it.id == id } },
+                    )
+                }
+            }
+        }
         serverId?.let(::loadServer)
     }
 
@@ -65,6 +78,10 @@ class ServerEditorViewModel(
         mutableState.update { it.copy(token = token) }
     }
 
+    fun updateProxy(proxyId: String?) {
+        mutableState.update { it.copy(proxyId = proxyId) }
+    }
+
     fun save() {
         val snapshot = mutableState.value
         if (!snapshot.canSave) return
@@ -72,9 +89,9 @@ class ServerEditorViewModel(
             mutableState.update { it.copy(isSaving = true, errorMessage = null) }
             val result = runSuspendCatching {
                 if (serverId == null) {
-                    repository.addServer(snapshot.name, snapshot.endpoint, snapshot.token)
+                    repository.addServer(snapshot.name, snapshot.endpoint, snapshot.token, snapshot.proxyId)
                 } else {
-                    repository.updateServer(serverId, snapshot.name, snapshot.endpoint, snapshot.token)
+                    repository.updateServer(serverId, snapshot.name, snapshot.endpoint, snapshot.token, snapshot.proxyId)
                 }
             }
             val error = result.exceptionOrNull()
@@ -94,7 +111,7 @@ class ServerEditorViewModel(
         viewModelScope.launch {
             mutableState.update { it.copy(isTesting = true, errorMessage = null) }
             runSuspendCatching {
-                repository.testServerConnection(snapshot.endpoint, snapshot.token)
+                repository.testServerConnection(snapshot.endpoint, snapshot.token, snapshot.proxyId)
             }.onSuccess {
                 mutableTestSucceededEvents.send(Unit)
             }.onFailure { error ->
@@ -119,6 +136,7 @@ class ServerEditorViewModel(
                             name = details.profile.name,
                             endpoint = details.profile.webSocketUrl,
                             token = details.token,
+                            proxyId = details.profile.proxyId,
                             isReady = true,
                             isLoading = false,
                         )
