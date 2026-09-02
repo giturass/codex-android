@@ -1,5 +1,8 @@
 package com.hebo.codex.ui.components
 
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -7,8 +10,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.imeAnimationSource
 import androidx.compose.foundation.layout.imeAnimationTarget
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -27,9 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.derivedStateOf
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.State
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
@@ -47,7 +46,6 @@ import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.constrainHeight
 import androidx.compose.ui.unit.constrainWidth
@@ -64,6 +62,8 @@ private val ComposerExpandedTextInset = 12.dp
 private val ComposerExpandedActionsHeight = 54.dp
 private val ComposerTextFieldHeight = 48.dp
 private val ComposerExpandedTextFieldMaxHeight = 140.dp
+private const val ComposerExpansionDurationMillis = 200
+private const val ComposerCollapseDurationMillis = 160
 
 internal enum class MessageComposerAction {
     EXECUTE,
@@ -87,31 +87,47 @@ internal fun MessageComposer(
     focusRequester: FocusRequester? = null,
 ) {
     val density = LocalDensity.current
-    val imeInsets = WindowInsets.ime
-    val imeAnimationSource = WindowInsets.imeAnimationSource
     val imeAnimationTarget = WindowInsets.imeAnimationTarget
-    val imeAnimation = remember(imeInsets, imeAnimationSource, imeAnimationTarget) {
-        ComposerImeAnimation(imeInsets, imeAnimationSource, imeAnimationTarget)
-    }
     val hasText = value.text.isNotEmpty()
-    val allowsMultipleLines by remember(density, imeAnimation, hasText) {
-        derivedStateOf { hasText || imeAnimation.isVisibleOrOpening(density) }
+    val expansionTarget = composerExpansionTarget(
+        imeTargetBottom = imeAnimationTarget.getBottom(density),
+        hasText = hasText,
+    )
+    val expansionTransition = updateTransition(
+        targetState = expansionTarget,
+        label = "输入框形态",
+    )
+    val expansionFraction = expansionTransition.animateFloat(
+        transitionSpec = {
+            tween(
+                durationMillis = if (targetState) {
+                    ComposerExpansionDurationMillis
+                } else {
+                    ComposerCollapseDurationMillis
+                },
+            )
+        },
+        label = "输入框展开进度",
+    ) { expanded ->
+        if (expanded) 1f else 0f
     }
-    val showsExpandedContent by remember(density, imeAnimation, hasText) {
-        derivedStateOf { imeAnimation.showsExpandedContent(density, hasText) }
-    }
+    val showsExpandedContent = composerExpandedContentVisible(
+        currentExpanded = expansionTransition.currentState,
+        targetExpanded = expansionTransition.targetState,
+        isTransitionRunning = expansionTransition.isRunning,
+    )
     val compactContainerColor = MaterialTheme.colorScheme.surfaceContainerLow
     val expandedContainerColor = MaterialTheme.colorScheme.surfaceContainer
     val compactBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)
     val expandedBorderColor = MaterialTheme.colorScheme.outlineVariant
 
     CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
-        // Insets 在布局前更新；在布局与绘制阶段读取，才能与 imePadding 保持同一帧
+        // IME 只决定目标形态，输入框的动画进度由自身 Transition 独立驱动
         Box(
             modifier = modifier
                 .fillMaxWidth()
                 .graphicsLayer {
-                    val fraction = imeAnimation.expansionFraction(this, hasText)
+                    val fraction = expansionFraction.value
                     this.shadowElevation = shadowElevation.toPx()
                     shape = RoundedCornerShape(
                         lerpDp(ComposerCompactCornerRadius, ComposerExpandedCornerRadius, fraction),
@@ -119,7 +135,7 @@ internal fun MessageComposer(
                     clip = true
                 }
                 .drawWithContent {
-                    val fraction = imeAnimation.expansionFraction(this, hasText)
+                    val fraction = expansionFraction.value
                     val cornerRadius = lerpDp(
                         ComposerCompactCornerRadius,
                         ComposerExpandedCornerRadius,
@@ -153,9 +169,8 @@ internal fun MessageComposer(
                     .fillMaxWidth()
                     .then(focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
                     .composerTextFieldLayout(
-                        imeAnimation = imeAnimation,
+                        expansionFraction = expansionFraction,
                         compactEndExtra = compactEndExtra,
-                        hasText = hasText,
                         hasLeadingContent = leadingContent != null,
                     ),
                 textStyle = MaterialTheme.typography.bodyLarge.copy(
@@ -163,13 +178,12 @@ internal fun MessageComposer(
                 ),
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                 minLines = 1,
-                maxLines = if (allowsMultipleLines) 5 else 1,
+                maxLines = if (expansionTarget) 5 else 1,
                 decorationBox = { innerTextField ->
                     ComposerTextFieldDecoration(
                         value = value.text,
                         placeholder = placeholder,
-                        imeAnimation = imeAnimation,
-                        hasText = hasText,
+                        expansionFraction = expansionFraction,
                         innerTextField = innerTextField,
                     )
                 },
@@ -205,12 +219,11 @@ internal fun MessageComposer(
 }
 
 private fun Modifier.composerTextFieldLayout(
-    imeAnimation: ComposerImeAnimation,
+    expansionFraction: State<Float>,
     compactEndExtra: Dp,
-    hasText: Boolean,
     hasLeadingContent: Boolean,
 ) = layout { measurable, constraints ->
-    val fraction = imeAnimation.expansionFraction(this, hasText)
+    val fraction = expansionFraction.value
     val startPadding = lerpDp(
         if (hasLeadingContent) ComposerCompactControlInset else ComposerExpandedTextInset,
         ComposerExpandedTextInset,
@@ -254,8 +267,7 @@ private fun Modifier.composerTextFieldLayout(
 private fun ComposerTextFieldDecoration(
     value: String,
     placeholder: String,
-    imeAnimation: ComposerImeAnimation,
-    hasText: Boolean,
+    expansionFraction: State<Float>,
     innerTextField: @Composable () -> Unit,
 ) {
     Layout(
@@ -269,7 +281,7 @@ private fun ComposerTextFieldDecoration(
             innerTextField()
         },
     ) { measurables, constraints ->
-        val fraction = imeAnimation.expansionFraction(this, hasText)
+        val fraction = expansionFraction.value
         val contentConstraints = constraints.copy(minWidth = 0, minHeight = 0)
         val placeables = measurables.map { it.measure(contentConstraints) }
         val width = constraints.constrainWidth(placeables.maxOfOrNull { it.width } ?: 0)
@@ -285,56 +297,16 @@ private fun ComposerTextFieldDecoration(
     }
 }
 
-private class ComposerImeAnimation(
-    private val current: WindowInsets,
-    private val source: WindowInsets,
-    private val target: WindowInsets,
-) {
-    fun expansionFraction(density: Density, hasText: Boolean): Float = composerExpansionFraction(
-        currentBottom = current.getBottom(density),
-        sourceBottom = source.getBottom(density),
-        targetBottom = target.getBottom(density),
-        hasText = hasText,
-    )
-
-    fun isVisibleOrOpening(density: Density): Boolean =
-        current.getBottom(density) > 0 || target.getBottom(density) > 0
-
-    fun showsExpandedContent(density: Density, hasText: Boolean): Boolean =
-        composerExpandedContentVisible(
-            currentBottom = current.getBottom(density),
-            sourceBottom = source.getBottom(density),
-            targetBottom = target.getBottom(density),
-            hasText = hasText,
-        )
-}
-
-internal fun composerExpansionFraction(
-    currentBottom: Int,
-    sourceBottom: Int,
-    targetBottom: Int,
+internal fun composerExpansionTarget(
+    imeTargetBottom: Int,
     hasText: Boolean,
-): Float {
-    if (hasText) return 1f
-    if (sourceBottom > 0 && targetBottom > 0) return 1f
-    val expandedBottom = maxOf(currentBottom, sourceBottom, targetBottom)
-    return if (expandedBottom == 0) {
-        0f
-    } else {
-        (currentBottom.toFloat() / expandedBottom).coerceIn(0f, 1f)
-    }
-}
+): Boolean = hasText || imeTargetBottom > 0
 
 internal fun composerExpandedContentVisible(
-    currentBottom: Int,
-    sourceBottom: Int,
-    targetBottom: Int,
-    hasText: Boolean,
-): Boolean {
-    if (hasText) return true
-    if (targetBottom == 0) return false
-    return composerExpansionFraction(currentBottom, sourceBottom, targetBottom, hasText) == 1f
-}
+    currentExpanded: Boolean,
+    targetExpanded: Boolean,
+    isTransitionRunning: Boolean,
+): Boolean = currentExpanded && targetExpanded && !isTransitionRunning
 
 @Composable
 internal fun MessageComposerActionButton(
