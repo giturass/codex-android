@@ -4,22 +4,13 @@ import android.content.ContentResolver
 import androidx.core.net.toUri
 import com.hebo.codex.domain.ProxyConfiguration
 import kotlinx.serialization.json.Json
-import okhttp3.OkHttpClient
 import java.io.ByteArrayOutputStream
-import java.net.Proxy
-import java.util.concurrent.TimeUnit
 import kotlin.coroutines.CoroutineContext
 
 class AppServerClientFactory(
     private val json: Json,
     private val contentResolver: ContentResolver,
 ) {
-    private val okHttpClient = OkHttpClient.Builder()
-        .proxy(Proxy.NO_PROXY)
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .pingInterval(20, TimeUnit.SECONDS)
-        .retryOnConnectionFailure(true)
-        .build()
     private val tunnelFactory = ProxyTunnelFactory(::readPrivateKey)
 
     internal fun create(
@@ -27,25 +18,23 @@ class AppServerClientFactory(
         token: String,
         proxy: ResolvedProxyConnection?,
         parentContext: CoroutineContext,
-    ): AppServerConnection =
-        AppServerConnection(
-            webSocketFactory = if (proxy == null) {
-                OkHttpAppServerWebSocketFactory(okHttpClient, endpoint, token)
-            } else {
-                ProxyAppServerWebSocketFactory(
-                    endpoint = endpoint,
-                    token = token,
-                    proxy = proxy,
-                    tunnelFactory = tunnelFactory,
-                    parentContext = parentContext,
-                )
-            },
+    ): AppServerConnection {
+        val target = WebSocketTarget.parse(endpoint)
+        return AppServerConnection(
+            webSocketFactory = JavaWebSocketAppServerWebSocketFactory(
+                endpoint = endpoint,
+                token = token,
+                socketFactory = proxy?.let {
+                    ProxyTunnelSocketFactory(target, it, tunnelFactory)
+                },
+            ),
             json = json,
             connectTimeoutMillis = proxy?.profile?.configuration?.proxyConnectTimeoutMillis()
                 ?.let { proxyTimeout -> proxyTimeout * 2 + INITIALIZATION_TIMEOUT_MILLIS }
                 ?: INITIALIZATION_TIMEOUT_MILLIS,
             parentContext = parentContext,
         )
+    }
 
     private fun readPrivateKey(uri: String): ByteArray {
         val input = contentResolver.openInputStream(uri.toUri()) ?: error("无法打开 SSH 私钥")

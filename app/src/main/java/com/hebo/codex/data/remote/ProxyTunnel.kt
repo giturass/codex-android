@@ -30,6 +30,7 @@ import java.nio.charset.StandardCharsets
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.util.Base64
+import javax.net.SocketFactory
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SNIHostName
 import javax.net.ssl.SSLContext
@@ -43,29 +44,25 @@ internal data class ResolvedProxyConnection(
 )
 
 internal data class WebSocketTarget(
-    val endpoint: String,
     val host: String,
     val port: Int,
     val secure: Boolean,
-    val requestTarget: String,
     val hostHeader: String,
 ) {
     companion object {
         fun parse(endpoint: String): WebSocketTarget {
             val uri = URI(endpoint)
-            val secure = uri.scheme == "wss"
+            val scheme = uri.scheme?.lowercase()
+            require(scheme == "ws" || scheme == "wss") { "WebSocket URL 必须使用 ws 或 wss 协议" }
+            val secure = scheme == "wss"
             val port = if (uri.port >= 0) uri.port else if (secure) 443 else 80
-            val rawPath = uri.rawPath?.takeIf(String::isNotEmpty) ?: "/"
-            val requestTarget = uri.rawQuery?.let { "$rawPath?$it" } ?: rawPath
             val defaultPort = if (secure) 443 else 80
             val host = requireNotNull(uri.host) { "WebSocket URL 缺少主机名" }
             val authorityHost = if (host.contains(':')) "[$host]" else host
             return WebSocketTarget(
-                endpoint = endpoint,
                 host = host,
                 port = port,
                 secure = secure,
-                requestTarget = requestTarget,
                 hostHeader = if (port == defaultPort) authorityHost else "$authorityHost:$port",
             )
         }
@@ -253,6 +250,43 @@ internal class ProxyTunnelFactory(
             throw IOException("SSH 隧道建立失败：${error.message ?: error.javaClass.simpleName}", error)
         }
     }
+}
+
+internal class ProxyTunnelSocketFactory(
+    private val target: WebSocketTarget,
+    private val proxy: ResolvedProxyConnection,
+    private val tunnelFactory: ProxyTunnelFactory,
+) : SocketFactory() {
+    override fun createSocket(): Socket {
+        val rawSocket = tunnelFactory.open(target, proxy)
+        return try {
+            wrapTargetTls(rawSocket, target)
+        } catch (error: Throwable) {
+            rawSocket.close()
+            throw error
+        }
+    }
+
+    override fun createSocket(host: String, port: Int): Socket = unsupported()
+
+    override fun createSocket(
+        host: String,
+        port: Int,
+        localHost: InetAddress,
+        localPort: Int,
+    ): Socket = unsupported()
+
+    override fun createSocket(host: InetAddress, port: Int): Socket = unsupported()
+
+    override fun createSocket(
+        address: InetAddress,
+        port: Int,
+        localAddress: InetAddress,
+        localPort: Int,
+    ): Socket = unsupported()
+
+    private fun unsupported(): Nothing =
+        throw UnsupportedOperationException("代理隧道只支持无参数 Socket 创建方式")
 }
 
 internal fun performHttpConnectHandshake(
@@ -550,6 +584,8 @@ private class StreamSocket(
     override fun getSoTimeout(): Int = timeout
     override fun setTcpNoDelay(on: Boolean) = Unit
     override fun getTcpNoDelay(): Boolean = true
+    override fun setReuseAddress(on: Boolean) = Unit
+    override fun getReuseAddress(): Boolean = false
     override fun setKeepAlive(on: Boolean) = Unit
     override fun getKeepAlive(): Boolean = true
     override fun shutdownInput() = input.close()

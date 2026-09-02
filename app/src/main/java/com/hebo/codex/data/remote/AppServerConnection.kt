@@ -58,7 +58,8 @@ class AppServerConnection internal constructor(
     suspend fun connect() {
         check(started.compareAndSet(false, true)) { "连接对象只能启动一次" }
         mutableStatus.value = ConnectionStatus.Connecting
-        webSocket = webSocketFactory.open(Listener())
+        webSocket = webSocketFactory.create(Listener())
+        webSocket.start()
         try {
             withTimeout(connectTimeoutMillis) { ready.await() }
         } catch (error: TimeoutCancellationException) {
@@ -268,10 +269,6 @@ class AppServerConnection internal constructor(
 
         override fun onBinaryMessage(webSocket: AppServerWebSocket) {
             failConnection(ProtocolException("服务端发送了不受支持的二进制消息"))
-        }
-
-        override fun onClosing(webSocket: AppServerWebSocket, code: Int, reason: String) {
-            webSocket.close(code, reason)
         }
 
         override fun onClosed(webSocket: AppServerWebSocket, code: Int, reason: String) {

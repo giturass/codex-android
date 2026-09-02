@@ -1,13 +1,17 @@
 package com.hebo.codex.data.remote
 
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.Response
-import okhttp3.WebSocket
-import okhttp3.WebSocketListener
-import okio.ByteString
+import org.java_websocket.client.WebSocketClient
+import org.java_websocket.drafts.Draft_6455
+import org.java_websocket.exceptions.InvalidHandshakeException
+import org.java_websocket.framing.CloseFrame
+import org.java_websocket.handshake.ServerHandshake
+import java.net.URI
+import java.nio.ByteBuffer
+import java.util.Collections
+import javax.net.SocketFactory
 
 internal interface AppServerWebSocket {
+    fun start()
     fun send(text: String): Boolean
     fun close(code: Int, reason: String): Boolean
     fun cancel()
@@ -17,65 +21,99 @@ internal interface AppServerWebSocketListener {
     fun onOpen(webSocket: AppServerWebSocket)
     fun onMessage(webSocket: AppServerWebSocket, text: String)
     fun onBinaryMessage(webSocket: AppServerWebSocket)
-    fun onClosing(webSocket: AppServerWebSocket, code: Int, reason: String)
     fun onClosed(webSocket: AppServerWebSocket, code: Int, reason: String)
     fun onFailure(webSocket: AppServerWebSocket, error: Throwable, statusCode: Int? = null)
 }
 
 internal fun interface AppServerWebSocketFactory {
-    fun open(listener: AppServerWebSocketListener): AppServerWebSocket
+    fun create(listener: AppServerWebSocketListener): AppServerWebSocket
 }
 
-internal class OkHttpAppServerWebSocketFactory(
-    private val client: OkHttpClient,
+internal class JavaWebSocketAppServerWebSocketFactory(
     private val endpoint: String,
     private val token: String,
+    private val socketFactory: SocketFactory? = null,
 ) : AppServerWebSocketFactory {
-    override fun open(listener: AppServerWebSocketListener): AppServerWebSocket {
-        lateinit var adapter: OkHttpAppServerWebSocket
-        val request = Request.Builder()
-            .url(endpoint)
-            .header("Authorization", "Bearer $token")
-            .build()
-        val socket = client.newWebSocket(
-            request,
-            object : WebSocketListener() {
-                override fun onOpen(webSocket: WebSocket, response: Response) {
-                    listener.onOpen(adapter)
-                }
-
-                override fun onMessage(webSocket: WebSocket, text: String) {
-                    listener.onMessage(adapter, text)
-                }
-
-                override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-                    listener.onBinaryMessage(adapter)
-                }
-
-                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                    listener.onClosing(adapter, code, reason)
-                }
-
-                override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    listener.onClosed(adapter, code, reason)
-                }
-
-                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    listener.onFailure(adapter, t, response?.code)
-                }
-            },
+    override fun create(listener: AppServerWebSocketListener): AppServerWebSocket =
+        JavaWebSocketAppServerWebSocket(
+            endpoint = endpoint,
+            token = token,
+            socketFactory = socketFactory,
+            listener = listener,
         )
-        adapter = OkHttpAppServerWebSocket(socket)
-        return adapter
+}
+
+private class JavaWebSocketAppServerWebSocket(
+    endpoint: String,
+    token: String,
+    socketFactory: SocketFactory?,
+    private val listener: AppServerWebSocketListener,
+) : AppServerWebSocket {
+    private val delegate = object : WebSocketClient(
+        URI(endpoint),
+        Draft_6455(Collections.emptyList(), MAX_MESSAGE_BYTES),
+        mapOf("Authorization" to "Bearer $token"),
+        CONNECT_TIMEOUT_MILLIS,
+    ) {
+        override fun onOpen(handshakedata: ServerHandshake) {
+            listener.onOpen(this@JavaWebSocketAppServerWebSocket)
+        }
+
+        override fun onMessage(message: String) {
+            listener.onMessage(this@JavaWebSocketAppServerWebSocket, message)
+        }
+
+        override fun onMessage(bytes: ByteBuffer) {
+            listener.onBinaryMessage(this@JavaWebSocketAppServerWebSocket)
+        }
+
+        override fun onClose(code: Int, reason: String, remote: Boolean) {
+            listener.onClosed(this@JavaWebSocketAppServerWebSocket, code, reason)
+        }
+
+        override fun onError(error: Exception) {
+            listener.onFailure(
+                this@JavaWebSocketAppServerWebSocket,
+                error,
+                rejectedHandshakeStatusCode(error),
+            )
+        }
+    }.apply {
+        setConnectionLostTimeout(PING_INTERVAL_SECONDS)
+        setTcpNoDelay(true)
+        socketFactory?.let(::setSocketFactory)
+    }
+
+    override fun start() = delegate.connect()
+
+    override fun send(text: String): Boolean {
+        if (!delegate.isOpen) return false
+        return runCatching {
+            delegate.send(text)
+            true
+        }.getOrDefault(false)
+    }
+
+    override fun close(code: Int, reason: String): Boolean {
+        if (delegate.isClosing || delegate.isClosed) return false
+        return runCatching {
+            delegate.close(code, reason)
+            true
+        }.getOrDefault(false)
+    }
+
+    override fun cancel() {
+        runCatching { delegate.socket?.close() }
+        delegate.closeConnection(CloseFrame.ABNORMAL_CLOSE, "client cancelled")
     }
 }
 
-private class OkHttpAppServerWebSocket(
-    private val delegate: WebSocket,
-) : AppServerWebSocket {
-    override fun send(text: String): Boolean = delegate.send(text)
-
-    override fun close(code: Int, reason: String): Boolean = delegate.close(code, reason)
-
-    override fun cancel() = delegate.cancel()
+internal fun rejectedHandshakeStatusCode(error: Throwable): Int? {
+    if (error !is InvalidHandshakeException) return null
+    return INVALID_STATUS_CODE.find(error.message.orEmpty())?.groupValues?.get(1)?.toIntOrNull()
 }
+
+private val INVALID_STATUS_CODE = Regex("^Invalid status code received: ([0-9]{3})\\b")
+private const val CONNECT_TIMEOUT_MILLIS = 10_000
+private const val MAX_MESSAGE_BYTES = 64 * 1024 * 1024
+private const val PING_INTERVAL_SECONDS = 20
