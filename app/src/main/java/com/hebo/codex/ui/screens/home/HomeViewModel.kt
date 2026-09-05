@@ -222,8 +222,8 @@ class HomeViewModel(
 
     fun reconnectServer(serverId: String) {
         viewModelScope.launch {
+            // ConnectionCoordinator publishes failures to connectionStatuses before rethrowing them.
             runSuspendCatching { repository.connect(serverId) }
-                .onFailure(::showError)
         }
     }
 

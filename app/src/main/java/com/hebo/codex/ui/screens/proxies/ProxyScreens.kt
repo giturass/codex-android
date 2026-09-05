@@ -41,9 +41,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -70,10 +67,10 @@ import com.hebo.codex.domain.ProxyTlsPolicy
 import com.hebo.codex.domain.Socks5Authentication
 import com.hebo.codex.domain.Socks5DnsResolution
 import com.hebo.codex.domain.SshAuthentication
-import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.domain.addressSummary
 import com.hebo.codex.domain.typeLabel
-import com.hebo.codex.ui.components.UserFacingErrorDialog
+import com.hebo.codex.ui.components.InlineNoticeHost
+import com.hebo.codex.ui.components.rememberNoticeHostState
 
 @Composable
 fun ProxyListScreen(
@@ -83,30 +80,30 @@ fun ProxyListScreen(
     onEdit: (String) -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val noticeState = rememberNoticeHostState()
     var deleting by remember { mutableStateOf<ProxyProfile?>(null) }
-    var technicalError by remember { mutableStateOf<UserFacingError?>(null) }
 
     LaunchedEffect(state.errorMessage) {
         state.errorMessage?.let { error ->
-            val result = snackbarHostState.showSnackbar(error.summary, error.technicalDetails?.let { "详情" })
-            if (result == SnackbarResult.ActionPerformed) technicalError = error
+            noticeState.showError(error)
             viewModel.clearError()
         }
     }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("代理") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
-                    }
-                },
-            )
+            Column {
+                TopAppBar(
+                    title = { Text("代理") },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
+                        }
+                    },
+                )
+                InlineNoticeHost(noticeState)
+            }
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
             FloatingActionButton(onClick = onAdd) {
                 Icon(Icons.Rounded.Add, contentDescription = "添加代理")
@@ -183,9 +180,6 @@ fun ProxyListScreen(
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("取消") } },
         )
     }
-    technicalError?.let { error ->
-        UserFacingErrorDialog(error, onDismiss = { technicalError = null })
-    }
 }
 
 @Composable
@@ -195,9 +189,8 @@ fun ProxyEditorScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val snackbarHostState = remember { SnackbarHostState() }
+    val noticeState = rememberNoticeHostState()
     var showCredential by rememberSaveable { mutableStateOf(false) }
-    var technicalError by remember { mutableStateOf<UserFacingError?>(null) }
     val privateKeyLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             try {
@@ -213,28 +206,29 @@ fun ProxyEditorScreen(
         viewModel.savedEvents.collect { onBack() }
     }
     LaunchedEffect(viewModel) {
-        viewModel.testSucceededEvents.collect { snackbarHostState.showSnackbar("代理连接成功") }
+        viewModel.testSucceededEvents.collect { noticeState.showMessage("代理连接成功") }
     }
     LaunchedEffect(state.errorMessage) {
         state.errorMessage?.let { error ->
-            val result = snackbarHostState.showSnackbar(error.summary, error.technicalDetails?.let { "详情" })
-            if (result == SnackbarResult.ActionPerformed) technicalError = error
+            noticeState.showError(error)
             viewModel.clearError()
         }
     }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(if (state.isEditing) "编辑代理" else "添加代理") },
-                navigationIcon = {
-                    IconButton(onClick = onBack, enabled = !state.isBusy) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
-                    }
-                },
-            )
+            Column {
+                TopAppBar(
+                    title = { Text(if (state.isEditing) "编辑代理" else "添加代理") },
+                    navigationIcon = {
+                        IconButton(onClick = onBack, enabled = !state.isBusy) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
+                        }
+                    },
+                )
+                InlineNoticeHost(noticeState)
+            }
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         if (state.isLoading) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
@@ -336,9 +330,6 @@ fun ProxyEditorScreen(
             confirmButton = { TextButton(onClick = viewModel::confirmHostKey) { Text("确认并重试") } },
             dismissButton = { TextButton(onClick = viewModel::dismissHostKey) { Text("取消") } },
         )
-    }
-    technicalError?.let { error ->
-        UserFacingErrorDialog(error, onDismiss = { technicalError = null })
     }
 }
 

@@ -123,6 +123,7 @@ fun CodexNavigationDrawer(
     hasMore: Boolean,
     activeTarget: DrawerActiveTarget?,
     isWideLayout: Boolean,
+    noticeContent: @Composable () -> Unit,
     onNewConversation: () -> Unit,
     onOpenConversation: (String) -> Unit,
     onDeleteDraft: (DraftKey) -> Unit,
@@ -162,6 +163,7 @@ fun CodexNavigationDrawer(
             isLoadingMore = isLoadingMore,
             hasMore = hasMore,
             activeTarget = activeTarget,
+            noticeContent = noticeContent,
             onNewConversation = onNewConversation,
             onOpenConversation = onOpenConversation,
             onDeleteDraft = onDeleteDraft,
@@ -237,6 +239,7 @@ private fun ColumnScope.DrawerContent(
     isLoadingMore: Boolean,
     hasMore: Boolean,
     activeTarget: DrawerActiveTarget?,
+    noticeContent: @Composable () -> Unit,
     onNewConversation: () -> Unit,
     onOpenConversation: (String) -> Unit,
     onDeleteDraft: (DraftKey) -> Unit,
@@ -506,6 +509,7 @@ private fun ColumnScope.DrawerContent(
 
     Column(Modifier.fillMaxHeight().padding(horizontal = 12.dp)) {
         Spacer(Modifier.height(12.dp))
+        noticeContent()
         if (servers.isEmpty()) {
             Text(
                 text = "Codex",

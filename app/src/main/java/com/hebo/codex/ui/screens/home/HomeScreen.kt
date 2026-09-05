@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -75,11 +77,12 @@ import com.hebo.codex.domain.QuickPhrase
 import com.hebo.codex.domain.SandboxMode
 import com.hebo.codex.domain.ThreadOptions
 import com.hebo.codex.domain.UserInputPart
-import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.domain.projectName
 import com.hebo.codex.ui.displayDescriptionRes
 import com.hebo.codex.ui.displayLabelRes
-import com.hebo.codex.ui.components.NavigationAttention
+import com.hebo.codex.ui.components.ConnectionNotice
+import com.hebo.codex.ui.components.InlineNoticeHost
+import com.hebo.codex.ui.components.rememberNoticeHostState
 import com.hebo.codex.ui.components.OptionChipRow
 import com.hebo.codex.ui.components.SettingDescription
 import com.hebo.codex.ui.components.navigationAttention
@@ -119,12 +122,12 @@ fun HomeScreen(
     onAddServer: () -> Unit,
     onRefreshRateLimits: () -> Unit,
     onConsumeRateLimitReset: (String?) -> Unit,
-    onShowError: suspend (UserFacingError) -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val newTaskState by newTaskViewModel.state.collectAsStateWithLifecycle()
     val quickPhraseState by quickPhraseViewModel.state.collectAsStateWithLifecycle()
     val activeServer = state.activeServer
+    val noticeState = rememberNoticeHostState(state.activeServerId)
     var showProjectMenu by remember { mutableStateOf(false) }
     var showCustomPathDialog by remember { mutableStateOf(false) }
     var showOptions by remember { mutableStateOf(false) }
@@ -157,25 +160,55 @@ fun HomeScreen(
     }
     LaunchedEffect(newTaskState.errorMessage) {
         newTaskState.errorMessage?.let { error ->
-            onShowError(error)
+            noticeState.showError(error)
             newTaskViewModel.clearError()
+        }
+    }
+    LaunchedEffect(quickPhraseState.error) {
+        quickPhraseState.error?.let { error ->
+            noticeState.showError(error)
+            quickPhraseViewModel.clearError()
         }
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
-            if (activeServer == null) {
-                TopAppBar(
-                    title = { Text("新建任务") },
-                    navigationIcon = {
-                        IconButton(onClick = onToggleNavigation) {
-                            Icon(
-                                Icons.Rounded.Menu,
-                                contentDescription = if (navigationOpen) "收起导航" else "打开导航",
-                            )
-                        }
-                    },
-                )
+            Column {
+                if (activeServer == null) {
+                    TopAppBar(
+                        title = { Text("新建任务") },
+                        navigationIcon = {
+                            IconButton(onClick = onToggleNavigation) {
+                                Icon(
+                                    Icons.Rounded.Menu,
+                                    contentDescription = if (navigationOpen) "收起导航" else "打开导航",
+                                )
+                            }
+                        },
+                    )
+                } else {
+                    ConversationFloatingHeader(
+                        conversation = null,
+                        newConversationTitle = "新建任务",
+                        newConversationSubtitle = if (newTaskState.cwd.isBlank()) "选择项目" else projectName(newTaskState.cwd),
+                        rateLimitsState = rateLimitsState,
+                        navigationAttention = navigationAttention(state.threadAttention),
+                        navigationOpen = navigationOpen,
+                        onToggleNavigation = onToggleNavigation,
+                        onOpenAttention = onOpenConversation,
+                        actions = null,
+                        onRefreshRateLimits = onRefreshRateLimits,
+                        onConsumeRateLimitReset = onConsumeRateLimitReset,
+                    )
+                    if (!navigationOpen) {
+                        ConnectionNotice(
+                            status = state.connectionStatuses[activeServer.id] ?: ConnectionStatus.Disconnected,
+                            onReconnect = { viewModel.reconnectServer(activeServer.id) },
+                        )
+                    }
+                }
+                InlineNoticeHost(noticeState)
             }
         },
     ) { padding ->
@@ -209,14 +242,7 @@ fun HomeScreen(
                     ?: ConnectionStatus.Disconnected,
                 isLoadingResources = newTaskState.isLoadingResources,
                 isCreating = newTaskState.serverId == null || newTaskState.isCreatingConversation,
-                rateLimitsState = rateLimitsState,
-                navigationAttention = navigationAttention(state.threadAttention),
-                navigationOpen = navigationOpen,
                 projectMenuExpanded = showProjectMenu,
-                onToggleNavigation = onToggleNavigation,
-                onOpenConversation = onOpenConversation,
-                onRefreshRateLimits = onRefreshRateLimits,
-                onConsumeRateLimitReset = onConsumeRateLimitReset,
                 onLoadResources = newTaskViewModel::loadInputResources,
                 onMessageChange = newTaskViewModel::updateMessage,
                 onAddAttachment = newTaskViewModel::addAttachment,
@@ -241,7 +267,7 @@ fun HomeScreen(
                 onMoveQuickPhraseDown = quickPhraseViewModel::moveDown,
                 onSend = newTaskViewModel::startConversation,
                 onSendQuickPhrase = newTaskViewModel::sendQuickPhrase,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding),
             )
         }
     }
@@ -285,14 +311,7 @@ private fun NewTaskContent(
     connectionStatus: ConnectionStatus,
     isLoadingResources: Boolean,
     isCreating: Boolean,
-    rateLimitsState: RateLimitsUiState,
-    navigationAttention: NavigationAttention?,
-    navigationOpen: Boolean,
     projectMenuExpanded: Boolean,
-    onToggleNavigation: () -> Unit,
-    onOpenConversation: (String) -> Unit,
-    onRefreshRateLimits: () -> Unit,
-    onConsumeRateLimitReset: (String?) -> Unit,
     onLoadResources: (Boolean) -> Unit,
     onMessageChange: (String) -> Unit,
     onAddAttachment: (UserInputPart, String?) -> Unit,
@@ -320,7 +339,7 @@ private fun NewTaskContent(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 24.dp, top = 96.dp, end = 24.dp, bottom = contentBottomPadding),
+                .padding(start = 24.dp, top = 16.dp, end = 24.dp, bottom = contentBottomPadding),
             contentAlignment = Alignment.Center,
         ) {
             Column(
@@ -355,21 +374,6 @@ private fun NewTaskContent(
                 )
             }
         }
-
-        ConversationFloatingHeader(
-            conversation = null,
-            newConversationTitle = "新建任务",
-            newConversationSubtitle = if (cwd.isBlank()) "选择项目" else projectName(cwd),
-            rateLimitsState = rateLimitsState,
-            navigationAttention = navigationAttention,
-            navigationOpen = navigationOpen,
-            onToggleNavigation = onToggleNavigation,
-            onOpenAttention = onOpenConversation,
-            actions = null,
-            onRefreshRateLimits = onRefreshRateLimits,
-            onConsumeRateLimitReset = onConsumeRateLimitReset,
-            modifier = Modifier.align(Alignment.TopCenter),
-        )
 
         Column(
             modifier = Modifier

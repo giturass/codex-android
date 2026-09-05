@@ -40,9 +40,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -57,17 +54,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.hebo.codex.R
 import com.hebo.codex.domain.ConnectionStatus
 import com.hebo.codex.domain.FeatureCatalog
 import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.ui.components.ConnectionIndicator
 import com.hebo.codex.ui.components.ExpandableErrorDetails
-import com.hebo.codex.ui.components.UserFacingErrorDialog
+import com.hebo.codex.ui.components.InlineNoticeHost
+import com.hebo.codex.ui.components.rememberNoticeHostState
 import com.hebo.codex.ui.components.label
 
 private val TwoPaneThreshold = 760.dp
@@ -78,28 +74,22 @@ fun ServerHubScreen(
     onBack: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val snackbar = remember { SnackbarHostState() }
+    val noticeState = rememberNoticeHostState()
     val uriHandler = LocalUriHandler.current
     var dialog by remember { mutableStateOf<HubDialog?>(null) }
     var details by remember { mutableStateOf<FeatureDetails?>(null) }
     var confirmation by remember { mutableStateOf<ConfirmationRequest?>(null) }
-    var technicalError by remember { mutableStateOf<UserFacingError?>(null) }
-    val detailsLabel = stringResource(R.string.common_details)
 
     LaunchedEffect(state.errorMessage) {
         val error = state.errorMessage ?: return@LaunchedEffect
         viewModel.clearError()
-        val result = snackbar.showSnackbar(
-            message = error.summary,
-            actionLabel = error.technicalDetails?.let { detailsLabel },
-        )
-        if (result == SnackbarResult.ActionPerformed) technicalError = error
+        noticeState.showError(error)
     }
     LaunchedEffect(state.actionResult) {
         val result = state.actionResult ?: return@LaunchedEffect
         result.url?.let { url -> runCatching { uriHandler.openUri(url) } }
         viewModel.clearActionResult()
-        snackbar.showSnackbar(result.message)
+        noticeState.showMessage(result.message)
     }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -113,52 +103,54 @@ fun ServerHubScreen(
 
         Scaffold(
             topBar = {
-                TopAppBar(
-                    title = {
-                        Column {
-                            Text(if (showDetailBack) selectedSection.title else rootTitle)
-                            if (showDetailBack) {
-                                Text(
-                                    text = state.scopeSummary(),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
+                Column {
+                    TopAppBar(
+                        title = {
+                            Column {
+                                Text(if (showDetailBack) selectedSection.title else rootTitle)
+                                if (showDetailBack) {
+                                    Text(
+                                        text = state.scopeSummary(),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
                             }
-                        }
-                    },
-                    navigationIcon = {
-                        IconButton(
-                            onClick = if (showDetailBack) {
-                                { viewModel.selectSection(null) }
-                            } else {
-                                onBack
-                            },
-                        ) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
-                        }
-                    },
-                    actions = {
-                        selectedSection?.let { section ->
-                            SectionPrimaryAction(
-                                section = section,
+                        },
+                        navigationIcon = {
+                            IconButton(
+                                onClick = if (showDetailBack) {
+                                    { viewModel.selectSection(null) }
+                                } else {
+                                    onBack
+                                },
+                            ) {
+                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
+                            }
+                        },
+                        actions = {
+                            selectedSection?.let { section ->
+                                SectionPrimaryAction(
+                                    section = section,
+                                    projectScoped = projectScoped,
+                                    onDialog = { dialog = it },
+                                )
+                                IconButton(onClick = { viewModel.refresh(section) }) {
+                                    Icon(Icons.Rounded.Refresh, contentDescription = "刷新${section.title}")
+                                }
+                            }
+                            HubOverflowMenu(
+                                selectedSection = selectedSection,
                                 projectScoped = projectScoped,
                                 onDialog = { dialog = it },
                             )
-                            IconButton(onClick = { viewModel.refresh(section) }) {
-                                Icon(Icons.Rounded.Refresh, contentDescription = "刷新${section.title}")
-                            }
-                        }
-                        HubOverflowMenu(
-                            selectedSection = selectedSection,
-                            projectScoped = projectScoped,
-                            onDialog = { dialog = it },
-                        )
-                    },
-                )
+                        },
+                    )
+                    InlineNoticeHost(noticeState)
+                }
             },
-            snackbarHost = { SnackbarHost(snackbar) },
         ) { padding ->
             if (twoPane) {
                 Row(Modifier.fillMaxSize().padding(padding)) {
@@ -249,9 +241,6 @@ fun ServerHubScreen(
                 dialog = null
             },
         )
-    }
-    technicalError?.let { error ->
-        UserFacingErrorDialog(error = error, onDismiss = { technicalError = null })
     }
 }
 

@@ -30,16 +30,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -51,9 +47,9 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hebo.codex.R
-import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.domain.typeLabel
-import com.hebo.codex.ui.components.UserFacingErrorDialog
+import com.hebo.codex.ui.components.InlineNoticeHost
+import com.hebo.codex.ui.components.rememberNoticeHostState
 
 @Composable
 fun ServerEditorScreen(
@@ -62,43 +58,39 @@ fun ServerEditorScreen(
     onManageProxies: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
+    val noticeState = rememberNoticeHostState()
     var showToken by rememberSaveable { mutableStateOf(false) }
     var proxyMenuExpanded by rememberSaveable { mutableStateOf(false) }
-    var technicalError by remember { mutableStateOf<UserFacingError?>(null) }
-    val detailsLabel = stringResource(R.string.common_details)
 
     LaunchedEffect(viewModel) {
         viewModel.savedEvents.collect { onBack() }
     }
     LaunchedEffect(viewModel) {
         viewModel.testSucceededEvents.collect {
-            snackbarHostState.showSnackbar("服务器连接成功")
+            noticeState.showMessage("服务器连接成功")
         }
     }
     LaunchedEffect(state.errorMessage) {
         state.errorMessage?.let { error ->
-            val result = snackbarHostState.showSnackbar(
-                message = error.summary,
-                actionLabel = error.technicalDetails?.let { detailsLabel },
-            )
-            if (result == SnackbarResult.ActionPerformed) technicalError = error
+            noticeState.showError(error)
             viewModel.clearError()
         }
     }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(if (state.isEditing) "编辑服务器" else "添加服务器") },
-                navigationIcon = {
-                    IconButton(onClick = onBack, enabled = !state.isBusy) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
-                    }
-                },
-            )
+            Column {
+                TopAppBar(
+                    title = { Text(if (state.isEditing) "编辑服务器" else "添加服务器") },
+                    navigationIcon = {
+                        IconButton(onClick = onBack, enabled = !state.isBusy) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
+                        }
+                    },
+                )
+                InlineNoticeHost(noticeState)
+            }
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         if (state.isLoading) {
             Box(
@@ -260,8 +252,5 @@ fun ServerEditorScreen(
                 }
             }
         }
-    }
-    technicalError?.let { error ->
-        UserFacingErrorDialog(error = error, onDismiss = { technicalError = null })
     }
 }

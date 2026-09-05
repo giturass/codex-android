@@ -10,6 +10,17 @@ import org.junit.Test
 
 class ThemeColorContrastTest {
     @Test
+    fun inlineNoticesMeetContrastRequirementsInBothThemes() {
+        for (colors in listOf(LightColors, DarkColors)) {
+            assertContrast("提示正文", colors.onSurface, colors.surfaceContainer, TEXT_CONTRAST)
+            assertContrast("提示操作", colors.primary, colors.surfaceContainer, TEXT_CONTRAST)
+            assertContrast("提示图标", colors.onSurfaceVariant, colors.surfaceContainer, GRAPHIC_CONTRAST)
+            assertContrast("错误图标", colors.error, colors.surfaceContainer, GRAPHIC_CONTRAST)
+            assertContrast("收起的提示", colors.onSurfaceVariant, colors.surface, TEXT_CONTRAST)
+        }
+    }
+
+    @Test
     fun errorTextMeetsContrastRequirement() {
         assertContrast(
             label = "浅色错误文字",

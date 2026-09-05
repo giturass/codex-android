@@ -39,7 +39,6 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -100,9 +99,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SmallFloatingActionButton
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -198,7 +194,9 @@ import com.hebo.codex.ui.components.NavigationAttention
 import com.hebo.codex.ui.components.OptionChipRow
 import com.hebo.codex.ui.components.SettingDescription
 import com.hebo.codex.ui.components.RemainingLinearProgressIndicator
-import com.hebo.codex.ui.components.UserFacingErrorDialog
+import com.hebo.codex.ui.components.ConnectionNotice
+import com.hebo.codex.ui.components.InlineNoticeHost
+import com.hebo.codex.ui.components.rememberNoticeHostState
 import com.hebo.codex.ui.quickphrases.QuickPhraseViewModel
 import com.hebo.codex.ui.ratelimits.RateLimitIndicator
 import com.hebo.codex.ui.ratelimits.RateLimitsUiState
@@ -277,7 +275,6 @@ private const val PLAN_STEP_PROGRESS_FADE_DURATION_MILLIS = 150
 private val ChatPageOverlap = 64.dp
 private val ConversationHeaderItemMinHeight = 48.dp
 private val ConversationHeaderVerticalPadding = 8.dp
-private val ChatHeaderControlsHeight = ConversationHeaderItemMinHeight + ConversationHeaderVerticalPadding * 2
 private val ChatTopHazeFadeHeight = 48.dp
 private val ChatBottomHazeFadeHeight = 64.dp
 private val ChatHazeBlurRadius = 22.dp
@@ -294,6 +291,8 @@ fun ChatScreen(
     rateLimitsState: RateLimitsUiState,
     navigationAttention: NavigationAttention?,
     navigationOpen: Boolean,
+    showConnectionNotice: Boolean,
+    onReconnect: () -> Unit,
     onToggleNavigation: () -> Unit,
     onNewTask: (String) -> Unit,
     onOpenConversation: (String, String?) -> Unit,
@@ -317,24 +316,21 @@ fun ChatScreen(
         )
     }
     val forkTurnsById = remember(forkTurns) { forkTurns.associateBy(ForkTurn::turnId) }
-    val snackbarHostState = remember { SnackbarHostState() }
+    val noticeState = rememberNoticeHostState(viewModel)
     val hazeState = rememberHazeState()
     val scrollScope = rememberCoroutineScope()
-    var topControlsHeightPx by remember { mutableStateOf(0) }
     var bottomControlsHeightPx by remember { mutableStateOf(0) }
     var dialog by remember { mutableStateOf<ChatDialog?>(null) }
     var showTurnOptions by remember { mutableStateOf(false) }
     var activeRequestKey by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
     var shownNoticeId by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
     var initialAnnouncementShown by rememberSaveable(initialAnnouncement) { mutableStateOf(false) }
-    var technicalError by remember { mutableStateOf<UserFacingError?>(null) }
     var activityDetailsRowKey by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
     var remoteFileTarget by remember(conversation?.threadId) { mutableStateOf<RemoteFileTarget?>(null) }
-    val detailsLabel = stringResource(R.string.common_details)
     val activeRequest = conversation?.pendingRequests?.firstOrNull { it.requestKey == activeRequestKey }
     val density = LocalDensity.current
     val showLinkError: (String) -> Unit = { message ->
-        scrollScope.launch { snackbarHostState.showSnackbar(message) }
+        noticeState.showError(UserFacingError(message))
     }
     val openRemotePath: (String) -> Unit = { path ->
         val target = resolveRemotePath(path)
@@ -364,16 +360,12 @@ fun ChatScreen(
         val announcement = initialAnnouncement ?: return@LaunchedEffect
         if (initialAnnouncementShown) return@LaunchedEffect
         initialAnnouncementShown = true
-        snackbarHostState.showSnackbar(announcement)
+        noticeState.showMessage(announcement)
     }
     LaunchedEffect(state.screenError, conversation?.errorMessage) {
         val error = state.screenError ?: conversation?.errorMessage
         if (error != null) {
-            val result = snackbarHostState.showSnackbar(
-                message = error.summary,
-                actionLabel = error.technicalDetails?.let { detailsLabel },
-            )
-            if (result == SnackbarResult.ActionPerformed) technicalError = error
+            noticeState.showError(error)
             viewModel.clearError()
         }
     }
@@ -381,12 +373,16 @@ fun ChatScreen(
         val notice = conversation?.notices?.lastOrNull() ?: return@LaunchedEffect
         if (notice.id == shownNoticeId) return@LaunchedEffect
         shownNoticeId = notice.id
-        val result = snackbarHostState.showSnackbar(
-            message = notice.message,
-            actionLabel = notice.technicalDetails?.let { detailsLabel },
-        )
-        if (result == SnackbarResult.ActionPerformed) {
-            technicalError = UserFacingError(notice.message, notice.technicalDetails.orEmpty())
+        if (conversation.errorMessage?.technicalDetails != notice.technicalDetails ||
+            conversation.errorMessage?.summary != notice.message
+        ) {
+            noticeState.showMessage(notice.message, notice.technicalDetails)
+        }
+    }
+    LaunchedEffect(quickPhraseState.error) {
+        quickPhraseState.error?.let { error ->
+            noticeState.showError(error)
+            quickPhraseViewModel.clearError()
         }
     }
     LaunchedEffect(conversation?.pendingRequests?.map { it.requestKey }) {
@@ -394,17 +390,12 @@ fun ChatScreen(
             activeRequestKey = conversation?.pendingRequests?.firstOrNull()?.requestKey
         }
     }
-    val statusBarPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val bottomSystemPadding = maxOf(
         WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
         WindowInsets.ime.asPaddingValues().calculateBottomPadding(),
     )
-    val topControlsHeight = with(density) { topControlsHeightPx.toDp() }
     val bottomControlsHeight = with(density) { bottomControlsHeightPx.toDp() }
-    val topContentPadding = maxOf(
-        topControlsHeight,
-        statusBarPadding + ChatHeaderControlsHeight,
-    ) + ChatHeaderContentSpacing
+    val topContentPadding = ChatHeaderContentSpacing
     val bottomContentPadding = if (conversation == null) {
         bottomSystemPadding + 16.dp
     } else {
@@ -413,7 +404,7 @@ fun ChatScreen(
             bottomSystemPadding = bottomSystemPadding,
         )
     }
-    val topHazeHeight = topControlsHeight + ChatTopHazeFadeHeight
+    val topHazeHeight = ChatTopHazeFadeHeight
     val bottomHazeHeight = bottomControlsHeight + bottomSystemPadding + ChatBottomHazeFadeHeight
     val hazeBackgroundColor = MaterialTheme.colorScheme.background
     val hazeStyle = remember(hazeBackgroundColor) {
@@ -424,12 +415,12 @@ fun ChatScreen(
             noiseFactor = 0f,
         )
     }
-    val topHazeMask = remember(density, topControlsHeightPx) {
+    val topHazeMask = remember(density) {
         val fadeHeightPx = with(density) { ChatTopHazeFadeHeight.toPx() }
         Brush.verticalGradient(
             colors = listOf(Color.Black, Color.Transparent),
-            startY = topControlsHeightPx.toFloat(),
-            endY = topControlsHeightPx + fadeHeightPx,
+            startY = 0f,
+            endY = fadeHeightPx,
         )
     }
     val bottomHazeMask = remember(density) {
@@ -474,259 +465,246 @@ fun ChatScreen(
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
-        when {
-            state.isLoading -> Box(
-                Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator()
-            }
-
-            conversation == null -> Box(
-                Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("无法打开会话")
-            }
-
-            else -> LazyColumn(
-                state = pagingController.listState,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .hazeSource(hazeState)
-                    .onSizeChanged { pagingController.onViewportHeightChanged(it.height) }
-                    .nestedScroll(pagingController.userScrollConnection),
-                contentPadding = PaddingValues(
-                    start = 20.dp,
-                    top = topContentPadding,
-                    end = 20.dp,
-                    bottom = bottomContentPadding,
-                ),
-                verticalArrangement = Arrangement.spacedBy(18.dp),
-            ) {
-                if (historyPaging != null) {
-                    item(CHAT_HISTORY_PAGING_KEY) {
-                        HistoryPagingControl(
-                            isLoading = historyPaging.isLoadingOlderTurns,
-                            error = historyPaging.olderTurnsError,
-                            onLoad = viewModel::loadOlderTurns,
-                            onRetry = viewModel::retryOlderTurns,
-                        )
-                    }
-                }
-                itemsIndexed(conversationRows, key = { _, row -> row.key }) { index, row ->
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        when (row) {
-                            is ConversationRow.Item -> ConversationItemView(
-                                item = row.item,
-                                activeItemKeys = conversation.activeItemKeys,
-                                serverName = conversation.serverName,
-                                cwd = conversation.cwd,
-                                onOpenRemoteFile = { remoteFileTarget = it },
-                                onLinkError = showLinkError,
-                                shellCommandDisabled = conversation.isRunning ||
-                                    state.connectionStatus !is ConnectionStatus.Connected,
-                                onRunShellCommand = viewModel::runShellCommand,
-                                onOpenActivityDetails = { activityDetailsRowKey = row.key },
-                            )
-                            is ConversationRow.ActivityGroup -> ActivityGroupCard(
-                                items = row.items,
-                                isSealed = row.isSealed,
-                                activeItemKeys = conversation.activeItemKeys,
-                                onOpenDetails = { activityDetailsRowKey = row.key },
-                            )
-                        }
-                        val turn = forkTurnsById[row.turnId]
-                        if (turn != null && conversationRows.getOrNull(index + 1)?.turnId != row.turnId) {
-                            ForkFromTurnAction(
-                                turn = turn,
-                                forkRequest = state.forkRequest,
-                                onFork = viewModel::fork,
-                            )
-                        }
-                    }
-                }
-                item(CHAT_LIST_END_KEY) {
-                    Spacer(Modifier.height(1.dp))
-                }
-                if (pagingController.pageRunwayEnabled && pagingController.pageRunwayHeightPx > 0) {
-                    item(CHAT_LIST_PAGE_RUNWAY_KEY) {
-                        Spacer(Modifier.height(pageRunwayHeight))
-                    }
-                }
-            }
-        }
-
-        if (conversation != null && topControlsHeightPx > 0) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .height(topHazeHeight)
-                    .hazeEffect(state = hazeState, style = hazeStyle) {
-                        mask = topHazeMask
-                    },
-            )
-        }
-
-        if (conversation != null && bottomControlsHeightPx > 0) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .height(bottomHazeHeight)
-                    .hazeEffect(state = hazeState, style = hazeStyle) {
-                        mask = bottomHazeMask
-                    },
-            )
-        }
-
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth(),
-        ) {
-            ConversationFloatingHeader(
-                conversation = conversation,
-                newConversationTitle = null,
-                newConversationSubtitle = null,
-                rateLimitsState = rateLimitsState,
-                navigationAttention = navigationAttention,
-                navigationOpen = navigationOpen,
-                onToggleNavigation = onToggleNavigation,
-                onOpenAttention = { onOpenConversation(it, null) },
-                actions = ConversationHeaderActions(
-                    onNewTask = { conversation?.let { onNewTask(it.cwd) } },
-                    onRename = { dialog = ChatDialog.Rename },
-                    onFork = { dialog = ChatDialog.Fork },
-                    onOpenGoal = { dialog = ChatDialog.Goal },
-                ),
-                onRefreshRateLimits = onRefreshRateLimits,
-                onConsumeRateLimitReset = onConsumeRateLimitReset,
-                shadowElevation = 1.dp,
-                modifier = Modifier.onSizeChanged { topControlsHeightPx = it.height },
-            )
-        }
-
-        if (conversation != null) {
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .imePadding(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Column(
-                    Modifier
-                        .widthIn(max = ChatComposerMaxWidth)
-                        .fillMaxWidth()
-                        .onSizeChanged { bottomControlsHeightPx = it.height },
-                ) {
-                    conversation.pendingRequests.firstOrNull()?.let { request ->
-                        PendingRequestBanner(
-                            request = request,
-                            requestCount = conversation.pendingRequests.size,
-                            onClick = { activeRequestKey = request.requestKey },
-                        )
-                    }
-                    ConversationComposer(
-                        serverId = conversation.serverId,
-                        conversationId = conversation.threadId,
-                        shellTarget = ShellCommandTarget(conversation.serverName, conversation.cwd),
-                        isRunning = conversation.isRunning,
-                        plan = conversation.plan,
-                        activeTurnId = conversation.activeTurnId,
-                        message = state.draft.message,
-                        attachments = state.draft.attachments,
-                        modelLabel = composerModelLabel(
-                            model = state.draft.options.model,
-                            reasoningEffort = state.draft.options.reasoningEffort,
-                            models = models,
-                        ),
-                        resources = state.inputResources,
-                        quickPhrases = quickPhraseState.phrases,
-                        isLoadingResources = state.isLoadingResources,
-                        isSending = state.isSendingDraft,
-                        sendEnabled = state.connectionStatus is ConnectionStatus.Connected,
-                        placeholder = when {
-                            state.connectionStatus !is ConnectionStatus.Connected -> "服务器已断开"
-                            conversation.isRunning -> "继续对话"
-                            else -> "向 Codex 发送消息"
-                        },
-                        commands = ComposerCommand.entries,
-                        onLoadResources = viewModel::loadInputResources,
-                        onAddQuickPhrase = quickPhraseViewModel::add,
-                        onUpdateQuickPhrase = quickPhraseViewModel::update,
-                        onDeleteQuickPhrase = quickPhraseViewModel::delete,
-                        onMoveQuickPhraseUp = quickPhraseViewModel::moveUp,
-                        onMoveQuickPhraseDown = quickPhraseViewModel::moveDown,
-                        onMessageChange = viewModel::updateDraftMessage,
-                        onAddAttachment = viewModel::addDraftAttachment,
-                        onRemoveAttachment = viewModel::removeDraftAttachment,
-                        onInputError = viewModel::reportInputError,
-                        onOpenOptions = {
-                            viewModel.loadModels()
-                            showTurnOptions = true
-                        },
-                        onCommand = { command ->
-                            when (command) {
-                                ComposerCommand.GOAL -> dialog = ChatDialog.Goal
-                                ComposerCommand.REVIEW -> dialog = ChatDialog.Review
-                                ComposerCommand.COMPACT -> viewModel.compact()
-                                else -> Unit
-                            }
-                        },
-                        onSend = {
-                            pagingController.onSubmission()
-                            viewModel.sendDraft()
-                        },
-                        onSendQuickPhrase = { content ->
-                            pagingController.onSubmission()
-                            viewModel.sendQuickPhrase(content)
-                        },
-                        onStop = viewModel::interrupt,
-                        backgroundCommands = conversation.backgroundTerminals,
-                        backgroundCommandsError = conversation.backgroundTerminalsError,
-                        terminatingBackgroundProcessIds = state.terminatingBackgroundProcessIds,
-                        onTerminateBackgroundCommand = viewModel::terminateBackgroundCommand,
-                    )
-                }
-            }
-        }
-
-        AnimatedVisibility(
-            visible = conversation != null && pagingController.showReturnToOutput,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = bottomContentPadding + 8.dp),
-            enter = fadeIn(tween(160)) +
-                scaleIn(tween(160), initialScale = 0.85f),
-            exit = fadeOut(tween(100)) +
-                scaleOut(tween(100), targetScale = 0.9f),
-        ) {
-            SmallFloatingActionButton(
-                modifier = Modifier.size(46.dp),
-                shape = CircleShape,
-                onClick = pagingController::returnToOutput,
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                contentColor = MaterialTheme.colorScheme.onSurface,
-            ) {
-                Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "回到当前输出")
-            }
-        }
-
-        SnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(
-                    start = 16.dp,
-                    end = 16.dp,
-                    bottom = bottomContentPadding + 8.dp,
-                ),
+    Column(Modifier.fillMaxSize()) {
+        ConversationFloatingHeader(
+            conversation = conversation,
+            newConversationTitle = null,
+            newConversationSubtitle = null,
+            rateLimitsState = rateLimitsState,
+            navigationAttention = navigationAttention,
+            navigationOpen = navigationOpen,
+            onToggleNavigation = onToggleNavigation,
+            onOpenAttention = { onOpenConversation(it, null) },
+            actions = ConversationHeaderActions(
+                onNewTask = { conversation?.let { onNewTask(it.cwd) } },
+                onRename = { dialog = ChatDialog.Rename },
+                onFork = { dialog = ChatDialog.Fork },
+                onOpenGoal = { dialog = ChatDialog.Goal },
+            ),
+            onRefreshRateLimits = onRefreshRateLimits,
+            onConsumeRateLimitReset = onConsumeRateLimitReset,
+            shadowElevation = 1.dp,
         )
+        if (showConnectionNotice) {
+            ConnectionNotice(state.connectionStatus, onReconnect)
+        }
+        InlineNoticeHost(noticeState)
+        Box(Modifier.weight(1f)) {
+            when {
+                state.isLoading -> Box(
+                    Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator()
+                }
+
+                conversation == null -> Box(
+                    Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("无法打开会话")
+                }
+
+                else -> LazyColumn(
+                    state = pagingController.listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .hazeSource(hazeState)
+                        .onSizeChanged { pagingController.onViewportHeightChanged(it.height) }
+                        .nestedScroll(pagingController.userScrollConnection),
+                    contentPadding = PaddingValues(
+                        start = 20.dp,
+                        top = topContentPadding,
+                        end = 20.dp,
+                        bottom = bottomContentPadding,
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(18.dp),
+                ) {
+                    if (historyPaging != null) {
+                        item(CHAT_HISTORY_PAGING_KEY) {
+                            HistoryPagingControl(
+                                isLoading = historyPaging.isLoadingOlderTurns,
+                                error = historyPaging.olderTurnsError,
+                                onLoad = viewModel::loadOlderTurns,
+                                onRetry = viewModel::retryOlderTurns,
+                            )
+                        }
+                    }
+                    itemsIndexed(conversationRows, key = { _, row -> row.key }) { index, row ->
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            when (row) {
+                                is ConversationRow.Item -> ConversationItemView(
+                                    item = row.item,
+                                    activeItemKeys = conversation.activeItemKeys,
+                                    serverName = conversation.serverName,
+                                    cwd = conversation.cwd,
+                                    onOpenRemoteFile = { remoteFileTarget = it },
+                                    onLinkError = showLinkError,
+                                    shellCommandDisabled = conversation.isRunning ||
+                                        state.connectionStatus !is ConnectionStatus.Connected,
+                                    onRunShellCommand = viewModel::runShellCommand,
+                                    onOpenActivityDetails = { activityDetailsRowKey = row.key },
+                                )
+                                is ConversationRow.ActivityGroup -> ActivityGroupCard(
+                                    items = row.items,
+                                    isSealed = row.isSealed,
+                                    activeItemKeys = conversation.activeItemKeys,
+                                    onOpenDetails = { activityDetailsRowKey = row.key },
+                                )
+                            }
+                            val turn = forkTurnsById[row.turnId]
+                            if (turn != null && conversationRows.getOrNull(index + 1)?.turnId != row.turnId) {
+                                ForkFromTurnAction(
+                                    turn = turn,
+                                    forkRequest = state.forkRequest,
+                                    onFork = viewModel::fork,
+                                )
+                            }
+                        }
+                    }
+                    item(CHAT_LIST_END_KEY) {
+                        Spacer(Modifier.height(1.dp))
+                    }
+                    if (pagingController.pageRunwayEnabled && pagingController.pageRunwayHeightPx > 0) {
+                        item(CHAT_LIST_PAGE_RUNWAY_KEY) {
+                            Spacer(Modifier.height(pageRunwayHeight))
+                        }
+                    }
+                }
+            }
+
+            if (conversation != null) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .height(topHazeHeight)
+                        .hazeEffect(state = hazeState, style = hazeStyle) {
+                            mask = topHazeMask
+                        },
+                )
+            }
+
+            if (conversation != null && bottomControlsHeightPx > 0) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(bottomHazeHeight)
+                        .hazeEffect(state = hazeState, style = hazeStyle) {
+                            mask = bottomHazeMask
+                        },
+                )
+            }
+
+            if (conversation != null) {
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .imePadding(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Column(
+                        Modifier
+                            .widthIn(max = ChatComposerMaxWidth)
+                            .fillMaxWidth()
+                            .onSizeChanged { bottomControlsHeightPx = it.height },
+                    ) {
+                        conversation.pendingRequests.firstOrNull()?.let { request ->
+                            PendingRequestBanner(
+                                request = request,
+                                requestCount = conversation.pendingRequests.size,
+                                onClick = { activeRequestKey = request.requestKey },
+                            )
+                        }
+                        ConversationComposer(
+                            serverId = conversation.serverId,
+                            conversationId = conversation.threadId,
+                            shellTarget = ShellCommandTarget(conversation.serverName, conversation.cwd),
+                            isRunning = conversation.isRunning,
+                            plan = conversation.plan,
+                            activeTurnId = conversation.activeTurnId,
+                            message = state.draft.message,
+                            attachments = state.draft.attachments,
+                            modelLabel = composerModelLabel(
+                                model = state.draft.options.model,
+                                reasoningEffort = state.draft.options.reasoningEffort,
+                                models = models,
+                            ),
+                            resources = state.inputResources,
+                            quickPhrases = quickPhraseState.phrases,
+                            isLoadingResources = state.isLoadingResources,
+                            isSending = state.isSendingDraft,
+                            sendEnabled = state.connectionStatus is ConnectionStatus.Connected,
+                            placeholder = when {
+                                state.connectionStatus !is ConnectionStatus.Connected -> "服务器已断开"
+                                conversation.isRunning -> "继续对话"
+                                else -> "向 Codex 发送消息"
+                            },
+                            commands = ComposerCommand.entries,
+                            onLoadResources = viewModel::loadInputResources,
+                            onAddQuickPhrase = quickPhraseViewModel::add,
+                            onUpdateQuickPhrase = quickPhraseViewModel::update,
+                            onDeleteQuickPhrase = quickPhraseViewModel::delete,
+                            onMoveQuickPhraseUp = quickPhraseViewModel::moveUp,
+                            onMoveQuickPhraseDown = quickPhraseViewModel::moveDown,
+                            onMessageChange = viewModel::updateDraftMessage,
+                            onAddAttachment = viewModel::addDraftAttachment,
+                            onRemoveAttachment = viewModel::removeDraftAttachment,
+                            onInputError = viewModel::reportInputError,
+                            onOpenOptions = {
+                                viewModel.loadModels()
+                                showTurnOptions = true
+                            },
+                            onCommand = { command ->
+                                when (command) {
+                                    ComposerCommand.GOAL -> dialog = ChatDialog.Goal
+                                    ComposerCommand.REVIEW -> dialog = ChatDialog.Review
+                                    ComposerCommand.COMPACT -> viewModel.compact()
+                                    else -> Unit
+                                }
+                            },
+                            onSend = {
+                                pagingController.onSubmission()
+                                viewModel.sendDraft()
+                            },
+                            onSendQuickPhrase = { content ->
+                                pagingController.onSubmission()
+                                viewModel.sendQuickPhrase(content)
+                            },
+                            onStop = viewModel::interrupt,
+                            backgroundCommands = conversation.backgroundTerminals,
+                            backgroundCommandsError = conversation.backgroundTerminalsError,
+                            terminatingBackgroundProcessIds = state.terminatingBackgroundProcessIds,
+                            onTerminateBackgroundCommand = viewModel::terminateBackgroundCommand,
+                        )
+                    }
+                }
+            }
+
+            androidx.compose.animation.AnimatedVisibility(
+                visible = conversation != null && pagingController.showReturnToOutput,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = bottomContentPadding + 8.dp),
+                enter = fadeIn(tween(160)) +
+                    scaleIn(tween(160), initialScale = 0.85f),
+                exit = fadeOut(tween(100)) +
+                    scaleOut(tween(100), targetScale = 0.9f),
+            ) {
+                SmallFloatingActionButton(
+                    modifier = Modifier.size(46.dp),
+                    shape = CircleShape,
+                    onClick = pagingController::returnToOutput,
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                ) {
+                    Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "回到当前输出")
+                }
+            }
+        }
     }
 
     when (dialog) {
@@ -862,9 +840,6 @@ fun ChatScreen(
             }
         }
     }
-    technicalError?.let { error ->
-        UserFacingErrorDialog(error = error, onDismiss = { technicalError = null })
-    }
     remoteFileTarget?.let { target ->
         RemoteFileSheet(
             target = target,
@@ -877,7 +852,7 @@ fun ChatScreen(
             onLinkError = showLinkError,
             onSaved = { fileName ->
                 remoteFileTarget = null
-                scrollScope.launch { snackbarHostState.showSnackbar("已保存 $fileName") }
+                noticeState.showMessage("已保存 $fileName")
             },
         )
     }

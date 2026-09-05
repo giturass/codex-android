@@ -2,30 +2,26 @@ package com.hebo.codex.ui
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.DismissibleNavigationDrawer
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ModalNavigationDrawer
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -36,15 +32,16 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.hebo.codex.ConversationTarget
-import com.hebo.codex.R
 import com.hebo.codex.domain.CodexRepository
 import com.hebo.codex.domain.DraftRepository
 import com.hebo.codex.domain.QuickPhraseRepository
-import com.hebo.codex.domain.UserFacingError
+import com.hebo.codex.domain.ConnectionStatus
 import com.hebo.codex.ui.components.CodexNavigationDrawer
 import com.hebo.codex.ui.components.CodexNavigationDrawerWidth
 import com.hebo.codex.ui.components.DrawerActiveTarget
-import com.hebo.codex.ui.components.UserFacingErrorDialog
+import com.hebo.codex.ui.components.ConnectionNotice
+import com.hebo.codex.ui.components.InlineNoticeHost
+import com.hebo.codex.ui.components.rememberNoticeHostState
 import com.hebo.codex.ui.components.navigationAttention
 import com.hebo.codex.ui.ratelimits.RateLimitsUiState
 import com.hebo.codex.ui.ratelimits.RateLimitsViewModel
@@ -112,7 +109,6 @@ fun CodexApp(
     val quickPhraseViewModel: QuickPhraseViewModel = viewModel(
         factory = QuickPhraseViewModel.factory(quickPhraseRepository),
     )
-    val quickPhraseState by quickPhraseViewModel.state.collectAsStateWithLifecycle()
     val rateLimitsViewModel: RateLimitsViewModel = viewModel(factory = RateLimitsViewModel.factory(repository))
     val rateLimitsStates by rateLimitsViewModel.state.collectAsStateWithLifecycle()
     val modalDrawerState = rememberDrawerState(DrawerValue.Closed)
@@ -120,9 +116,7 @@ fun CodexApp(
     val focusManager = LocalFocusManager.current
     val density = LocalDensity.current
     val keyboardController = LocalSoftwareKeyboardController.current
-    val snackbarHostState = remember { SnackbarHostState() }
-    var technicalError by remember { mutableStateOf<UserFacingError?>(null) }
-    val detailsLabel = stringResource(R.string.common_details)
+    val noticeState = rememberNoticeHostState(homeState.activeServerId)
     val scope = rememberCoroutineScope()
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val activeDrawerTarget = currentBackStackEntry?.arguments?.let { arguments ->
@@ -136,14 +130,6 @@ fun CodexApp(
 
             else -> null
         }
-    }
-
-    suspend fun showUserFacingError(error: UserFacingError) {
-        val result = snackbarHostState.showSnackbar(
-            message = error.summary,
-            actionLabel = error.technicalDetails?.let { detailsLabel },
-        )
-        if (result == SnackbarResult.ActionPerformed) technicalError = error
     }
 
     fun openNewTask(
@@ -197,23 +183,18 @@ fun CodexApp(
     }
     LaunchedEffect(homeState.errorMessage) {
         homeState.errorMessage?.let { error ->
-            showUserFacingError(error)
+            noticeState.showError(error)
             homeViewModel.clearError()
         }
     }
-    LaunchedEffect(quickPhraseState.error) {
-        quickPhraseState.error?.let { error ->
-            showUserFacingError(error)
-            quickPhraseViewModel.clearError()
-        }
-    }
     LaunchedEffect(homeState.serverNotices.lastOrNull()?.id) {
-        homeState.serverNotices.lastOrNull()?.let { snackbarHostState.showSnackbar(it.message) }
+        homeState.serverNotices.lastOrNull()?.let { noticeState.showMessage(it.message, it.technicalDetails) }
     }
 
     BoxWithConstraints {
         val isWideLayout = maxWidth >= WideDrawerThreshold
         val drawerState = if (isWideLayout) wideDrawerState else modalDrawerState
+        val drawerVisible = drawerState.isOpen || drawerState.targetValue == DrawerValue.Open
         val wideDrawerOffset = wideDrawerState.currentOffset
         val wideDrawerVisibleWidth = if (wideDrawerOffset.isNaN()) {
             if (wideDrawerState.isOpen) CodexNavigationDrawerWidth else 0.dp
@@ -261,6 +242,17 @@ fun CodexApp(
                 hasMore = homeState.nextCursor != null,
                 activeTarget = activeDrawerTarget,
                 isWideLayout = isWideLayout,
+                noticeContent = {
+                    if (drawerVisible) {
+                        InlineNoticeHost(noticeState)
+                        homeState.activeServer?.let { server ->
+                            ConnectionNotice(
+                                status = homeState.connectionStatuses[server.id] ?: ConnectionStatus.Disconnected,
+                                onReconnect = { homeViewModel.reconnectServer(server.id) },
+                            )
+                        }
+                    }
+                },
                 modifier = if (isWideLayout) Modifier.width(CodexNavigationDrawerWidth) else Modifier,
                 onNewConversation = {
                     dismissModalDrawer()
@@ -309,128 +301,138 @@ fun CodexApp(
             )
         }
         val content: @Composable () -> Unit = {
-            NavHost(
-                navController = navController,
-                startDestination = NewTaskRoute(),
-            ) {
-                composable<NewTaskRoute> { entry ->
-                    val route = entry.toRoute<NewTaskRoute>()
-                    val newTaskViewModel: NewTaskViewModel = viewModel(
-                        factory = NewTaskViewModel.factory(
-                            repository = repository,
-                            draftRepository = draftRepository,
-                            serverId = route.serverId,
-                            initialCwd = route.cwd,
-                        ),
-                    )
-                    LaunchedEffect(route.serverId, homeState.activeServerId) {
-                        val serverId = route.serverId
-                        if (serverId != null && serverId != homeState.activeServerId) {
-                            homeViewModel.selectServer(serverId)
+            val showNotice = !drawerVisible && noticeState.hasContent
+            Column(Modifier.fillMaxSize()) {
+                if (showNotice) {
+                    InlineNoticeHost(noticeState, Modifier.statusBarsPadding())
+                }
+                NavHost(
+                    navController = navController,
+                    startDestination = NewTaskRoute(),
+                    modifier = Modifier.weight(1f).then(
+                        if (showNotice) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier,
+                    ),
+                ) {
+                    composable<NewTaskRoute> { entry ->
+                        val route = entry.toRoute<NewTaskRoute>()
+                        val newTaskViewModel: NewTaskViewModel = viewModel(
+                            factory = NewTaskViewModel.factory(
+                                repository = repository,
+                                draftRepository = draftRepository,
+                                serverId = route.serverId,
+                                initialCwd = route.cwd,
+                            ),
+                        )
+                        LaunchedEffect(route.serverId, homeState.activeServerId) {
+                            val serverId = route.serverId
+                            if (serverId != null && serverId != homeState.activeServerId) {
+                                homeViewModel.selectServer(serverId)
+                            }
                         }
-                    }
-                    LaunchedEffect(newTaskViewModel) {
-                        newTaskViewModel.events.collect { event ->
-                            when (event) {
-                                is NewTaskEvent.OpenConversation -> {
-                                    replaceNewTaskWithConversation(event.serverId, event.threadId)
+                        LaunchedEffect(newTaskViewModel) {
+                            newTaskViewModel.events.collect { event ->
+                                when (event) {
+                                    is NewTaskEvent.OpenConversation -> {
+                                        replaceNewTaskWithConversation(event.serverId, event.threadId)
+                                    }
                                 }
                             }
                         }
+                        HomeScreen(
+                            viewModel = homeViewModel,
+                            newTaskViewModel = newTaskViewModel,
+                            quickPhraseViewModel = quickPhraseViewModel,
+                            rateLimitsState = homeState.activeServerId?.let(rateLimitsStates::get) ?: RateLimitsUiState(),
+                            navigationOpen = drawerVisible,
+                            onToggleNavigation = ::toggleDrawer,
+                            onOpenConversation = { threadId ->
+                                homeState.activeServerId?.let { openConversation(it, threadId) }
+                            },
+                            onAddServer = { navController.navigate(ServerEditorRoute()) },
+                            onRefreshRateLimits = {
+                                homeState.activeServerId?.let(rateLimitsViewModel::refresh)
+                            },
+                            onConsumeRateLimitReset = { creditId ->
+                                homeState.activeServerId?.let { serverId ->
+                                    rateLimitsViewModel.consumeRateLimitReset(serverId, creditId)
+                                }
+                            },
+                        )
                     }
-                    HomeScreen(
-                        viewModel = homeViewModel,
-                        newTaskViewModel = newTaskViewModel,
-                        quickPhraseViewModel = quickPhraseViewModel,
-                        rateLimitsState = homeState.activeServerId?.let(rateLimitsStates::get) ?: RateLimitsUiState(),
-                        navigationOpen = drawerState.isOpen,
-                        onToggleNavigation = ::toggleDrawer,
-                        onOpenConversation = { threadId ->
-                            homeState.activeServerId?.let { openConversation(it, threadId) }
-                        },
-                        onAddServer = { navController.navigate(ServerEditorRoute()) },
-                        onRefreshRateLimits = {
-                            homeState.activeServerId?.let(rateLimitsViewModel::refresh)
-                        },
-                        onConsumeRateLimitReset = { creditId ->
-                            homeState.activeServerId?.let { serverId ->
-                                rateLimitsViewModel.consumeRateLimitReset(serverId, creditId)
-                            }
-                        },
-                        onShowError = ::showUserFacingError,
-                    )
-                }
-                composable<ServerEditorRoute> { entry ->
-                    val route = entry.toRoute<ServerEditorRoute>()
-                    val viewModel: ServerEditorViewModel = viewModel(
-                        key = "server-editor:${route.serverId.orEmpty()}",
-                        factory = ServerEditorViewModel.factory(repository, route.serverId),
-                    )
-                    ServerEditorScreen(
-                        viewModel = viewModel,
-                        onBack = navController::popBackStack,
-                        onManageProxies = { navController.navigate(ProxyListRoute) },
-                    )
-                }
-                composable<ProxyListRoute> {
-                    val viewModel: ProxyListViewModel = viewModel(
-                        key = "proxy-list",
-                        factory = ProxyListViewModel.factory(repository),
-                    )
-                    ProxyListScreen(
-                        viewModel = viewModel,
-                        onBack = navController::popBackStack,
-                        onAdd = { navController.navigate(ProxyEditorRoute()) },
-                        onEdit = { proxyId -> navController.navigate(ProxyEditorRoute(proxyId)) },
-                    )
-                }
-                composable<ProxyEditorRoute> { entry ->
-                    val route = entry.toRoute<ProxyEditorRoute>()
-                    val viewModel: ProxyEditorViewModel = viewModel(
-                        key = "proxy-editor:${route.proxyId.orEmpty()}",
-                        factory = ProxyEditorViewModel.factory(repository, route.proxyId),
-                    )
-                    ProxyEditorScreen(viewModel = viewModel, onBack = navController::popBackStack)
-                }
-                composable<ChatRoute> { entry ->
-                    val route = entry.toRoute<ChatRoute>()
-                    val viewModel: ChatViewModel = viewModel(
-                        key = "chat:${route.serverId}:${route.threadId}",
-                        factory = ChatViewModel.factory(
-                            repository,
-                            draftRepository,
-                            route.serverId,
-                            route.threadId,
-                        ),
-                    )
-                    ChatScreen(
-                        viewModel = viewModel,
-                        quickPhraseViewModel = quickPhraseViewModel,
-                        initialAnnouncement = route.announcement,
-                        rateLimitsState = rateLimitsStates[route.serverId] ?: RateLimitsUiState(),
-                        navigationAttention = navigationAttention(
-                            attentionByThread = homeState.threadAttention,
-                            currentThreadId = route.threadId,
-                        ),
-                        navigationOpen = drawerState.isOpen,
-                        onToggleNavigation = ::toggleDrawer,
-                        onNewTask = { cwd -> openNewTask(route.serverId, cwd) },
-                        onOpenConversation = { threadId, announcement ->
-                            openConversation(route.serverId, threadId, announcement)
-                        },
-                        onRefreshRateLimits = { rateLimitsViewModel.refresh(route.serverId) },
-                        onConsumeRateLimitReset = { creditId ->
-                            rateLimitsViewModel.consumeRateLimitReset(route.serverId, creditId)
-                        },
-                    )
-                }
-                composable<ServerHubRoute> { entry ->
-                    val route = entry.toRoute<ServerHubRoute>()
-                    val viewModel: ServerHubViewModel = viewModel(
-                        key = "hub:${route.serverId}:${route.cwd.orEmpty()}",
-                        factory = ServerHubViewModel.factory(repository, route.serverId, route.cwd),
-                    )
-                    ServerHubScreen(viewModel = viewModel, onBack = navController::popBackStack)
+                    composable<ServerEditorRoute> { entry ->
+                        val route = entry.toRoute<ServerEditorRoute>()
+                        val viewModel: ServerEditorViewModel = viewModel(
+                            key = "server-editor:${route.serverId.orEmpty()}",
+                            factory = ServerEditorViewModel.factory(repository, route.serverId),
+                        )
+                        ServerEditorScreen(
+                            viewModel = viewModel,
+                            onBack = navController::popBackStack,
+                            onManageProxies = { navController.navigate(ProxyListRoute) },
+                        )
+                    }
+                    composable<ProxyListRoute> {
+                        val viewModel: ProxyListViewModel = viewModel(
+                            key = "proxy-list",
+                            factory = ProxyListViewModel.factory(repository),
+                        )
+                        ProxyListScreen(
+                            viewModel = viewModel,
+                            onBack = navController::popBackStack,
+                            onAdd = { navController.navigate(ProxyEditorRoute()) },
+                            onEdit = { proxyId -> navController.navigate(ProxyEditorRoute(proxyId)) },
+                        )
+                    }
+                    composable<ProxyEditorRoute> { entry ->
+                        val route = entry.toRoute<ProxyEditorRoute>()
+                        val viewModel: ProxyEditorViewModel = viewModel(
+                            key = "proxy-editor:${route.proxyId.orEmpty()}",
+                            factory = ProxyEditorViewModel.factory(repository, route.proxyId),
+                        )
+                        ProxyEditorScreen(viewModel = viewModel, onBack = navController::popBackStack)
+                    }
+                    composable<ChatRoute> { entry ->
+                        val route = entry.toRoute<ChatRoute>()
+                        val viewModel: ChatViewModel = viewModel(
+                            key = "chat:${route.serverId}:${route.threadId}",
+                            factory = ChatViewModel.factory(
+                                repository,
+                                draftRepository,
+                                route.serverId,
+                                route.threadId,
+                            ),
+                        )
+                        ChatScreen(
+                            viewModel = viewModel,
+                            quickPhraseViewModel = quickPhraseViewModel,
+                            initialAnnouncement = route.announcement,
+                            rateLimitsState = rateLimitsStates[route.serverId] ?: RateLimitsUiState(),
+                            navigationAttention = navigationAttention(
+                                attentionByThread = homeState.threadAttention,
+                                currentThreadId = route.threadId,
+                            ),
+                            navigationOpen = drawerVisible,
+                            onReconnect = { homeViewModel.reconnectServer(route.serverId) },
+                            showConnectionNotice = !drawerVisible || route.serverId != homeState.activeServerId,
+                            onToggleNavigation = ::toggleDrawer,
+                            onNewTask = { cwd -> openNewTask(route.serverId, cwd) },
+                            onOpenConversation = { threadId, announcement ->
+                                openConversation(route.serverId, threadId, announcement)
+                            },
+                            onRefreshRateLimits = { rateLimitsViewModel.refresh(route.serverId) },
+                            onConsumeRateLimitReset = { creditId ->
+                                rateLimitsViewModel.consumeRateLimitReset(route.serverId, creditId)
+                            },
+                        )
+                    }
+                    composable<ServerHubRoute> { entry ->
+                        val route = entry.toRoute<ServerHubRoute>()
+                        val viewModel: ServerHubViewModel = viewModel(
+                            key = "hub:${route.serverId}:${route.cwd.orEmpty()}",
+                            factory = ServerHubViewModel.factory(repository, route.serverId, route.cwd),
+                        )
+                        ServerHubScreen(viewModel = viewModel, onBack = navController::popBackStack)
+                    }
                 }
             }
         }
@@ -456,12 +458,5 @@ fun CodexApp(
                 content = content,
             )
         }
-        SnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),
-        )
-    }
-    technicalError?.let { error ->
-        UserFacingErrorDialog(error = error, onDismiss = { technicalError = null })
     }
 }
