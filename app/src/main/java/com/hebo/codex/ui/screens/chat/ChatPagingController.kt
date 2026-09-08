@@ -237,12 +237,12 @@ internal fun rememberChatPagingController(
             }
         }
     }
-    val userScrollConnection = remember(conversationId, listState, liveEdgeIndex) {
+    val userScrollConnection = remember(conversationId, listState, liveEdgeIndex, pageOverlapPx) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 if (source != NestedScrollSource.UserInput || available.y >= 0f) return Offset.Zero
                 val position = listState.layoutInfo.chatPagingPosition(liveEdgeIndex)
-                return if (shouldStopForwardUserScroll(position)) {
+                return if (hasReachedChatPageAnchor(position, anchorOffset = pageOverlapPx)) {
                     Offset(x = 0f, y = available.y)
                 } else {
                     Offset.Zero
@@ -251,7 +251,8 @@ internal fun rememberChatPagingController(
 
             override suspend fun onPreFling(available: Velocity): Velocity {
                 if (available.y >= 0f) return Velocity.Zero
-                return if (shouldStopForwardUserScroll(listState.layoutInfo.chatPagingPosition(liveEdgeIndex))) {
+                val position = listState.layoutInfo.chatPagingPosition(liveEdgeIndex)
+                return if (hasReachedChatPageAnchor(position, anchorOffset = pageOverlapPx)) {
                     available
                 } else {
                     Velocity.Zero

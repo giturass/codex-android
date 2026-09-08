@@ -71,11 +71,6 @@ internal fun shouldFollowChatOutput(
     !hasReachedChatOutputEnd(position)
 }
 
-internal fun shouldStopForwardUserScroll(position: ChatPagingPosition): Boolean =
-    position.liveEdgeOffset?.let { it <= position.readingEndOffset }
-        ?: position.firstVisibleItemIndex?.let { it > position.liveEdgeIndex }
-        ?: false
-
 internal fun canReleaseChatPageRunway(
     position: ChatPagingPosition,
     liveEdgeHeight: Int,

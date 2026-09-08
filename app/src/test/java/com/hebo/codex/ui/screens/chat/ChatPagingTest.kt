@@ -213,22 +213,26 @@ class ChatPagingTest {
     }
 
     @Test
-    fun `当前输出已到窗口底部时阻止用户继续向前滚动`() {
-        assertTrue(shouldStopForwardUserScroll(position(liveEdgeOffset = 600)))
-        assertFalse(shouldStopForwardUserScroll(position(liveEdgeOffset = 601)))
+    fun `回看后末尾仍可见时允许滑回原分页位置`() {
+        val pageAnchorOffset = 64
+        val originalPosition = position(liveEdgeOffset = 120, outputEndOffset = 102)
+        val historyPosition = position(liveEdgeOffset = 200, outputEndOffset = 182)
+
+        assertTrue(isChatOutputEndVisible(historyPosition))
+        assertFalse(hasReachedChatPageAnchor(historyPosition, anchorOffset = pageAnchorOffset))
+        assertFalse(hasReachedChatPageAnchor(originalPosition, anchorOffset = pageAnchorOffset))
+        assertTrue(
+            hasReachedChatPageAnchor(
+                position(liveEdgeOffset = 64, outputEndOffset = 46),
+                anchorOffset = pageAnchorOffset,
+            ),
+        )
     }
 
     @Test
-    fun `当前输出已滚过窗口时阻止用户继续向前滚动`() {
-        assertTrue(
-            shouldStopForwardUserScroll(
-                position(
-                    liveEdgeOffset = null,
-                    firstVisibleItemIndex = 6,
-                    lastVisibleItemIndex = 6,
-                ),
-            ),
-        )
+    fun `当前输出进入窗口底部后仍允许继续向前滚动`() {
+        assertFalse(hasReachedChatPageAnchor(position(liveEdgeOffset = 600), anchorOffset = 64))
+        assertFalse(hasReachedChatPageAnchor(position(liveEdgeOffset = 601), anchorOffset = 64))
     }
 
     @Test
