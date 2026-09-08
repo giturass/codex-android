@@ -275,10 +275,10 @@ private const val PLAN_STEP_PROGRESS_FADE_DURATION_MILLIS = 150
 private val ChatPageOverlap = 64.dp
 private val ConversationHeaderItemMinHeight = 48.dp
 private val ConversationHeaderVerticalPadding = 8.dp
-private val ChatTopHazeFadeHeight = 48.dp
-private val ChatBottomHazeFadeHeight = 64.dp
+private val ChatTopHazeFadeHeight = 24.dp
+private val ChatBottomHazeFadeHeight = 32.dp
 private val ChatHazeBlurRadius = 22.dp
-private val ChatHeaderContentSpacing = ChatTopHazeFadeHeight
+private val ChatHeaderContentSpacing = 48.dp
 private val ChatComposerOverlayMinHeight = 116.dp
 private val ChatComposerMaxWidth = 760.dp
 private val ConversationStatisticsPopupWidth = 300.dp
@@ -410,7 +410,7 @@ fun ChatScreen(
     val hazeStyle = remember(hazeBackgroundColor) {
         HazeStyle(
             backgroundColor = hazeBackgroundColor,
-            tint = HazeTint(hazeBackgroundColor.copy(alpha = 0.74f)),
+            tint = HazeTint(hazeBackgroundColor.copy(alpha = 0.50f)),
             blurRadius = ChatHazeBlurRadius,
             noiseFactor = 0f,
         )
