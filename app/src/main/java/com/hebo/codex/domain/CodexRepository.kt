@@ -1531,6 +1531,10 @@ class CodexRepository(
             threadId = summary.id,
             title = summary.title,
             cwd = summary.cwd,
+            parentThreadId = summary.parentThreadId,
+            agentNickname = summary.agentNickname,
+            agentRole = summary.agentRole,
+            canAcceptDirectInput = summary.canAcceptDirectInput,
             history = ConversationHistory(
                 turns = turns,
                 olderTurnsCursor = olderTurnsCursor,

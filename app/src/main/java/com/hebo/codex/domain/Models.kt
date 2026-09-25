@@ -139,6 +139,9 @@ data class ThreadSummary(
     val ephemeral: Boolean = false,
     val modelProvider: String = "",
     val source: String = "",
+    val agentNickname: String? = null,
+    val agentRole: String? = null,
+    val canAcceptDirectInput: Boolean? = null,
 )
 
 enum class ThreadHistoryMode {
@@ -235,9 +238,16 @@ data class ConversationState(
     val approvalsReviewer: String? = null,
     val sandbox: String? = null,
     val errorMessage: UserFacingError? = null,
+    val parentThreadId: String? = null,
+    val agentNickname: String? = null,
+    val agentRole: String? = null,
+    val canAcceptDirectInput: Boolean? = null,
 ) {
     val items: List<ConversationItem>
         get() = history.items
+
+    val isViewOnly: Boolean
+        get() = canAcceptDirectInput == false
 }
 
 data class BackgroundTerminal(
@@ -345,6 +355,27 @@ sealed interface ConversationItem {
         val remotePath: String? = null,
         val status: ActivityStatus,
     ) : ConversationItem
+
+    data class AgentCollaboration(
+        override val id: String,
+        override val turnId: String,
+        val tool: AgentTool,
+        val status: ActivityStatus,
+        val senderThreadId: String,
+        val receiverThreadIds: List<String>,
+        val prompt: String?,
+        val model: String?,
+        val reasoningEffort: String?,
+        val agentsStates: Map<String, AgentState>,
+    ) : ConversationItem
+
+    data class SubAgentActivity(
+        override val id: String,
+        override val turnId: String,
+        val kind: SubAgentActivityKind,
+        val agentThreadId: String,
+        val agentPath: String,
+    ) : ConversationItem
 }
 
 enum class AgentMessagePhase {
@@ -355,12 +386,10 @@ enum class AgentMessagePhase {
 enum class ActivityKind {
     MCP_TOOL,
     DYNAMIC_TOOL,
-    COLLAB_AGENT,
     WEB_SEARCH,
     CONTEXT_COMPACTION,
     REVIEW,
     HOOK,
-    SUB_AGENT,
     IMAGE_VIEW,
     IMAGE_GENERATION,
     WAIT,
@@ -378,9 +407,17 @@ data class RemoteFileMetadata(
 sealed interface UserMessagePart {
     data class Text(val text: String) : UserMessagePart
 
-    data class Image(val source: String) : UserMessagePart
+    data class Image(val url: String? = null, val fileId: String? = null) : UserMessagePart {
+        init {
+            require(url != null || fileId != null) { "图片必须提供 url 或 fileId" }
+        }
+    }
 
     data class LocalImage(val path: String) : UserMessagePart
+
+    data class Audio(val url: String) : UserMessagePart
+
+    data class LocalAudio(val path: String) : UserMessagePart
 
     data class Skill(val name: String, val path: String) : UserMessagePart
 
@@ -404,6 +441,7 @@ sealed interface FileChangeKind {
 enum class ActivityStatus {
     IN_PROGRESS,
     COMPLETED,
+    INTERRUPTED,
     FAILED,
     DECLINED,
 }

@@ -46,6 +46,8 @@ private fun List<UserMessagePart>.forkTurnTitle(): String {
     return when (val attachment = firstOrNull { it !is UserMessagePart.Text }) {
         is UserMessagePart.Image -> "图片消息"
         is UserMessagePart.LocalImage -> "图片：${attachment.path.substringAfterLast('/')}"
+        is UserMessagePart.Audio -> "音频消息"
+        is UserMessagePart.LocalAudio -> "音频：${attachment.path.substringAfterLast('/')}"
         is UserMessagePart.Skill -> "技能：${attachment.name}"
         is UserMessagePart.Mention -> "引用：${attachment.name}"
         is UserMessagePart.Text, null -> "未记录用户输入"

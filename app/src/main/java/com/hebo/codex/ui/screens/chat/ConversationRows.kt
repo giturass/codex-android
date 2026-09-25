@@ -82,6 +82,8 @@ private fun ConversationItem.isGroupableActivity(): Boolean =
         is ConversationItem.CommandExecution,
         is ConversationItem.FileChange,
         is ConversationItem.Activity,
+        is ConversationItem.AgentCollaboration,
+        is ConversationItem.SubAgentActivity,
         -> true
     }
 

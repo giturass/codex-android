@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.AudioFile
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -100,6 +101,12 @@ private fun MessagePartLabel(part: UserMessagePart) {
             R.string.message_attachment_server_image,
             part.path.fileName(),
         ) to Icons.Rounded.Image
+
+        is UserMessagePart.Audio -> stringResource(R.string.message_attachment_audio) to Icons.Rounded.AudioFile
+        is UserMessagePart.LocalAudio -> stringResource(
+            R.string.message_attachment_server_audio,
+            part.path.fileName(),
+        ) to Icons.Rounded.AudioFile
 
         is UserMessagePart.Skill -> stringResource(
             R.string.message_attachment_skill,

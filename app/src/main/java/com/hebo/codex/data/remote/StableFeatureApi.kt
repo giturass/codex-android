@@ -715,6 +715,7 @@ class StableFeatureApi(
     }
 
     private fun String.toMcpAuthStatusLabel(): String = when (this) {
+        "unknown" -> "状态未知"
         "notLoggedIn" -> "待登录"
         "bearerToken" -> "令牌认证"
         "oAuth" -> "OAuth 已认证"

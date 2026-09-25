@@ -23,6 +23,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -137,6 +138,7 @@ internal fun ActivityGroupCard(
     val sealedGroupStatusIcon = if (isSealedGroup) {
         when (status) {
             ActivityStatus.DECLINED -> Icons.Rounded.Block
+            ActivityStatus.INTERRUPTED -> Icons.Rounded.Block
             ActivityStatus.IN_PROGRESS, ActivityStatus.COMPLETED, ActivityStatus.FAILED -> null
         }
     } else {
@@ -269,10 +271,10 @@ private fun ActivityGroupMetrics(
     color: Color,
     modifier: Modifier = Modifier,
 ) {
-    Row(
+    FlowRow(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         metrics.forEach { metric ->
             Row(
@@ -317,6 +319,7 @@ internal enum class ActivityGroupMetricType {
     PROGRESS,
     COMMAND,
     FILE,
+    AGENT,
     ACTIVITY,
 }
 
@@ -335,6 +338,9 @@ internal fun activityGroupMetrics(items: List<ConversationItem>): List<ActivityG
     val commands = items.filterIsInstance<ConversationItem.CommandExecution>()
     val fileChanges = items.filterIsInstance<ConversationItem.FileChange>()
     val activities = items.filterIsInstance<ConversationItem.Activity>()
+    val agentItems = items.filter {
+        it is ConversationItem.AgentCollaboration || it is ConversationItem.SubAgentActivity
+    }
     return buildList {
         if (reasoningCount > 0) add(ActivityGroupMetric(ActivityGroupMetricType.REASONING, reasoningCount))
         if (progressCount > 0) add(ActivityGroupMetric(ActivityGroupMetricType.PROGRESS, progressCount))
@@ -353,6 +359,15 @@ internal fun activityGroupMetrics(items: List<ConversationItem>): List<ActivityG
                     type = ActivityGroupMetricType.FILE,
                     count = fileChanges.size,
                     failedCount = fileChanges.count { it.status == ActivityStatus.FAILED },
+                ),
+            )
+        }
+        if (agentItems.isNotEmpty()) {
+            add(
+                ActivityGroupMetric(
+                    type = ActivityGroupMetricType.AGENT,
+                    count = agentItems.size,
+                    failedCount = agentItems.count { it.activityStatus() == ActivityStatus.FAILED },
                 ),
             )
         }
@@ -382,6 +397,7 @@ private fun ActivityGroupMetric.icon(): ImageVector = when (type) {
     ActivityGroupMetricType.PROGRESS -> Icons.Rounded.Checklist
     ActivityGroupMetricType.COMMAND -> Icons.Rounded.Terminal
     ActivityGroupMetricType.FILE -> Icons.Rounded.EditNote
+    ActivityGroupMetricType.AGENT -> Icons.Rounded.AccountTree
     ActivityGroupMetricType.ACTIVITY -> Icons.Rounded.Extension
 }
 
@@ -391,6 +407,7 @@ private fun ActivityGroupMetric.contentDescription(): String {
         ActivityGroupMetricType.PROGRESS -> "$count 项进度更新"
         ActivityGroupMetricType.COMMAND -> "$count 条命令"
         ActivityGroupMetricType.FILE -> "$count 次文件修改"
+        ActivityGroupMetricType.AGENT -> "$count 次子代理协作"
         ActivityGroupMetricType.ACTIVITY -> "$count 项操作"
     }
     if (failedCount == 0) return description
@@ -398,6 +415,7 @@ private fun ActivityGroupMetric.contentDescription(): String {
     val failedUnit = when (type) {
         ActivityGroupMetricType.COMMAND -> "条"
         ActivityGroupMetricType.FILE -> "次"
+        ActivityGroupMetricType.AGENT -> "次"
         ActivityGroupMetricType.REASONING,
         ActivityGroupMetricType.PROGRESS,
         ActivityGroupMetricType.ACTIVITY,
@@ -420,6 +438,7 @@ internal fun activityGroupLabel(
             ActivityGroupMetricType.PROGRESS -> "进度 ${metric.count}"
             ActivityGroupMetricType.COMMAND -> "命令 ${metric.count}"
             ActivityGroupMetricType.FILE -> "文件 ${metric.count}"
+            ActivityGroupMetricType.AGENT -> "协作 ${metric.count}"
             ActivityGroupMetricType.ACTIVITY -> "操作 ${metric.count}"
         }
     }
@@ -450,6 +469,8 @@ private fun activeActivityLabel(
             .ifBlank { "修改文件" }
 
         is ConversationItem.Activity -> activeItem.title
+        is ConversationItem.AgentCollaboration -> activeItem.tool.title()
+        is ConversationItem.SubAgentActivity -> activeItem.kind.title()
         is ConversationItem.AgentMessage -> agentMessageTitle(activeItem.text)
         is ConversationItem.UserMessage -> error("活动组包含用户消息")
     }
@@ -465,6 +486,7 @@ private fun activityGroupStatus(
     return when {
         ActivityStatus.FAILED in statuses -> ActivityStatus.FAILED
         ActivityStatus.DECLINED in statuses -> ActivityStatus.DECLINED
+        ActivityStatus.INTERRUPTED in statuses -> ActivityStatus.INTERRUPTED
         else -> ActivityStatus.COMPLETED
     }
 }
@@ -477,6 +499,8 @@ internal fun ConversationItem.activityStatus(
         is ConversationItem.UserShellCommand -> status
         is ConversationItem.FileChange -> status
         is ConversationItem.Activity -> status
+        is ConversationItem.AgentCollaboration -> status
+        is ConversationItem.SubAgentActivity -> ActivityStatus.COMPLETED
         is ConversationItem.Reasoning,
         is ConversationItem.Plan,
         is ConversationItem.AgentMessage,
@@ -500,6 +524,7 @@ internal fun ActivityDetailsSheet(
     onOpenRemoteFile: (RemoteFileTarget) -> Unit,
     onLinkError: (String) -> Unit,
     onOpenRemotePath: (String) -> Unit,
+    onOpenConversation: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberBottomSheetState(
@@ -624,6 +649,7 @@ internal fun ActivityDetailsSheet(
                                 onOpenRemoteFile = onOpenRemoteFile,
                                 onLinkError = onLinkError,
                                 onOpenRemotePath = onOpenRemotePath,
+                                onOpenConversation = onOpenConversation,
                             )
                         }
                     }
@@ -776,6 +802,7 @@ private fun ActivityTimelineBody(
     onOpenRemoteFile: (RemoteFileTarget) -> Unit,
     onLinkError: (String) -> Unit,
     onOpenRemotePath: (String) -> Unit,
+    onOpenConversation: (String) -> Unit,
 ) {
     val hasDetails = activityItemHasDetails(item)
     val expansionTarget = hasDetails && expanded
@@ -824,6 +851,7 @@ private fun ActivityTimelineBody(
                         onOpenRemoteFile = onOpenRemoteFile,
                         onLinkError = onLinkError,
                         onOpenRemotePath = onOpenRemotePath,
+                        onOpenConversation = onOpenConversation,
                     )
                 }
             }
@@ -852,6 +880,7 @@ private fun ActivityTimelineIcon(
     val tint = when (status) {
         ActivityStatus.IN_PROGRESS -> MaterialTheme.colorScheme.onSurfaceVariant
         ActivityStatus.COMPLETED -> MaterialTheme.colorScheme.onSurfaceVariant
+        ActivityStatus.INTERRUPTED -> MaterialTheme.colorScheme.onSurfaceVariant
         ActivityStatus.FAILED, ActivityStatus.DECLINED -> MaterialTheme.colorScheme.error
     }
     Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
@@ -901,14 +930,14 @@ private fun activityTypeIcon(item: ConversationItem): ImageVector = when (item) 
     is ConversationItem.CommandExecution -> Icons.Rounded.Terminal
     is ConversationItem.UserShellCommand -> Icons.Rounded.Terminal
     is ConversationItem.FileChange -> Icons.Rounded.EditNote
+    is ConversationItem.AgentCollaboration -> Icons.Rounded.AccountTree
+    is ConversationItem.SubAgentActivity -> Icons.Rounded.SmartToy
     is ConversationItem.Activity -> when (item.kind) {
         ActivityKind.MCP_TOOL, ActivityKind.DYNAMIC_TOOL -> Icons.Rounded.Extension
-        ActivityKind.COLLAB_AGENT -> Icons.Rounded.AccountTree
         ActivityKind.WEB_SEARCH -> Icons.Rounded.TravelExplore
         ActivityKind.CONTEXT_COMPACTION -> Icons.Rounded.Compress
         ActivityKind.REVIEW -> Icons.AutoMirrored.Rounded.FactCheck
         ActivityKind.HOOK -> Icons.Rounded.Webhook
-        ActivityKind.SUB_AGENT -> Icons.Rounded.SmartToy
         ActivityKind.IMAGE_VIEW -> Icons.Rounded.Image
         ActivityKind.IMAGE_GENERATION -> Icons.Rounded.AutoAwesome
         ActivityKind.WAIT -> Icons.Rounded.HourglassTop
@@ -925,14 +954,14 @@ private fun activityTypeDescription(item: ConversationItem): String = when (item
     is ConversationItem.CommandExecution -> "命令"
     is ConversationItem.UserShellCommand -> "用户 Shell"
     is ConversationItem.FileChange -> "文件修改"
+    is ConversationItem.AgentCollaboration -> "子代理协作"
+    is ConversationItem.SubAgentActivity -> "子代理"
     is ConversationItem.Activity -> when (item.kind) {
         ActivityKind.MCP_TOOL, ActivityKind.DYNAMIC_TOOL -> "工具调用"
-        ActivityKind.COLLAB_AGENT -> "协作代理"
         ActivityKind.WEB_SEARCH -> "网页搜索"
         ActivityKind.CONTEXT_COMPACTION -> "上下文压缩"
         ActivityKind.REVIEW -> "审查"
         ActivityKind.HOOK -> "Hook"
-        ActivityKind.SUB_AGENT -> "子代理"
         ActivityKind.IMAGE_VIEW -> "图片"
         ActivityKind.IMAGE_GENERATION -> "图片生成"
         ActivityKind.WAIT -> "等待"
@@ -951,6 +980,7 @@ private fun activityStatusDescription(status: ActivityStatus): String = when (st
     ActivityStatus.COMPLETED -> "已完成"
     ActivityStatus.FAILED -> "失败"
     ActivityStatus.DECLINED -> "已取消"
+    ActivityStatus.INTERRUPTED -> "已中断"
 }
 
 internal fun activityItemTitle(item: ConversationItem): String {
@@ -970,6 +1000,8 @@ internal fun activityItemTitle(item: ConversationItem): String {
             .let { paths -> paths.singleOrNull() ?: "${paths.size} 个文件" }
 
         is ConversationItem.Activity -> item.title
+        is ConversationItem.AgentCollaboration -> item.tool.title()
+        is ConversationItem.SubAgentActivity -> item.kind.title()
         is ConversationItem.UserMessage -> "用户消息"
         is ConversationItem.AgentMessage -> when (item.phase) {
             AgentMessagePhase.COMMENTARY -> agentMessageTitle(item.text)
@@ -980,15 +1012,21 @@ internal fun activityItemTitle(item: ConversationItem): String {
         ActivityStatus.IN_PROGRESS, ActivityStatus.COMPLETED -> title
         ActivityStatus.FAILED -> "$title · 失败"
         ActivityStatus.DECLINED -> "$title · 已取消"
+        ActivityStatus.INTERRUPTED -> "$title · 已中断"
     }
 }
 
 internal fun activityItemSubtitle(item: ConversationItem): String? = when (item) {
+    is ConversationItem.AgentCollaboration -> item.prompt?.takeIf(String::isNotBlank)
+    is ConversationItem.SubAgentActivity -> item.agentPath
     is ConversationItem.Activity -> item.summary?.takeIf(String::isNotBlank)
     else -> null
 }
 
 internal fun activityItemHasDetails(item: ConversationItem): Boolean = when (item) {
+    is ConversationItem.AgentCollaboration,
+    is ConversationItem.SubAgentActivity,
+    -> true
     is ConversationItem.Reasoning -> reasoningSummaryBody(item.summaryParts).isNotBlank() ||
         reasoningRawContent(item.rawContentParts).isNotBlank()
     is ConversationItem.Plan -> item.text.isNotBlank()
@@ -1016,8 +1054,17 @@ private fun ActivityItemDetails(
     onOpenRemoteFile: (RemoteFileTarget) -> Unit,
     onLinkError: (String) -> Unit,
     onOpenRemotePath: (String) -> Unit,
+    onOpenConversation: (String) -> Unit,
 ) {
     when (item) {
+        is ConversationItem.AgentCollaboration -> AgentCollaborationDetails(
+            item = item,
+            cwd = cwd,
+            onOpenRemoteFile = onOpenRemoteFile,
+            onLinkError = onLinkError,
+            onOpenConversation = onOpenConversation,
+        )
+        is ConversationItem.SubAgentActivity -> SubAgentActivityDetails(item, onOpenConversation)
         is ConversationItem.Reasoning -> ReasoningItemDetails(
             item = item,
             cwd = cwd,

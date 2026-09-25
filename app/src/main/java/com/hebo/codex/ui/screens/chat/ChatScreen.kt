@@ -296,6 +296,7 @@ fun ChatScreen(
     onToggleNavigation: () -> Unit,
     onNewTask: (String) -> Unit,
     onOpenConversation: (String, String?) -> Unit,
+    onOpenRelatedConversation: (String) -> Unit,
     onRefreshRateLimits: () -> Unit,
     onConsumeRateLimitReset: (String?) -> Unit,
 ) {
@@ -540,7 +541,7 @@ fun ChatScreen(
                                     cwd = conversation.cwd,
                                     onOpenRemoteFile = { remoteFileTarget = it },
                                     onLinkError = showLinkError,
-                                    shellCommandDisabled = conversation.isRunning ||
+                                    shellCommandDisabled = conversation.isRunning || conversation.isViewOnly ||
                                         state.connectionStatus !is ConnectionStatus.Connected,
                                     onRunShellCommand = viewModel::runShellCommand,
                                     onOpenActivityDetails = { activityDetailsRowKey = row.key },
@@ -619,67 +620,93 @@ fun ChatScreen(
                                 onClick = { activeRequestKey = request.requestKey },
                             )
                         }
-                        ConversationComposer(
-                            serverId = conversation.serverId,
-                            conversationId = conversation.threadId,
-                            shellTarget = ShellCommandTarget(conversation.serverName, conversation.cwd),
-                            isRunning = conversation.isRunning,
-                            plan = conversation.plan,
-                            activeTurnId = conversation.activeTurnId,
-                            message = state.draft.message,
-                            attachments = state.draft.attachments,
-                            modelLabel = composerModelLabel(
-                                model = state.draft.options.model,
-                                reasoningEffort = state.draft.options.reasoningEffort,
-                                models = models,
-                            ),
-                            resources = state.inputResources,
-                            quickPhrases = quickPhraseState.phrases,
-                            isLoadingResources = state.isLoadingResources,
-                            isSending = state.isSendingDraft,
-                            sendEnabled = state.connectionStatus is ConnectionStatus.Connected,
-                            placeholder = when {
-                                state.connectionStatus !is ConnectionStatus.Connected -> "服务器已断开"
-                                conversation.isRunning -> "继续对话"
-                                else -> "向 Codex 发送消息"
-                            },
-                            commands = ComposerCommand.entries,
-                            onLoadResources = viewModel::loadInputResources,
-                            onAddQuickPhrase = quickPhraseViewModel::add,
-                            onUpdateQuickPhrase = quickPhraseViewModel::update,
-                            onDeleteQuickPhrase = quickPhraseViewModel::delete,
-                            onMoveQuickPhraseUp = quickPhraseViewModel::moveUp,
-                            onMoveQuickPhraseDown = quickPhraseViewModel::moveDown,
-                            onMessageChange = viewModel::updateDraftMessage,
-                            onAddAttachment = viewModel::addDraftAttachment,
-                            onRemoveAttachment = viewModel::removeDraftAttachment,
-                            onInputError = viewModel::reportInputError,
-                            onOpenOptions = {
-                                viewModel.loadModels()
-                                showTurnOptions = true
-                            },
-                            onCommand = { command ->
-                                when (command) {
-                                    ComposerCommand.GOAL -> dialog = ChatDialog.Goal
-                                    ComposerCommand.REVIEW -> dialog = ChatDialog.Review
-                                    ComposerCommand.COMPACT -> viewModel.compact()
-                                    else -> Unit
+                        conversation.parentThreadId?.let { parentThreadId ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    if (conversation.isViewOnly) "子代理由父会话控制" else "子代理会话",
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                TextButton(onClick = { onOpenRelatedConversation(parentThreadId) }) {
+                                    Text("返回父会话")
                                 }
-                            },
-                            onSend = {
-                                pagingController.onSubmission()
-                                viewModel.sendDraft()
-                            },
-                            onSendQuickPhrase = { content ->
-                                pagingController.onSubmission()
-                                viewModel.sendQuickPhrase(content)
-                            },
-                            onStop = viewModel::interrupt,
-                            backgroundCommands = conversation.backgroundTerminals,
-                            backgroundCommandsError = conversation.backgroundTerminalsError,
-                            terminatingBackgroundProcessIds = state.terminatingBackgroundProcessIds,
-                            onTerminateBackgroundCommand = viewModel::terminateBackgroundCommand,
-                        )
+                            }
+                        }
+                        if (conversation.isViewOnly && conversation.parentThreadId == null) {
+                            Text(
+                                "此会话当前仅可查看",
+                                modifier = Modifier.padding(16.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        if (!conversation.isViewOnly) {
+                            ConversationComposer(
+                                serverId = conversation.serverId,
+                                conversationId = conversation.threadId,
+                                shellTarget = ShellCommandTarget(conversation.serverName, conversation.cwd),
+                                isRunning = conversation.isRunning,
+                                plan = conversation.plan,
+                                activeTurnId = conversation.activeTurnId,
+                                message = state.draft.message,
+                                attachments = state.draft.attachments,
+                                modelLabel = composerModelLabel(
+                                    model = state.draft.options.model,
+                                    reasoningEffort = state.draft.options.reasoningEffort,
+                                    models = models,
+                                ),
+                                resources = state.inputResources,
+                                quickPhrases = quickPhraseState.phrases,
+                                isLoadingResources = state.isLoadingResources,
+                                isSending = state.isSendingDraft,
+                                sendEnabled = state.connectionStatus is ConnectionStatus.Connected,
+                                placeholder = when {
+                                    state.connectionStatus !is ConnectionStatus.Connected -> "服务器已断开"
+                                    conversation.isRunning -> "继续对话"
+                                    else -> "向 Codex 发送消息"
+                                },
+                                commands = ComposerCommand.entries,
+                                onLoadResources = viewModel::loadInputResources,
+                                onAddQuickPhrase = quickPhraseViewModel::add,
+                                onUpdateQuickPhrase = quickPhraseViewModel::update,
+                                onDeleteQuickPhrase = quickPhraseViewModel::delete,
+                                onMoveQuickPhraseUp = quickPhraseViewModel::moveUp,
+                                onMoveQuickPhraseDown = quickPhraseViewModel::moveDown,
+                                onMessageChange = viewModel::updateDraftMessage,
+                                onAddAttachment = viewModel::addDraftAttachment,
+                                onRemoveAttachment = viewModel::removeDraftAttachment,
+                                onInputError = viewModel::reportInputError,
+                                onOpenOptions = {
+                                    viewModel.loadModels()
+                                    showTurnOptions = true
+                                },
+                                onCommand = { command ->
+                                    when (command) {
+                                        ComposerCommand.GOAL -> dialog = ChatDialog.Goal
+                                        ComposerCommand.REVIEW -> dialog = ChatDialog.Review
+                                        ComposerCommand.COMPACT -> viewModel.compact()
+                                        else -> Unit
+                                    }
+                                },
+                                onSend = {
+                                    pagingController.onSubmission()
+                                    viewModel.sendDraft()
+                                },
+                                onSendQuickPhrase = { content ->
+                                    pagingController.onSubmission()
+                                    viewModel.sendQuickPhrase(content)
+                                },
+                                onStop = viewModel::interrupt,
+                                backgroundCommands = conversation.backgroundTerminals,
+                                backgroundCommandsError = conversation.backgroundTerminalsError,
+                                terminatingBackgroundProcessIds = state.terminatingBackgroundProcessIds,
+                                onTerminateBackgroundCommand = viewModel::terminateBackgroundCommand,
+                            )
+                        }
                     }
                 }
             }
@@ -766,7 +793,7 @@ fun ChatScreen(
                 null
             } else {
                 ActivityDetailsActions(
-                    isRunning = conversation.isRunning,
+                    isRunning = conversation.isRunning && !conversation.isViewOnly,
                     pendingRequest = conversation.pendingRequests.firstOrNull(),
                     pendingRequestCount = conversation.pendingRequests.size,
                     onStop = viewModel::interrupt,
@@ -777,6 +804,10 @@ fun ChatScreen(
             onOpenRemoteFile = { remoteFileTarget = it },
             onLinkError = showLinkError,
             onOpenRemotePath = openRemotePath,
+            onOpenConversation = { threadId ->
+                activityDetailsRowKey = null
+                onOpenRelatedConversation(threadId)
+            },
             onDismiss = { activityDetailsRowKey = null },
         )
     }
@@ -935,7 +966,13 @@ internal fun ConversationFloatingHeader(
     var actionsExpanded by remember { mutableStateOf(false) }
     var statisticsExpanded by remember(conversation?.threadId) { mutableStateOf(false) }
     val headerTitle = conversation?.title ?: newConversationTitle
-    val headerSubtitle = conversation?.let { projectName(it.cwd) } ?: newConversationSubtitle
+    val headerSubtitle = conversation?.let {
+        if (it.parentThreadId != null) {
+            listOfNotNull("子代理", it.agentNickname, it.agentRole).joinToString(" · ")
+        } else {
+            projectName(it.cwd)
+        }
+    } ?: newConversationSubtitle
     Box(
         modifier
             .fillMaxWidth()
@@ -1034,14 +1071,16 @@ internal fun ConversationFloatingHeader(
                                         actions.onFork()
                                     },
                                 )
-                                ChatActionMenuItem(
-                                    text = "目标管理",
-                                    icon = { Icon(Icons.Rounded.Flag, contentDescription = null) },
-                                    onClick = {
-                                        actionsExpanded = false
-                                        actions.onOpenGoal()
-                                    },
-                                )
+                                if (conversation?.isViewOnly != true) {
+                                    ChatActionMenuItem(
+                                        text = "目标管理",
+                                        icon = { Icon(Icons.Rounded.Flag, contentDescription = null) },
+                                        onClick = {
+                                            actionsExpanded = false
+                                            actions.onOpenGoal()
+                                        },
+                                    )
+                                }
                                 ChatActionMenuItem(
                                     text = "对话统计",
                                     icon = { Icon(Icons.Rounded.BarChart, contentDescription = null) },
@@ -1220,6 +1259,7 @@ private fun UserShellCommand(
 
         ActivityStatus.IN_PROGRESS,
         ActivityStatus.COMPLETED,
+        ActivityStatus.INTERRUPTED,
         -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     Surface(
@@ -1254,6 +1294,7 @@ private fun UserShellCommand(
                             ActivityStatus.COMPLETED -> "已完成"
                             ActivityStatus.FAILED -> "失败"
                             ActivityStatus.DECLINED -> "已取消"
+                            ActivityStatus.INTERRUPTED -> "已中断"
                             ActivityStatus.IN_PROGRESS -> error("已处理进行中状态")
                         },
                         style = MaterialTheme.typography.labelMedium,

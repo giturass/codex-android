@@ -234,6 +234,7 @@ class ChatViewModel(
 
     fun sendDraft() {
         val current = mutableState.value
+        if (current.conversation?.isViewOnly == true) return
         if (current.isSendingDraft || current.connectionStatus !is ConnectionStatus.Connected) return
         val draft = current.draft
         if (isShellCommandInput(draft.message)) {
@@ -269,6 +270,7 @@ class ChatViewModel(
 
     fun sendQuickPhrase(content: String) {
         val current = mutableState.value
+        if (current.conversation?.isViewOnly == true) return
         if (current.isSendingDraft || current.connectionStatus !is ConnectionStatus.Connected) return
         val input = quickPhraseInput(content)
         mutableState.update { it.copy(isSendingDraft = true, screenError = null) }
@@ -315,6 +317,10 @@ class ChatViewModel(
 
     suspend fun runShellCommand(command: String): Boolean {
         val current = mutableState.value
+        if (current.conversation?.isViewOnly == true) {
+            showError(IllegalStateException("此会话当前仅可查看"))
+            return false
+        }
         if (current.connectionStatus !is ConnectionStatus.Connected) {
             showError(IllegalStateException("服务器已断开"))
             return false
@@ -338,6 +344,7 @@ class ChatViewModel(
         repository.downloadRemoteFile(serverId, path, output)
 
     fun compact() {
+        if (mutableState.value.conversation?.isViewOnly == true) return
         viewModelScope.launch {
             runSuspendCatching { repository.compactConversation(serverId, threadId) }
                 .onFailure(::showError)
@@ -380,6 +387,7 @@ class ChatViewModel(
     }
 
     fun review(target: ReviewTarget, delivery: ReviewDelivery) {
+        if (mutableState.value.conversation?.isViewOnly == true) return
         viewModelScope.launch {
             runSuspendCatching { repository.reviewConversation(serverId, threadId, target, delivery) }
                 .onSuccess { reviewThreadId ->
@@ -390,6 +398,7 @@ class ChatViewModel(
     }
 
     fun setGoal(objective: String, status: ThreadGoalStatus, tokenBudget: Long?) {
+        if (mutableState.value.conversation?.isViewOnly == true) return
         viewModelScope.launch {
             runSuspendCatching { repository.setGoal(serverId, threadId, objective, status, tokenBudget) }
                 .onSuccess { goal -> mutableState.update { it.copy(goal = goal) } }
@@ -398,6 +407,7 @@ class ChatViewModel(
     }
 
     fun clearGoal() {
+        if (mutableState.value.conversation?.isViewOnly == true) return
         viewModelScope.launch {
             runSuspendCatching { repository.clearGoal(serverId, threadId) }
                 .onSuccess { mutableState.update { it.copy(goal = null) } }

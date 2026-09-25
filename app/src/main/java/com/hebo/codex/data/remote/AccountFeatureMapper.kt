@@ -28,11 +28,16 @@ internal object AccountFeatureMapper {
         "pro" -> AccountPlan.PRO
         "prolite" -> AccountPlan.PRO_LITE
         "team" -> AccountPlan.TEAM
+        "self_serve_business_prolite" -> AccountPlan.SELF_SERVE_BUSINESS_PRO_LITE
         "self_serve_business_usage_based" -> AccountPlan.BUSINESS_USAGE_BASED
         "business" -> AccountPlan.BUSINESS
+        "ent26" -> AccountPlan.ENT26
+        "enterprise_cbp_automation" -> AccountPlan.ENTERPRISE_CBP_AUTOMATION
         "enterprise_cbp_usage_based" -> AccountPlan.ENTERPRISE_USAGE_BASED
         "enterprise" -> AccountPlan.ENTERPRISE
         "edu" -> AccountPlan.EDUCATION
+        "edu_plus" -> AccountPlan.EDUCATION_PLUS
+        "edu_pro" -> AccountPlan.EDUCATION_PRO
         "unknown" -> AccountPlan.UNKNOWN
         else -> throw ProtocolException("未知账号计划：$value")
     }

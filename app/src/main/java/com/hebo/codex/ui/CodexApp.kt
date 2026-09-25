@@ -419,6 +419,20 @@ fun CodexApp(
                             onOpenConversation = { threadId, announcement ->
                                 openConversation(route.serverId, threadId, announcement)
                             },
+                            onOpenRelatedConversation = { threadId ->
+                                if (threadId != route.threadId) {
+                                    val previous = navController.previousBackStackEntry?.arguments
+                                    if (previous?.getString("serverId") == route.serverId &&
+                                        previous.getString("threadId") == threadId
+                                    ) {
+                                        navController.popBackStack()
+                                    } else {
+                                        navController.navigate(ChatRoute(route.serverId, threadId)) {
+                                            launchSingleTop = true
+                                        }
+                                    }
+                                }
+                            },
                             onRefreshRateLimits = { rateLimitsViewModel.refresh(route.serverId) },
                             onConsumeRateLimitReset = { creditId ->
                                 rateLimitsViewModel.consumeRateLimitReset(route.serverId, creditId)

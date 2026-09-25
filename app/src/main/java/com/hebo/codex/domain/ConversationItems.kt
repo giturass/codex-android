@@ -104,6 +104,10 @@ internal fun ConversationState.withRefreshedConversation(
         serverName = merged.serverName,
         title = merged.title,
         cwd = merged.cwd,
+        parentThreadId = merged.parentThreadId,
+        agentNickname = merged.agentNickname,
+        agentRole = merged.agentRole,
+        canAcceptDirectInput = merged.canAcceptDirectInput,
         history = merged.history,
         activeItemKeys = merged.activeItemKeys,
         activeTurnId = merged.activeTurnId,
@@ -124,6 +128,8 @@ internal val ConversationItem.usesTransientActivityState: Boolean
         is ConversationItem.UserShellCommand,
         is ConversationItem.FileChange,
         is ConversationItem.Activity,
+        is ConversationItem.AgentCollaboration,
+        is ConversationItem.SubAgentActivity,
         -> false
     }
 

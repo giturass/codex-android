@@ -9,6 +9,13 @@
     <string name="common_server_default">服务器默认</string>
 
     <string name="message_attachment_image">图片</string>
+    <string name="message_attachment_audio">音频</string>
+    <string name="message_attachment_server_audio">服务端音频 · %1$s</string>
+    <string name="account_plan_self_serve_business_pro_lite">self_serve_business_prolite</string>
+    <string name="account_plan_ent26">ent26</string>
+    <string name="account_plan_enterprise_cbp_automation">enterprise_cbp_automation</string>
+    <string name="account_plan_education_plus">edu_plus</string>
+    <string name="account_plan_education_pro">edu_pro</string>
     <string name="message_attachment_server_image">服务端图片 · %1$s</string>
     <string name="message_attachment_skill">Skill · %1$s</string>
     <string name="message_attachment_mention">提及 · %1$s</string>

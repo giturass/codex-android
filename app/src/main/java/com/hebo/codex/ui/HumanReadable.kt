@@ -100,11 +100,16 @@ val AccountPlan.displayLabelRes: Int
         AccountPlan.PRO -> R.string.account_plan_pro
         AccountPlan.PRO_LITE -> R.string.account_plan_pro_lite
         AccountPlan.TEAM -> R.string.account_plan_team
+        AccountPlan.SELF_SERVE_BUSINESS_PRO_LITE -> R.string.account_plan_self_serve_business_pro_lite
         AccountPlan.BUSINESS_USAGE_BASED -> R.string.account_plan_business_usage_based
         AccountPlan.BUSINESS -> R.string.account_plan_business
+        AccountPlan.ENT26 -> R.string.account_plan_ent26
+        AccountPlan.ENTERPRISE_CBP_AUTOMATION -> R.string.account_plan_enterprise_cbp_automation
         AccountPlan.ENTERPRISE_USAGE_BASED -> R.string.account_plan_enterprise_usage_based
         AccountPlan.ENTERPRISE -> R.string.account_plan_enterprise
         AccountPlan.EDUCATION -> R.string.account_plan_education
+        AccountPlan.EDUCATION_PLUS -> R.string.account_plan_education_plus
+        AccountPlan.EDUCATION_PRO -> R.string.account_plan_education_pro
         AccountPlan.UNKNOWN -> R.string.account_plan_unknown
     }
 

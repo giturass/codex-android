@@ -516,7 +516,7 @@ class ProtocolMapperTest {
         }
         assertThrows(ProtocolException::class.java) {
             ProtocolMapper.requestedPermissions(
-                json.parseToJsonElement("""{"network":null}""").jsonObject,
+                json.parseToJsonElement("""{"network":true}""").jsonObject,
             )
         }
     }

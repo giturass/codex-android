@@ -3,6 +3,10 @@ package com.hebo.codex.data.remote
 import com.hebo.codex.domain.ActivityKind
 import com.hebo.codex.domain.ActivityStatus
 import com.hebo.codex.domain.AgentMessagePhase
+import com.hebo.codex.domain.AgentTool
+import com.hebo.codex.domain.AgentState
+import com.hebo.codex.domain.AgentStatus
+import com.hebo.codex.domain.SubAgentActivityKind
 import com.hebo.codex.domain.ApprovalType
 import com.hebo.codex.domain.BackgroundTerminal
 import com.hebo.codex.domain.ChangedFile
@@ -107,6 +111,9 @@ object ProtocolMapper {
             ephemeral = thread.optionalBoolean("ephemeral") ?: false,
             modelProvider = thread.optionalString("modelProvider").orEmpty(),
             source = thread["source"].compactText(),
+            agentNickname = thread.optionalString("agentNickname"),
+            agentRole = thread.optionalString("agentRole"),
+            canAcceptDirectInput = thread.optionalBoolean("canAcceptDirectInput"),
         )
     }
 
@@ -608,8 +615,8 @@ object ProtocolMapper {
         }
 
     fun requestedPermissions(value: JsonObject): RequestedPermissions = RequestedPermissions(
-        networkEnabled = value.requiredNullableObject("network")?.optionalBoolean("enabled"),
-        fileSystem = value.requiredNullableObject("fileSystem")?.toRequestedFileSystemPermissions(),
+        networkEnabled = value.optionalObject("network")?.optionalBoolean("enabled"),
+        fileSystem = value.optionalObject("fileSystem")?.toRequestedFileSystemPermissions(),
         responseJson = value.toString(),
     )
 
@@ -671,13 +678,23 @@ object ProtocolMapper {
                 technicalDetails = item.compactText(),
             )
 
-            "collabAgentToolCall" -> genericActivity(
-                item = item,
+            "collabAgentToolCall" -> ConversationItem.AgentCollaboration(
+                id = id,
                 turnId = turnId,
-                kind = ActivityKind.COLLAB_AGENT,
-                title = collabActivityTitle(item.requiredString("tool")),
-                summary = item.optionalString("prompt"),
-                technicalDetails = item.compactText(),
+                tool = agentTool(item.requiredString("tool")),
+                status = activityStatus(item.requiredString("status")),
+                senderThreadId = item.requiredString("senderThreadId"),
+                receiverThreadIds = item.requiredArray("receiverThreadIds").map { it.jsonPrimitive.content },
+                prompt = item.optionalString("prompt"),
+                model = item.optionalString("model"),
+                reasoningEffort = item.optionalString("reasoningEffort"),
+                agentsStates = item.requiredObject("agentsStates").mapValues { (_, value) ->
+                    val state = value.jsonObject
+                    AgentState(
+                        status = agentStatus(state.requiredString("status")),
+                        message = state.optionalString("message"),
+                    )
+                },
             )
 
             "webSearch" -> genericActivity(
@@ -717,13 +734,12 @@ object ProtocolMapper {
                 technicalDetails = item.compactText(),
             )
 
-            "subAgentActivity" -> genericActivity(
-                item = item,
+            "subAgentActivity" -> ConversationItem.SubAgentActivity(
+                id = id,
                 turnId = turnId,
-                kind = ActivityKind.SUB_AGENT,
-                title = subAgentActivityTitle(item.requiredString("kind")),
-                summary = item.requiredString("agentPath"),
-                technicalDetails = item.compactText(),
+                kind = subAgentActivityKind(item.requiredString("kind")),
+                agentThreadId = item.requiredString("agentThreadId"),
+                agentPath = item.requiredString("agentPath"),
             )
 
             "imageView" -> genericActivity(
@@ -824,8 +840,15 @@ object ProtocolMapper {
         val value = input.jsonObject
         return when (value.requiredString("type")) {
             "text" -> UserMessagePart.Text(value.requiredString("text"))
-            "image" -> UserMessagePart.Image(value.requiredString("url"))
+            "image" -> {
+                val url = value.optionalString("url")
+                val fileId = value.optionalString("fileId")
+                if (url == null && fileId == null) throw ProtocolException("图片缺少 url 或 fileId")
+                UserMessagePart.Image(url = url, fileId = fileId)
+            }
             "localImage" -> UserMessagePart.LocalImage(value.requiredString("path"))
+            "audio" -> UserMessagePart.Audio(value.requiredString("url"))
+            "localAudio" -> UserMessagePart.LocalAudio(value.requiredString("path"))
             "skill" -> UserMessagePart.Skill(value.requiredString("name"), value.requiredString("path"))
             "mention" -> UserMessagePart.Mention(value.requiredString("name"), value.requiredString("path"))
             else -> throw ProtocolException("未知用户输入类型：${value.requiredString("type")}")
@@ -889,6 +912,7 @@ object ProtocolMapper {
     private fun activityStatus(value: String?): ActivityStatus = when (value) {
         "inProgress" -> ActivityStatus.IN_PROGRESS
         "completed" -> ActivityStatus.COMPLETED
+        "interrupted" -> ActivityStatus.INTERRUPTED
         "failed" -> ActivityStatus.FAILED
         "declined" -> ActivityStatus.DECLINED
         null -> ActivityStatus.COMPLETED
@@ -931,19 +955,35 @@ object ProtocolMapper {
         else -> throw ProtocolException("未知 turn 状态：$this")
     }
 
-    private fun collabActivityTitle(tool: String): String = when (tool) {
-        "spawnAgent" -> "创建协作代理"
-        "sendInput" -> "向协作代理发送消息"
-        "resumeAgent" -> "恢复协作代理"
-        "wait" -> "等待协作代理"
-        "closeAgent" -> "关闭协作代理"
+    private fun agentTool(tool: String): AgentTool = when (tool) {
+        "spawnAgent" -> AgentTool.SPAWN
+        "sendInput" -> AgentTool.SEND_INPUT
+        "resumeAgent" -> AgentTool.RESUME
+        "wait" -> AgentTool.WAIT
+        "closeAgent" -> AgentTool.CLOSE
+        "sendMessage" -> AgentTool.SEND_MESSAGE
+        "followupTask" -> AgentTool.FOLLOWUP_TASK
+        "interruptAgent" -> AgentTool.INTERRUPT
+        "listAgents" -> AgentTool.LIST
         else -> throw ProtocolException("未知协作代理操作：$tool")
     }
 
-    private fun subAgentActivityTitle(kind: String): String = when (kind) {
-        "started" -> "子代理已启动"
-        "interacted" -> "子代理正在交互"
-        "interrupted" -> "子代理已中断"
+    private fun agentStatus(status: String): AgentStatus = when (status) {
+        "pendingInit" -> AgentStatus.PENDING_INIT
+        "running" -> AgentStatus.RUNNING
+        "interrupted" -> AgentStatus.INTERRUPTED
+        "completed" -> AgentStatus.COMPLETED
+        "errored" -> AgentStatus.ERRORED
+        "shutdown" -> AgentStatus.SHUTDOWN
+        "notFound" -> AgentStatus.NOT_FOUND
+        else -> throw ProtocolException("未知子代理状态：$status")
+    }
+
+    private fun subAgentActivityKind(kind: String): SubAgentActivityKind = when (kind) {
+        "started" -> SubAgentActivityKind.STARTED
+        "interacted" -> SubAgentActivityKind.INTERACTED
+        "interrupted" -> SubAgentActivityKind.INTERRUPTED
+        "completed" -> SubAgentActivityKind.COMPLETED
         else -> throw ProtocolException("未知子代理活动：$kind")
     }
 
@@ -1019,9 +1059,8 @@ internal fun JsonObject.requiredBoolean(name: String): Boolean =
 internal fun JsonObject.requiredObject(name: String): JsonObject =
     this[name] as? JsonObject ?: throw ProtocolException("协议字段 $name 缺失或不是对象")
 
-internal fun JsonObject.requiredNullableObject(name: String): JsonObject? = when (val value = this[name]) {
-    null -> throw ProtocolException("协议字段 $name 缺失")
-    JsonNull -> null
+internal fun JsonObject.optionalObject(name: String): JsonObject? = when (val value = this[name]) {
+    null, JsonNull -> null
     is JsonObject -> value
     else -> throw ProtocolException("协议字段 $name 不是对象或 null")
 }
@@ -1030,7 +1069,7 @@ internal fun JsonObject.requiredArray(name: String): JsonArray =
     this[name] as? JsonArray ?: throw ProtocolException("协议字段 $name 缺失或不是数组")
 
 private fun JsonObject.stringArray(name: String): List<String> =
-    requiredArray(name).map { it.jsonPrimitive.content }
+    if (containsKey(name)) requiredArray(name).map { it.jsonPrimitive.content } else emptyList()
 
 private fun JsonElement?.compactText(): String = when (this) {
     null, JsonNull -> ""

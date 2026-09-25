@@ -16,6 +16,28 @@ class AccountFeatureMapperTest {
     private val json = Json
 
     @Test
+    fun preservesNewPlanTypesWhenReadingRateLimits() {
+        val plans = mapOf(
+            "self_serve_business_prolite" to AccountPlan.SELF_SERVE_BUSINESS_PRO_LITE,
+            "ent26" to AccountPlan.ENT26,
+            "enterprise_cbp_automation" to AccountPlan.ENTERPRISE_CBP_AUTOMATION,
+            "edu_plus" to AccountPlan.EDUCATION_PLUS,
+            "edu_pro" to AccountPlan.EDUCATION_PRO,
+        )
+
+        plans.forEach { (wireValue, expectedPlan) ->
+            val response = json.parseToJsonElement(
+                """{"rateLimits":{"planType":"$wireValue","primary":{"usedPercent":25}}}""",
+            ).jsonObject
+
+            val limit = AccountFeatureMapper.rateLimits(response).limits.single()
+
+            assertEquals(expectedPlan, limit.planType)
+            assertEquals(25.0, requireNotNull(limit.primary).usedPercent, 0.0)
+        }
+    }
+
+    @Test
     fun mapsEveryHumanReadableRateLimitField() {
         val response = json.parseToJsonElement(
             """
