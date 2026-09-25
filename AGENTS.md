@@ -4,6 +4,11 @@
 - Codex 桌面端项目位于 `../codex-desktop-linux`
 - Codex 端及 `app-server` 协议仅供参考，禁止修改
 
+# app-server 协议
+
+- 更新协议时，以当前环境 Codex CLI 导出的 JSON Schema 为准，先用 `codex --version` 记录版本，再执行 `codex app-server generate-json-schema --experimental --out <临时目录>`，临时目录必须位于 `/tmp`
+- 根据 Schema 核对并更新本项目的请求参数、响应与通知映射、业务模型及相关测试，方法名与方向以聚合 Schema 中的 `ClientRequest`、`ServerRequest`、`ClientNotification` 和 `ServerNotification` 为准
+
 # 开发原则
 
 - 修改时不考虑向后兼容或添加兜底机制，应从长期可维护性和演进方向出发
