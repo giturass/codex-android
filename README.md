@@ -118,7 +118,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 - Coroutines 与 StateFlow
 - Room 与 DataStore Preferences
 - Android Keystore AES-GCM
-- OkHttp WebSocket
+- Java-WebSocket
 - kotlinx.serialization JSON
 
 ## 工程结构
