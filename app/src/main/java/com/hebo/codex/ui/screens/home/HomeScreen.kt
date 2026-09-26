@@ -80,9 +80,7 @@ import com.hebo.codex.domain.UserInputPart
 import com.hebo.codex.domain.projectName
 import com.hebo.codex.ui.displayDescriptionRes
 import com.hebo.codex.ui.displayLabelRes
-import com.hebo.codex.ui.components.ConnectionNotice
-import com.hebo.codex.ui.components.InlineNoticeHost
-import com.hebo.codex.ui.components.rememberNoticeHostState
+import com.hebo.codex.ui.components.NoticeHostState
 import com.hebo.codex.ui.components.OptionChipRow
 import com.hebo.codex.ui.components.SettingDescription
 import com.hebo.codex.ui.components.navigationAttention
@@ -113,6 +111,7 @@ internal fun nextProjectOptionLimit(currentLimit: Int, loadedProjectCount: Int):
 @Composable
 fun HomeScreen(
     viewModel: HomeViewModel,
+    noticeState: NoticeHostState,
     newTaskViewModel: NewTaskViewModel,
     quickPhraseViewModel: QuickPhraseViewModel,
     rateLimitsState: RateLimitsUiState,
@@ -127,7 +126,6 @@ fun HomeScreen(
     val newTaskState by newTaskViewModel.state.collectAsStateWithLifecycle()
     val quickPhraseState by quickPhraseViewModel.state.collectAsStateWithLifecycle()
     val activeServer = state.activeServer
-    val noticeState = rememberNoticeHostState(state.activeServerId)
     var showProjectMenu by remember { mutableStateOf(false) }
     var showCustomPathDialog by remember { mutableStateOf(false) }
     var showOptions by remember { mutableStateOf(false) }
@@ -174,41 +172,32 @@ fun HomeScreen(
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
-            Column {
-                if (activeServer == null) {
-                    TopAppBar(
-                        title = { Text("新建任务") },
-                        navigationIcon = {
-                            IconButton(onClick = onToggleNavigation) {
-                                Icon(
-                                    Icons.Rounded.Menu,
-                                    contentDescription = if (navigationOpen) "收起导航" else "打开导航",
-                                )
-                            }
-                        },
-                    )
-                } else {
-                    ConversationFloatingHeader(
-                        conversation = null,
-                        newConversationTitle = "新建任务",
-                        newConversationSubtitle = if (newTaskState.cwd.isBlank()) "选择项目" else projectName(newTaskState.cwd),
-                        rateLimitsState = rateLimitsState,
-                        navigationAttention = navigationAttention(state.threadAttention),
-                        navigationOpen = navigationOpen,
-                        onToggleNavigation = onToggleNavigation,
-                        onOpenAttention = onOpenConversation,
-                        actions = null,
-                        onRefreshRateLimits = onRefreshRateLimits,
-                        onConsumeRateLimitReset = onConsumeRateLimitReset,
-                    )
-                    if (!navigationOpen) {
-                        ConnectionNotice(
-                            status = state.connectionStatuses[activeServer.id] ?: ConnectionStatus.Disconnected,
-                            onReconnect = { viewModel.reconnectServer(activeServer.id) },
-                        )
-                    }
-                }
-                InlineNoticeHost(noticeState)
+            if (activeServer == null) {
+                TopAppBar(
+                    title = { Text("新建任务") },
+                    navigationIcon = {
+                        IconButton(onClick = onToggleNavigation) {
+                            Icon(
+                                Icons.Rounded.Menu,
+                                contentDescription = if (navigationOpen) "收起导航" else "打开导航",
+                            )
+                        }
+                    },
+                )
+            } else {
+                ConversationFloatingHeader(
+                    conversation = null,
+                    newConversationTitle = "新建任务",
+                    newConversationSubtitle = if (newTaskState.cwd.isBlank()) "选择项目" else projectName(newTaskState.cwd),
+                    rateLimitsState = rateLimitsState,
+                    navigationAttention = navigationAttention(state.threadAttention),
+                    navigationOpen = navigationOpen,
+                    onToggleNavigation = onToggleNavigation,
+                    onOpenAttention = onOpenConversation,
+                    actions = null,
+                    onRefreshRateLimits = onRefreshRateLimits,
+                    onConsumeRateLimitReset = onConsumeRateLimitReset,
+                )
             }
         },
     ) { padding ->

@@ -123,7 +123,12 @@ fun rememberNoticeHostState(vararg inputs: Any?): NoticeHostState =
     rememberSaveable(*inputs, saver = NoticeHostState.Saver) { NoticeHostState() }
 
 @Composable
-fun InlineNoticeHost(state: NoticeHostState, modifier: Modifier = Modifier) {
+fun InlineNoticeHost(
+    state: NoticeHostState,
+    connectionStatus: ConnectionStatus?,
+    onReconnect: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val notice = state.current
     val recent = state.recent
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -163,8 +168,13 @@ fun InlineNoticeHost(state: NoticeHostState, modifier: Modifier = Modifier) {
                     if (notice.isError || notice.technicalDetails != null) {
                         TextButton(onClick = { showDetails(notice) }) { Text(stringResource(R.string.common_details)) }
                     }
+                    if (connectionStatus == ConnectionStatus.Disconnected || connectionStatus is ConnectionStatus.Failed) {
+                        TextButton(onClick = onReconnect) { Text("重连") }
+                    }
                 },
             )
+        } else if (connectionStatus != null && connectionStatus != ConnectionStatus.Connected) {
+            ConnectionNotice(connectionStatus, onReconnect)
         } else if (recent != null) {
             TextButton(
                 onClick = { showDetails(recent) },
@@ -197,7 +207,7 @@ fun InlineNoticeHost(state: NoticeHostState, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun ConnectionNotice(
+private fun ConnectionNotice(
     status: ConnectionStatus,
     onReconnect: () -> Unit,
     modifier: Modifier = Modifier,

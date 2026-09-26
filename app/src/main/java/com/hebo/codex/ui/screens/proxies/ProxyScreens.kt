@@ -69,18 +69,17 @@ import com.hebo.codex.domain.Socks5DnsResolution
 import com.hebo.codex.domain.SshAuthentication
 import com.hebo.codex.domain.addressSummary
 import com.hebo.codex.domain.typeLabel
-import com.hebo.codex.ui.components.InlineNoticeHost
-import com.hebo.codex.ui.components.rememberNoticeHostState
+import com.hebo.codex.ui.components.NoticeHostState
 
 @Composable
 fun ProxyListScreen(
     viewModel: ProxyListViewModel,
+    noticeState: NoticeHostState,
     onBack: () -> Unit,
     onAdd: () -> Unit,
     onEdit: (String) -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val noticeState = rememberNoticeHostState()
     var deleting by remember { mutableStateOf<ProxyProfile?>(null) }
 
     LaunchedEffect(state.errorMessage) {
@@ -92,17 +91,14 @@ fun ProxyListScreen(
 
     Scaffold(
         topBar = {
-            Column {
-                TopAppBar(
-                    title = { Text("代理") },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
-                        }
-                    },
-                )
-                InlineNoticeHost(noticeState)
-            }
+            TopAppBar(
+                title = { Text("代理") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
+                    }
+                },
+            )
         },
         floatingActionButton = {
             FloatingActionButton(onClick = onAdd) {
@@ -185,11 +181,11 @@ fun ProxyListScreen(
 @Composable
 fun ProxyEditorScreen(
     viewModel: ProxyEditorViewModel,
+    noticeState: NoticeHostState,
     onBack: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val noticeState = rememberNoticeHostState()
     var showCredential by rememberSaveable { mutableStateOf(false) }
     val privateKeyLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -217,17 +213,14 @@ fun ProxyEditorScreen(
 
     Scaffold(
         topBar = {
-            Column {
-                TopAppBar(
-                    title = { Text(if (state.isEditing) "编辑代理" else "添加代理") },
-                    navigationIcon = {
-                        IconButton(onClick = onBack, enabled = !state.isBusy) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
-                        }
-                    },
-                )
-                InlineNoticeHost(noticeState)
-            }
+            TopAppBar(
+                title = { Text(if (state.isEditing) "编辑代理" else "添加代理") },
+                navigationIcon = {
+                    IconButton(onClick = onBack, enabled = !state.isBusy) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
+                    }
+                },
+            )
         },
     ) { padding ->
         if (state.isLoading) {

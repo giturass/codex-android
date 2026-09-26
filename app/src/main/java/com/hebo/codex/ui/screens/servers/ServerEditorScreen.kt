@@ -48,17 +48,16 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hebo.codex.R
 import com.hebo.codex.domain.typeLabel
-import com.hebo.codex.ui.components.InlineNoticeHost
-import com.hebo.codex.ui.components.rememberNoticeHostState
+import com.hebo.codex.ui.components.NoticeHostState
 
 @Composable
 fun ServerEditorScreen(
     viewModel: ServerEditorViewModel,
+    noticeState: NoticeHostState,
     onBack: () -> Unit,
     onManageProxies: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val noticeState = rememberNoticeHostState()
     var showToken by rememberSaveable { mutableStateOf(false) }
     var proxyMenuExpanded by rememberSaveable { mutableStateOf(false) }
 
@@ -79,17 +78,14 @@ fun ServerEditorScreen(
 
     Scaffold(
         topBar = {
-            Column {
-                TopAppBar(
-                    title = { Text(if (state.isEditing) "编辑服务器" else "添加服务器") },
-                    navigationIcon = {
-                        IconButton(onClick = onBack, enabled = !state.isBusy) {
-                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
-                        }
-                    },
-                )
-                InlineNoticeHost(noticeState)
-            }
+            TopAppBar(
+                title = { Text(if (state.isEditing) "编辑服务器" else "添加服务器") },
+                navigationIcon = {
+                    IconButton(onClick = onBack, enabled = !state.isBusy) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
+                    }
+                },
+            )
         },
     ) { padding ->
         if (state.isLoading) {

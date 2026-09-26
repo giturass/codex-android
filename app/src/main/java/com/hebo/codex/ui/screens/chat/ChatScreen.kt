@@ -194,9 +194,7 @@ import com.hebo.codex.ui.components.NavigationAttention
 import com.hebo.codex.ui.components.OptionChipRow
 import com.hebo.codex.ui.components.SettingDescription
 import com.hebo.codex.ui.components.RemainingLinearProgressIndicator
-import com.hebo.codex.ui.components.ConnectionNotice
-import com.hebo.codex.ui.components.InlineNoticeHost
-import com.hebo.codex.ui.components.rememberNoticeHostState
+import com.hebo.codex.ui.components.NoticeHostState
 import com.hebo.codex.ui.quickphrases.QuickPhraseViewModel
 import com.hebo.codex.ui.ratelimits.RateLimitIndicator
 import com.hebo.codex.ui.ratelimits.RateLimitsUiState
@@ -285,13 +283,12 @@ private val ConversationStatisticsPopupWidth = 300.dp
 @Composable
 fun ChatScreen(
     viewModel: ChatViewModel,
+    noticeState: NoticeHostState,
     quickPhraseViewModel: QuickPhraseViewModel,
     initialAnnouncement: String?,
     rateLimitsState: RateLimitsUiState,
     navigationAttention: NavigationAttention?,
     navigationOpen: Boolean,
-    showConnectionNotice: Boolean,
-    onReconnect: () -> Unit,
     onToggleNavigation: () -> Unit,
     onNewTask: (String) -> Unit,
     onOpenConversation: (String, String?) -> Unit,
@@ -316,7 +313,6 @@ fun ChatScreen(
         )
     }
     val forkTurnsById = remember(forkTurns) { forkTurns.associateBy(ForkTurn::turnId) }
-    val noticeState = rememberNoticeHostState(viewModel)
     val hazeState = rememberHazeState()
     val scrollScope = rememberCoroutineScope()
     var bottomControlsHeightPx by remember { mutableStateOf(0) }
@@ -485,10 +481,6 @@ fun ChatScreen(
             onConsumeRateLimitReset = onConsumeRateLimitReset,
             shadowElevation = 1.dp,
         )
-        if (showConnectionNotice) {
-            ConnectionNotice(state.connectionStatus, onReconnect)
-        }
-        InlineNoticeHost(noticeState)
         Box(Modifier.weight(1f)) {
             when {
                 state.isLoading -> Box(

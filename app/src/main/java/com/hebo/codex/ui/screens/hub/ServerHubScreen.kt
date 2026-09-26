@@ -57,13 +57,11 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.hebo.codex.domain.ConnectionStatus
 import com.hebo.codex.domain.FeatureCatalog
 import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.ui.components.ConnectionIndicator
 import com.hebo.codex.ui.components.ExpandableErrorDetails
-import com.hebo.codex.ui.components.InlineNoticeHost
-import com.hebo.codex.ui.components.rememberNoticeHostState
+import com.hebo.codex.ui.components.NoticeHostState
 import com.hebo.codex.ui.components.label
 
 private val TwoPaneThreshold = 760.dp
@@ -71,10 +69,10 @@ private val TwoPaneThreshold = 760.dp
 @Composable
 fun ServerHubScreen(
     viewModel: ServerHubViewModel,
+    noticeState: NoticeHostState,
     onBack: () -> Unit,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val noticeState = rememberNoticeHostState()
     val uriHandler = LocalUriHandler.current
     var dialog by remember { mutableStateOf<HubDialog?>(null) }
     var details by remember { mutableStateOf<FeatureDetails?>(null) }
@@ -103,53 +101,50 @@ fun ServerHubScreen(
 
         Scaffold(
             topBar = {
-                Column {
-                    TopAppBar(
-                        title = {
-                            Column {
-                                Text(if (showDetailBack) selectedSection.title else rootTitle)
-                                if (showDetailBack) {
-                                    Text(
-                                        text = state.scopeSummary(),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                            }
-                        },
-                        navigationIcon = {
-                            IconButton(
-                                onClick = if (showDetailBack) {
-                                    { viewModel.selectSection(null) }
-                                } else {
-                                    onBack
-                                },
-                            ) {
-                                Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
-                            }
-                        },
-                        actions = {
-                            selectedSection?.let { section ->
-                                SectionPrimaryAction(
-                                    section = section,
-                                    projectScoped = projectScoped,
-                                    onDialog = { dialog = it },
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text(if (showDetailBack) selectedSection.title else rootTitle)
+                            if (showDetailBack) {
+                                Text(
+                                    text = state.scopeSummary(),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
-                                IconButton(onClick = { viewModel.refresh(section) }) {
-                                    Icon(Icons.Rounded.Refresh, contentDescription = "刷新${section.title}")
-                                }
                             }
-                            HubOverflowMenu(
-                                selectedSection = selectedSection,
+                        }
+                    },
+                    navigationIcon = {
+                        IconButton(
+                            onClick = if (showDetailBack) {
+                                { viewModel.selectSection(null) }
+                            } else {
+                                onBack
+                            },
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
+                        }
+                    },
+                    actions = {
+                        selectedSection?.let { section ->
+                            SectionPrimaryAction(
+                                section = section,
                                 projectScoped = projectScoped,
                                 onDialog = { dialog = it },
                             )
-                        },
-                    )
-                    InlineNoticeHost(noticeState)
-                }
+                            IconButton(onClick = { viewModel.refresh(section) }) {
+                                Icon(Icons.Rounded.Refresh, contentDescription = "刷新${section.title}")
+                            }
+                        }
+                        HubOverflowMenu(
+                            selectedSection = selectedSection,
+                            projectScoped = projectScoped,
+                            onDialog = { dialog = it },
+                        )
+                    },
+                )
             },
         ) { padding ->
             if (twoPane) {
@@ -357,12 +352,6 @@ private fun ScopeHeader(state: ServerHubUiState, onReconnect: () -> Unit) {
                         Text("重新连接")
                     }
                 }
-            }
-            (state.connectionStatus as? ConnectionStatus.Failed)?.error?.let { error ->
-                ExpandableErrorDetails(
-                    error = error,
-                    modifier = Modifier.fillMaxWidth(),
-                )
             }
         }
     }
