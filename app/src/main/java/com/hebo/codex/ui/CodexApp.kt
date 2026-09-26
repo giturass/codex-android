@@ -1,5 +1,6 @@
 package com.hebo.codex.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.DismissibleNavigationDrawer
 import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
@@ -191,7 +193,9 @@ fun CodexApp(
         homeState.serverNotices.lastOrNull()?.let { noticeState.showMessage(it.message, it.technicalDetails) }
     }
 
-    BoxWithConstraints {
+    BoxWithConstraints(
+        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
+    ) {
         val isWideLayout = maxWidth >= WideDrawerThreshold
         val drawerState = if (isWideLayout) wideDrawerState else modalDrawerState
         val drawerVisible = drawerState.isOpen || drawerState.targetValue == DrawerValue.Open

@@ -116,8 +116,7 @@ internal fun MessageComposer(
         targetExpanded = expansionTransition.targetState,
         isTransitionRunning = expansionTransition.isRunning,
     )
-    val compactContainerColor = MaterialTheme.colorScheme.surfaceContainerLow
-    val expandedContainerColor = MaterialTheme.colorScheme.surfaceContainer
+    val containerColor = MaterialTheme.colorScheme.surfaceContainer
     val compactBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)
     val expandedBorderColor = MaterialTheme.colorScheme.outlineVariant
 
@@ -142,7 +141,7 @@ internal fun MessageComposer(
                         fraction,
                     ).toPx()
                     drawRoundRect(
-                        color = lerpColor(compactContainerColor, expandedContainerColor, fraction),
+                        color = containerColor,
                         cornerRadius = CornerRadius(cornerRadius),
                     )
                     drawContent()

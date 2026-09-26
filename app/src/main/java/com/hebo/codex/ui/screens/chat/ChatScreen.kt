@@ -275,8 +275,7 @@ private const val PLAN_STEP_PROGRESS_FADE_DURATION_MILLIS = 150
 private val ChatPageOverlap = 64.dp
 private val ConversationHeaderItemMinHeight = 48.dp
 private val ConversationHeaderVerticalPadding = 8.dp
-private val ChatTopHazeFadeHeight = 24.dp
-private val ChatBottomHazeFadeHeight = 32.dp
+private val ChatHazeFadeHeight = 32.dp
 private val ChatHazeBlurRadius = 22.dp
 private val ChatHeaderContentSpacing = 48.dp
 private val ChatComposerOverlayMinHeight = 116.dp
@@ -405,8 +404,8 @@ fun ChatScreen(
             bottomSystemPadding = bottomSystemPadding,
         )
     }
-    val topHazeHeight = ChatTopHazeFadeHeight
-    val bottomHazeHeight = bottomControlsHeight + bottomSystemPadding + ChatBottomHazeFadeHeight
+    val topHazeHeight = ChatHazeFadeHeight
+    val bottomHazeHeight = bottomControlsHeight + bottomSystemPadding + ChatHazeFadeHeight
     val hazeBackgroundColor = MaterialTheme.colorScheme.background
     val hazeStyle = remember(hazeBackgroundColor) {
         HazeStyle(
@@ -417,7 +416,7 @@ fun ChatScreen(
         )
     }
     val topHazeMask = remember(density) {
-        val fadeHeightPx = with(density) { ChatTopHazeFadeHeight.toPx() }
+        val fadeHeightPx = with(density) { ChatHazeFadeHeight.toPx() }
         Brush.verticalGradient(
             colors = listOf(Color.Black, Color.Transparent),
             startY = 0f,
@@ -427,7 +426,7 @@ fun ChatScreen(
     val bottomHazeMask = remember(density) {
         Brush.verticalGradient(
             colors = listOf(Color.Transparent, Color.Black),
-            endY = with(density) { ChatBottomHazeFadeHeight.toPx() },
+            endY = with(density) { ChatHazeFadeHeight.toPx() },
         )
     }
     val topContentPaddingPx = with(density) { topContentPadding.roundToPx() }
@@ -984,8 +983,8 @@ internal fun ConversationFloatingHeader(
                 onClick = onToggleNavigation,
                 modifier = Modifier.size(ConversationHeaderItemMinHeight),
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                 shadowElevation = shadowElevation,
             ) {
                 Box(contentAlignment = Alignment.Center) {
@@ -998,8 +997,8 @@ internal fun ConversationFloatingHeader(
                     .fillMaxWidth()
                     .heightIn(min = ConversationHeaderItemMinHeight),
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
                 shadowElevation = shadowElevation,
             ) {
                 Row(
