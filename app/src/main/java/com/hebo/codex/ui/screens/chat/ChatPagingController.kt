@@ -94,7 +94,11 @@ internal fun rememberChatPagingController(
             pageRunwayEnabled = true
         } else {
             retainPageRunway = false
-            if (shouldDock) completionDockRequest++
+            if (shouldDock) {
+                completionDockRequest++
+            } else {
+                pageRunwayEnabled = false
+            }
         }
     }
     LaunchedEffect(conversationId, isRunning, initialListPositioned, liveEdgeIndex) {
@@ -166,8 +170,8 @@ internal fun rememberChatPagingController(
             }
         }
     }
-    LaunchedEffect(completionDockRequest, initialListPositioned, liveEdgeIndex, liveEdgeHeightPx) {
-        if (!initialListPositioned || completionDockRequest == handledCompletionDockRequest) {
+    LaunchedEffect(isRunning, completionDockRequest, initialListPositioned, liveEdgeIndex, liveEdgeHeightPx) {
+        if (isRunning || !initialListPositioned || completionDockRequest == handledCompletionDockRequest) {
             return@LaunchedEffect
         }
         handledCompletionDockRequest = completionDockRequest
@@ -181,8 +185,9 @@ internal fun rememberChatPagingController(
                 scrollOffset = -(readingEndOffset - liveEdgeHeightPx).coerceAtLeast(0),
             )
             showReturnToOutput = false
-            pageRunwayEnabled = false
         } finally {
+            // 完成后即使归位动画被手势或重新布局取消，也必须释放分页留白
+            if (!retainPageRunway) pageRunwayEnabled = false
             completionDockInProgress = false
         }
     }
@@ -240,7 +245,9 @@ internal fun rememberChatPagingController(
     val userScrollConnection = remember(conversationId, listState, liveEdgeIndex, pageOverlapPx) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (source != NestedScrollSource.UserInput || available.y >= 0f) return Offset.Zero
+                if (!pageRunwayEnabled || source != NestedScrollSource.UserInput || available.y >= 0f) {
+                    return Offset.Zero
+                }
                 val position = listState.layoutInfo.chatPagingPosition(liveEdgeIndex)
                 return if (hasReachedChatPageAnchor(position, anchorOffset = pageOverlapPx)) {
                     Offset(x = 0f, y = available.y)
@@ -250,7 +257,7 @@ internal fun rememberChatPagingController(
             }
 
             override suspend fun onPreFling(available: Velocity): Velocity {
-                if (available.y >= 0f) return Velocity.Zero
+                if (!pageRunwayEnabled || available.y >= 0f) return Velocity.Zero
                 val position = listState.layoutInfo.chatPagingPosition(liveEdgeIndex)
                 return if (hasReachedChatPageAnchor(position, anchorOffset = pageOverlapPx)) {
                     available
