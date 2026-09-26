@@ -8,6 +8,24 @@ import org.junit.Test
 
 class ConversationEventsTest {
     @Test
+    fun `新用量和目标与同步标记一起应用且互不清除对方标记`() {
+        val state = conversationState().copy(runtimeStatus = RuntimeStatus().markStale())
+        val breakdown = TokenUsageBreakdown(123, 100, 0, 23, 0)
+        val usage = TokenUsage(breakdown, breakdown, 1000)
+        val used = state.reduceConversationEvent(ConversationEvent.TokenUsageUpdated(usage))
+
+        assertEquals(usage, used.tokenUsage)
+        assertFalse(used.runtimeStatus.tokenUsageStale)
+        assertTrue(used.runtimeStatus.goalStale)
+
+        val goal = ThreadGoal("检查任务", ThreadGoalStatus.ACTIVE, 1000, 100, 10)
+        val updated = used.reduceConversationEvent(ConversationEvent.GoalChanged(goal))
+        assertEquals(goal, updated.goal)
+        assertFalse(updated.runtimeStatus.goalStale)
+        assertTrue(updated.goalLoaded)
+    }
+
+    @Test
     fun `运行状态变化统一清理活动条目`() {
         val state = conversationState().copy(
             activeItemKeys = setOf(ConversationItemKey("turn-1", "item-1")),

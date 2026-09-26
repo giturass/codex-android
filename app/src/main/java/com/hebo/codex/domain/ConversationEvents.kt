@@ -71,8 +71,13 @@ internal fun ConversationState.reduceConversationEvent(
         notices = (notices + event.notice).takeLast(MAX_NOTICES),
     )
 
-    is ConversationEvent.TokenUsageUpdated -> copy(tokenUsage = event.usage)
-    is ConversationEvent.GoalChanged -> withGoal(event.goal, announceGoal)
+    is ConversationEvent.TokenUsageUpdated -> copy(
+        tokenUsage = event.usage,
+        runtimeStatus = runtimeStatus.reduce(RuntimeStatusEvent.TokenUsageSynced),
+    )
+    is ConversationEvent.GoalChanged -> withGoal(event.goal, announceGoal).copy(
+        runtimeStatus = runtimeStatus.reduce(RuntimeStatusEvent.GoalSynced),
+    )
     is ConversationEvent.TurnStarted -> copy(
         history = history.copy(
             turns = history.turns.upsertConversationTurn(

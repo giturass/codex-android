@@ -1,7 +1,5 @@
 package com.hebo.codex.ui.screens.chat
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,11 +8,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ExpandLess
-import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Terminal
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -28,7 +23,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -44,6 +38,7 @@ internal fun BackgroundCommandsPanel(
     error: UserFacingError?,
     terminatingProcessIds: Set<String>,
     onTerminate: (String) -> Unit,
+    canTerminate: Boolean = true,
 ) {
     var expanded by remember { mutableStateOf(false) }
     var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -61,70 +56,35 @@ internal fun BackgroundCommandsPanel(
     }
     if (visibleCommands.isEmpty() && error == null) return
 
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 6.dp),
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-    ) {
-        Column {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(
-                        enabled = visibleCommands.isNotEmpty(),
-                        role = Role.Button,
-                        onClick = { expanded = !expanded },
-                    )
-                    .padding(horizontal = 12.dp, vertical = 9.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Rounded.Terminal, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    if (visibleCommands.isEmpty()) {
-                        requireNotNull(error).summary
-                    } else {
-                        "${visibleCommands.size} 个命令正在后台运行 · ${
-                            formatBackgroundCommandDuration(
-                                visibleCommands.maxOf { nowMillis - it.observedAtMillis },
-                            )
-                        }"
-                    },
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.labelMedium,
+    ComposerAccessoryPanel(
+        title = if (visibleCommands.isEmpty()) {
+            requireNotNull(error).summary
+        } else {
+            "${visibleCommands.size} 个命令正在后台运行 · ${
+                formatBackgroundCommandDuration(
+                    visibleCommands.maxOf { nowMillis - it.observedAtMillis },
                 )
-                if (visibleCommands.isNotEmpty()) {
-                    Icon(
-                        if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                        contentDescription = if (expanded) "收起运行中命令" else "展开运行中命令",
-                    )
-                }
-            }
-            if (expanded) {
-                Column(
-                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    visibleCommands.forEach { command ->
-                        BackgroundCommandRow(
-                            command = command,
-                            durationMillis = nowMillis - command.observedAtMillis,
-                            isTerminating = command.processId in terminatingProcessIds,
-                            onTerminate = { onTerminate(command.processId) },
-                        )
-                    }
-                    error?.let {
-                        Text(
-                            it.summary,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                }
-            }
+            }"
+        },
+        icon = Icons.Rounded.Terminal,
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+    ) {
+        visibleCommands.forEach { command ->
+            BackgroundCommandRow(
+                command = command,
+                durationMillis = nowMillis - command.observedAtMillis,
+                isTerminating = command.processId in terminatingProcessIds,
+                canTerminate = canTerminate,
+                onTerminate = { onTerminate(command.processId) },
+            )
+        }
+        error?.let {
+            Text(
+                it.summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
         }
     }
 }
@@ -134,6 +94,7 @@ private fun BackgroundCommandRow(
     command: BackgroundTerminal,
     durationMillis: Long,
     isTerminating: Boolean,
+    canTerminate: Boolean,
     onTerminate: () -> Unit,
 ) {
     Surface(
@@ -156,7 +117,7 @@ private fun BackgroundCommandRow(
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(8.dp))
                 } else {
-                    TextButton(onClick = onTerminate) {
+                    TextButton(onClick = onTerminate, enabled = canTerminate) {
                         Text("终止")
                     }
                 }

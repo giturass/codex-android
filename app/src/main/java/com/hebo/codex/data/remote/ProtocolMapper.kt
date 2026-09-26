@@ -7,6 +7,7 @@ import com.hebo.codex.domain.AgentTool
 import com.hebo.codex.domain.AgentState
 import com.hebo.codex.domain.AgentStatus
 import com.hebo.codex.domain.SubAgentActivityKind
+import com.hebo.codex.domain.SubAgentEvent
 import com.hebo.codex.domain.ApprovalType
 import com.hebo.codex.domain.BackgroundTerminal
 import com.hebo.codex.domain.ChangedFile
@@ -28,6 +29,7 @@ import com.hebo.codex.domain.NetworkPolicyRuleAction
 import com.hebo.codex.domain.PendingServerRequest
 import com.hebo.codex.domain.ThreadHistoryMode
 import com.hebo.codex.domain.ThreadRuntimeStatus
+import com.hebo.codex.domain.ThreadActiveFlag
 import com.hebo.codex.domain.ThreadSummary
 import com.hebo.codex.domain.TokenUsage
 import com.hebo.codex.domain.TokenUsageBreakdown
@@ -92,6 +94,37 @@ internal data class ProtocolNotification(
 )
 
 object ProtocolMapper {
+    internal fun subAgentEvent(method: String, params: JsonObject): SubAgentEvent? = when (method) {
+        "thread/started" -> SubAgentEvent.Started(threadSummary(params.requiredObject("thread")))
+        "thread/status/changed" -> params.requiredObject("status").let { status ->
+            SubAgentEvent.StatusChanged(
+                params.requiredString("threadId"), status.toThreadStatus(), status.threadActiveFlags(),
+            )
+        }
+        "thread/closed", "thread/deleted" -> SubAgentEvent.Removed(
+            params.requiredString("threadId"), deleted = method == "thread/deleted",
+        )
+        "item/completed" -> {
+            val item = params.requiredObject("item")
+            val discoversAgent = when (item.requiredString("type")) {
+                "subAgentActivity" -> item.requiredString("kind") == "started"
+                "collabAgentToolCall" -> item.requiredString("tool") in setOf("spawnAgent", "resumeAgent")
+                else -> false
+            }
+            if (discoversAgent) SubAgentEvent.Discover(params.requiredString("threadId")) else null
+        }
+        else -> null
+    }
+
+    private fun JsonObject.threadActiveFlags(): Set<ThreadActiveFlag> =
+        if (requiredString("type") != "active") emptySet() else requiredArray("activeFlags").map { flag ->
+            when (flag.jsonPrimitive.content) {
+                "waitingOnApproval" -> ThreadActiveFlag.WAITING_APPROVAL
+                "waitingOnUserInput" -> ThreadActiveFlag.WAITING_INPUT
+                else -> throw ProtocolException("未知会话活动标记：$flag")
+            }
+        }.toSet()
+
     fun threadSummary(thread: JsonObject): ThreadSummary {
         val preview = thread.requiredString("preview")
         val name = thread.optionalString("name")?.trim().orEmpty()
@@ -114,6 +147,9 @@ object ProtocolMapper {
             agentNickname = thread.optionalString("agentNickname"),
             agentRole = thread.optionalString("agentRole"),
             canAcceptDirectInput = thread.optionalBoolean("canAcceptDirectInput"),
+            agentPath = (((thread["source"] as? JsonObject)?.get("subAgent") as? JsonObject)
+                ?.get("thread_spawn") as? JsonObject)?.optionalString("agent_path"),
+            activeFlags = thread.requiredObject("status").threadActiveFlags(),
         )
     }
 
@@ -411,7 +447,7 @@ object ProtocolMapper {
         "error" -> {
             val message = params.requiredObject("error").requiredString("message")
             ConversationEvent.NoticeAdded(
-                notice = ConversationNotice(UUID.randomUUID().toString(), "服务器报告错误", message),
+                notice = ConversationNotice(UUID.randomUUID().toString(), "服务器报告错误", message, requiresAttention = true),
                 terminalError = if (params.optionalBoolean("willRetry") == true) {
                     null
                 } else {
@@ -424,6 +460,7 @@ object ProtocolMapper {
             ConversationNotice(
                 UUID.randomUUID().toString(),
                 params.requiredString("message"),
+                requiresAttention = true,
             ),
         )
 
@@ -435,31 +472,8 @@ object ProtocolMapper {
         )
 
         "model/verification" -> ConversationEvent.NoticeAdded(
-            ConversationNotice(UUID.randomUUID().toString(), "模型请求需要额外账号验证"),
+            ConversationNotice(UUID.randomUUID().toString(), "模型请求需要额外账号验证", requiresAttention = true),
         )
-
-        "model/safetyBuffering/updated" -> if (params.optionalBoolean("showBufferingUi") == true) {
-            ConversationEvent.NoticeAdded(
-                ConversationNotice(UUID.randomUUID().toString(), "模型正在进行安全检查"),
-            )
-        } else {
-            null
-        }
-
-        "hook/started", "hook/completed" -> ConversationEvent.NoticeAdded(
-            ConversationNotice(
-                UUID.randomUUID().toString(),
-                if (method == "hook/started") "Hook 开始执行" else "Hook 执行完成",
-            ),
-        )
-
-        "item/autoApprovalReview/started", "item/autoApprovalReview/completed" ->
-            ConversationEvent.NoticeAdded(
-                ConversationNotice(
-                    UUID.randomUUID().toString(),
-                    if (method.endsWith("started")) "自动审批审查开始" else "自动审批审查完成",
-                ),
-            )
 
         "item/started", "item/completed" -> ConversationEvent.ItemUpserted(
             item = conversationItem(

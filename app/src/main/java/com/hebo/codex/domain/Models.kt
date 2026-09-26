@@ -142,6 +142,8 @@ data class ThreadSummary(
     val agentNickname: String? = null,
     val agentRole: String? = null,
     val canAcceptDirectInput: Boolean? = null,
+    val agentPath: String? = null,
+    val activeFlags: Set<ThreadActiveFlag> = emptySet(),
 )
 
 enum class ThreadHistoryMode {
@@ -159,6 +161,11 @@ enum class ThreadRuntimeStatus {
     IDLE,
     ACTIVE,
     SYSTEM_ERROR,
+}
+
+enum class ThreadActiveFlag {
+    WAITING_APPROVAL,
+    WAITING_INPUT,
 }
 
 enum class ThreadAttention {
@@ -225,6 +232,7 @@ data class ConversationState(
     val backgroundTerminals: List<BackgroundTerminal> = emptyList(),
     val backgroundTerminalsLoaded: Boolean = false,
     val backgroundTerminalsError: UserFacingError? = null,
+    val runtimeStatus: RuntimeStatus = RuntimeStatus(),
     val pendingRequests: List<PendingServerRequest> = emptyList(),
     val plan: ActiveTurnPlan? = null,
     val tokenUsage: TokenUsage? = null,
@@ -636,6 +644,7 @@ data class ConversationNotice(
     val id: String,
     val message: String,
     val technicalDetails: String? = null,
+    val requiresAttention: Boolean = false,
 )
 
 enum class ApprovalPolicy(val wireValue: String) {

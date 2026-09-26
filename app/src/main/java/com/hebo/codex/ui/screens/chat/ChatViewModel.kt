@@ -19,6 +19,7 @@ import com.hebo.codex.domain.ModelOption
 import com.hebo.codex.domain.ReviewDelivery
 import com.hebo.codex.domain.ReviewTarget
 import com.hebo.codex.domain.RemoteFileMetadata
+import com.hebo.codex.domain.SubAgentsState
 import com.hebo.codex.domain.ThreadGoal
 import com.hebo.codex.domain.ThreadGoalStatus
 import com.hebo.codex.domain.TurnOptions
@@ -64,6 +65,7 @@ sealed interface ModelListState {
 
 data class ChatUiState(
     val conversation: ConversationState? = null,
+    val subAgents: SubAgentsState = SubAgentsState(),
     val modelListState: ModelListState = ModelListState.Idle,
     val inputResources: List<FeatureEntry> = emptyList(),
     val goal: ThreadGoal? = null,
@@ -96,6 +98,7 @@ class ChatViewModel(
     val events = mutableEvents.receiveAsFlow()
     private var draftInitialized = false
     private var conversationJob: Job? = null
+    private var subAgentsJob: Job? = null
     private var modelListJob: Job? = null
     private var historyPagingJob: Job? = null
     private val draftKey = DraftKey(serverId, DraftTarget.Thread(threadId))
@@ -126,6 +129,11 @@ class ChatViewModel(
     fun resumeConversation() {
         if (conversationJob != null) return
         loadModels()
+        subAgentsJob = viewModelScope.launch {
+            repository.observeSubAgents(serverId, threadId).collectLatest { value ->
+                mutableState.update { it.copy(subAgents = value) }
+            }
+        }
         conversationJob = viewModelScope.launch {
             val restoredResult = if (draftInitialized) {
                 Result.success<ConversationDraft?>(null)
@@ -172,8 +180,14 @@ class ChatViewModel(
     fun pauseConversation() {
         conversationJob?.cancel()
         conversationJob = null
+        subAgentsJob?.cancel()
+        subAgentsJob = null
         historyPagingJob?.cancel()
     }
+
+    fun refreshSubAgents() = repository.refreshSubAgents(serverId, threadId)
+
+    fun refreshRuntimeQueue() = repository.refreshRuntimeQueue(serverId, threadId)
 
     fun loadOlderTurns() = requestOlderTurns(retry = false)
 

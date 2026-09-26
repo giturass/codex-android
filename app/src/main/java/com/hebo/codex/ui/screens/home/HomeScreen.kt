@@ -378,8 +378,6 @@ private fun NewTaskContent(
                 conversationId = null,
                 shellTarget = ShellCommandTarget(serverName, cwd),
                 isRunning = false,
-                plan = null,
-                activeTurnId = null,
                 message = message,
                 attachments = attachments,
                 modelLabel = modelLabel,

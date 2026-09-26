@@ -126,6 +126,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
@@ -151,7 +152,6 @@ import com.hebo.codex.domain.AgentMessagePhase
 import com.hebo.codex.domain.ApprovalDecision
 import com.hebo.codex.domain.ApprovalPolicy
 import com.hebo.codex.domain.ApprovalReviewer
-import com.hebo.codex.domain.BackgroundTerminal
 import com.hebo.codex.domain.ApprovalType
 import com.hebo.codex.domain.ConnectionStatus
 import com.hebo.codex.domain.ConversationItem
@@ -635,14 +635,20 @@ fun ChatScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
+                        ConversationAccessoryPanels(
+                            conversation = if (conversation.goalLoaded) conversation else conversation.copy(goal = state.goal),
+                            state = state,
+                            onRetrySubAgents = viewModel::refreshSubAgents,
+                            onRetryQueue = viewModel::refreshRuntimeQueue,
+                            onOpenConversation = onOpenRelatedConversation,
+                            onTerminateCommand = viewModel::terminateBackgroundCommand,
+                        )
                         if (!conversation.isViewOnly) {
                             ConversationComposer(
                                 serverId = conversation.serverId,
                                 conversationId = conversation.threadId,
                                 shellTarget = ShellCommandTarget(conversation.serverName, conversation.cwd),
                                 isRunning = conversation.isRunning,
-                                plan = conversation.plan,
-                                activeTurnId = conversation.activeTurnId,
                                 message = state.draft.message,
                                 attachments = state.draft.attachments,
                                 modelLabel = composerModelLabel(
@@ -692,10 +698,6 @@ fun ChatScreen(
                                     viewModel.sendQuickPhrase(content)
                                 },
                                 onStop = viewModel::interrupt,
-                                backgroundCommands = conversation.backgroundTerminals,
-                                backgroundCommandsError = conversation.backgroundTerminalsError,
-                                terminatingBackgroundProcessIds = state.terminatingBackgroundProcessIds,
-                                onTerminateBackgroundCommand = viewModel::terminateBackgroundCommand,
                             )
                         }
                     }
@@ -1950,13 +1952,63 @@ private fun PermissionsCard(
 }
 
 @Composable
+private fun ConversationAccessoryPanels(
+    conversation: ConversationState,
+    state: ChatUiState,
+    onRetrySubAgents: () -> Unit,
+    onRetryQueue: () -> Unit,
+    onOpenConversation: (String) -> Unit,
+    onTerminateCommand: (String) -> Unit,
+) {
+    val density = LocalDensity.current
+    val windowHeight = LocalWindowInfo.current.containerSize.height
+    val bottomInset = maxOf(WindowInsets.ime.getBottom(density), WindowInsets.navigationBars.getBottom(density))
+    val availableHeight = with(density) { (windowHeight - bottomInset).coerceAtLeast(0).toDp() }
+    val connected = state.connectionStatus is ConnectionStatus.Connected
+    key(conversation.serverId, conversation.threadId) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .heightIn(max = minOf(320.dp, availableHeight * 0.4f))
+                .verticalScroll(rememberScrollState()),
+        ) {
+            RuntimeStatusPanel(
+                conversation = conversation,
+                connected = connected,
+                runtimeStatus = conversation.runtimeStatus,
+                onRetryQueue = onRetryQueue,
+            )
+            if (conversation.isRunning) {
+                conversation.plan?.takeIf { it.steps.isNotEmpty() }?.let { plan ->
+                    key(conversation.activeTurnId) { ActivePlanCard(plan) }
+                }
+            }
+            SubAgentsPanel(
+                agents = state.subAgents.agents,
+                stale = state.subAgents.isStale,
+                error = state.subAgents.error,
+                connected = connected,
+                onRetry = onRetrySubAgents,
+                onOpenConversation = onOpenConversation,
+            )
+            BackgroundCommandsPanel(
+                commands = conversation.backgroundTerminals,
+                error = conversation.backgroundTerminalsError,
+                terminatingProcessIds = state.terminatingBackgroundProcessIds,
+                onTerminate = onTerminateCommand,
+                canTerminate = connected && !conversation.isViewOnly,
+            )
+        }
+    }
+}
+
+@Composable
 internal fun ConversationComposer(
     serverId: String?,
     conversationId: String?,
     shellTarget: ShellCommandTarget?,
     isRunning: Boolean,
-    plan: ActiveTurnPlan?,
-    activeTurnId: String?,
     message: String,
     attachments: List<DraftAttachment>,
     modelLabel: String,
@@ -1982,10 +2034,6 @@ internal fun ConversationComposer(
     onSend: () -> Unit,
     onSendQuickPhrase: (String) -> Unit,
     onStop: (() -> Unit)?,
-    backgroundCommands: List<BackgroundTerminal> = emptyList(),
-    backgroundCommandsError: UserFacingError? = null,
-    terminatingBackgroundProcessIds: Set<String> = emptySet(),
-    onTerminateBackgroundCommand: (String) -> Unit = {},
 ) {
     var dialog by remember { mutableStateOf<ComposerDialog?>(null) }
     var addMenuExpanded by remember { mutableStateOf(false) }
@@ -2064,19 +2112,6 @@ internal fun ConversationComposer(
     Column(
         Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 12.dp),
     ) {
-        BackgroundCommandsPanel(
-            commands = backgroundCommands,
-            error = backgroundCommandsError,
-            terminatingProcessIds = terminatingBackgroundProcessIds,
-            onTerminate = onTerminateBackgroundCommand,
-        )
-        if (isRunning) {
-            plan?.takeIf { it.steps.isNotEmpty() }?.let { visiblePlan ->
-                key(serverId, conversationId, activeTurnId) {
-                    ActivePlanCard(plan = visiblePlan)
-                }
-            }
-        }
         if (activeToken != null && (paletteEntries.isNotEmpty() || isLoadingResources)) {
             ComposerPalette(
                 entries = paletteEntries,

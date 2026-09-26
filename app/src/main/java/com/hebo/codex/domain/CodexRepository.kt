@@ -7,6 +7,7 @@ import com.hebo.codex.data.remote.AppServerApi
 import com.hebo.codex.data.remote.AppServerClientFactory
 import com.hebo.codex.data.remote.AppServerConnection
 import com.hebo.codex.data.remote.ProtocolMapper
+import com.hebo.codex.data.remote.RuntimeStatusMapper
 import com.hebo.codex.data.remote.ProtocolException
 import com.hebo.codex.data.remote.ResolvedProxyConnection
 import com.hebo.codex.data.remote.ServerEvent
@@ -27,6 +28,9 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
@@ -51,6 +55,7 @@ import kotlinx.serialization.json.put
 import java.io.OutputStream
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.atomic.AtomicLong
 
 private sealed interface BackgroundTerminalChange {
@@ -75,6 +80,9 @@ class CodexRepository(
     private val backgroundTerminalRefreshBuffers =
         ConcurrentHashMap<ConversationKey, BackgroundTerminalRefreshBuffer>()
     private val historyPagingMutexes = ConcurrentHashMap<ConversationKey, Mutex>()
+    private val subAgentMonitors = ConcurrentHashMap<ConversationKey, CopyOnWriteArraySet<SubAgentMonitor>>()
+    private val runtimeQueueRefreshes = ConcurrentHashMap<ConversationKey, RuntimeQueueRefresh>()
+    private val goalRevisions = ConcurrentHashMap<ConversationKey, AtomicLong>()
     private val mutableConnectionStatuses = MutableStateFlow<Map<String, ConnectionStatus>>(emptyMap())
     private val mutableThreadRevisions = MutableStateFlow<Map<String, Long>>(emptyMap())
     private val mutableFeatureRevisions = MutableStateFlow<Map<String, Long>>(emptyMap())
@@ -406,6 +414,57 @@ class CodexRepository(
         return snapshot.summary.id
     }
 
+    fun observeSubAgents(serverId: String, threadId: String): Flow<SubAgentsState> = channelFlow {
+        val key = ConversationKey(serverId, threadId)
+        val monitor = SubAgentMonitor(this, threadId, object : SubAgentSource {
+            override suspend fun listDescendants(): List<ThreadSummary> {
+                val result = mutableListOf<ThreadSummary>()
+                val cursors = mutableSetOf<String>()
+                var cursor: String? = null
+                do {
+                    val page = api(serverId).listThreads(
+                        cursor = cursor,
+                        ancestorThreadId = threadId,
+                        sourceKinds = setOf(ThreadSourceKind.SUB_AGENT_THREAD_SPAWN),
+                        sortKey = ThreadSortKey.CREATED_AT,
+                        sortDirection = SortDirection.ASC,
+                    )
+                    result += page.requiredArray("data").map { ProtocolMapper.threadSummary(it.jsonObject) }
+                    cursor = page.optionalString("nextCursor")
+                    check(cursor == null || cursors.add(cursor)) { "子 Agent 列表返回了重复的游标" }
+                } while (cursor != null)
+                return result
+            }
+
+            override suspend fun latestTurnStatus(threadId: String): ConversationTurnStatus? =
+                ProtocolMapper.threadTurnPage(api(serverId).listThreadTurns(threadId, limit = 1))
+                    .data.singleOrNull()?.status
+        })
+        subAgentMonitors.compute(key) { _, monitors ->
+            (monitors ?: CopyOnWriteArraySet()).also { it.add(monitor) }
+        }
+        try {
+            launch {
+                connectionStatuses.map { it[serverId] is ConnectionStatus.Connected }
+                    .distinctUntilChanged().collect(monitor::setConnected)
+            }
+            monitor.state.collect { send(it) }
+        } finally {
+            subAgentMonitors.computeIfPresent(key) { _, monitors ->
+                monitors.apply { remove(monitor) }.takeIf { it.isNotEmpty() }
+            }
+            monitor.close()
+        }
+    }
+
+    fun refreshSubAgents(serverId: String, threadId: String) {
+        subAgentMonitors[ConversationKey(serverId, threadId)]?.forEach(SubAgentMonitor::refresh)
+    }
+
+    fun refreshRuntimeQueue(serverId: String, threadId: String) {
+        requestRuntimeQueueRefresh(ConversationKey(serverId, threadId))
+    }
+
     suspend fun openConversation(serverId: String, threadId: String): StateFlow<ConversationState> {
         val key = ConversationKey(serverId, threadId)
         val conversation = conversationMutex.withLock {
@@ -441,6 +500,7 @@ class CodexRepository(
             }
         }
         markThreadViewed(serverId, threadId)
+        requestRuntimeQueueRefresh(key)
         return conversation
     }
 
@@ -684,15 +744,17 @@ class CodexRepository(
     }
 
     suspend fun getGoal(serverId: String, threadId: String): ThreadGoal? {
-        val response = api(serverId).request(
+        val targetApi = api(serverId)
+        val key = ConversationKey(serverId, threadId)
+        val revisions = goalRevisions.computeIfAbsent(key) { AtomicLong() }
+        val revision = revisions.incrementAndGet()
+        val response = targetApi.request(
             StableRpcMethod.THREAD_GOAL_GET,
             buildJsonObject { put("threadId", threadId) },
         ).jsonObject
         val goal = (response["goal"] as? JsonObject)?.let(ProtocolMapper::threadGoal)
-        conversations[ConversationKey(serverId, threadId)]?.updateState {
-            it.copy(goal = goal, goalLoaded = true)
-        }
-        return goal
+        applyGoalResponse(key, revisions, revision, goal)
+        return if (revisions.get() == revision) goal else conversations[key]?.value?.goal
     }
 
     suspend fun setGoal(
@@ -703,7 +765,11 @@ class CodexRepository(
         tokenBudget: Long? = null,
     ): ThreadGoal {
         require(objective.isNotBlank()) { "目标不能为空" }
-        val response = api(serverId).request(
+        val targetApi = api(serverId)
+        val key = ConversationKey(serverId, threadId)
+        val revisions = goalRevisions.computeIfAbsent(key) { AtomicLong() }
+        val revision = revisions.incrementAndGet()
+        val response = targetApi.request(
             StableRpcMethod.THREAD_GOAL_SET,
             buildJsonObject {
                 put("threadId", threadId)
@@ -713,19 +779,29 @@ class CodexRepository(
             },
         ).jsonObject
         return ProtocolMapper.threadGoal(response.requiredObject("goal")).also { goal ->
-            conversations[ConversationKey(serverId, threadId)]?.updateState {
-                it.copy(goal = goal, goalLoaded = true)
-            }
+            applyGoalResponse(key, revisions, revision, goal)
         }
     }
 
     suspend fun clearGoal(serverId: String, threadId: String) {
-        api(serverId).request(
+        val targetApi = api(serverId)
+        val key = ConversationKey(serverId, threadId)
+        val revisions = goalRevisions.computeIfAbsent(key) { AtomicLong() }
+        val revision = revisions.incrementAndGet()
+        targetApi.request(
             StableRpcMethod.THREAD_GOAL_CLEAR,
             buildJsonObject { put("threadId", threadId) },
         )
-        conversations[ConversationKey(serverId, threadId)]?.updateState {
-            it.copy(goal = null, goalLoaded = true)
+        applyGoalResponse(key, revisions, revision, null)
+    }
+
+    private fun applyGoalResponse(key: ConversationKey, revisions: AtomicLong, revision: Long, goal: ThreadGoal?) {
+        conversations[key]?.updateState { current ->
+            if (revisions.get() != revision) current else current.copy(
+                goal = goal,
+                goalLoaded = true,
+                runtimeStatus = current.runtimeStatus.reduce(RuntimeStatusEvent.GoalSynced),
+            )
         }
     }
 
@@ -763,6 +839,8 @@ class CodexRepository(
         conversationEventBuffers.remove(key)
         backgroundTerminalRefreshBuffers.remove(key)
         historyPagingMutexes.remove(key)
+        runtimeQueueRefreshes.remove(key)?.revision?.incrementAndGet()
+        goalRevisions.remove(key)?.incrementAndGet()
         removePendingRequests(key.serverId, key.threadId)
     }
 
@@ -994,8 +1072,13 @@ class CodexRepository(
     }
 
     private fun clearConnectionState(serverId: String) {
+        goalRevisions.filterKeys { it.serverId == serverId }.values.forEach { it.incrementAndGet() }
         pendingResumeGoalSnapshots.removeIf { it.serverId == serverId }
         clearServerPendingRequests(serverId)
+        conversations.entries.filter { it.key.serverId == serverId }.forEach { (key, state) ->
+            runtimeQueueRefreshes[key]?.revision?.incrementAndGet()
+            state.updateState { it.copy(runtimeStatus = it.runtimeStatus.markStale()) }
+        }
     }
 
     private suspend fun restoreConversations(
@@ -1045,6 +1128,15 @@ class CodexRepository(
             connection.status.collect { status ->
                 if (connections.isCurrent(serverId, managed)) {
                     mutableConnectionStatuses.updateValue(serverId, status)
+                    conversations.entries.filter { it.key.serverId == serverId }.forEach { (key, state) ->
+                        if (status is ConnectionStatus.Connected) {
+                            requestRuntimeQueueRefresh(key)
+                        } else {
+                            goalRevisions[key]?.incrementAndGet()
+                            runtimeQueueRefreshes[key]?.revision?.incrementAndGet()
+                            state.updateState { it.copy(runtimeStatus = it.runtimeStatus.markStale()) }
+                        }
+                    }
                 }
             }
         }
@@ -1058,6 +1150,15 @@ class CodexRepository(
                     if (threadId != null) {
                         conversations[ConversationKey(serverId, threadId)]?.updateState {
                             it.copy(errorMessage = error.toUserFacingError("处理服务器事件失败"))
+                        }
+                    }
+                } finally {
+                    if (connection.status.value !is ConnectionStatus.Connected) {
+                        val threadId = event.paramsOrNull()?.optionalString("threadId")
+                        if (threadId != null) {
+                            conversations[ConversationKey(serverId, threadId)]?.updateState {
+                                it.copy(runtimeStatus = it.runtimeStatus.markStale())
+                            }
                         }
                     }
                 }
@@ -1116,6 +1217,10 @@ class CodexRepository(
     }
 
     private fun handleNotification(serverId: String, method: String, params: JsonObject) {
+        ProtocolMapper.subAgentEvent(method, params)?.let { event ->
+            subAgentMonitors.entries.filter { it.key.serverId == serverId }
+                .forEach { (_, monitors) -> monitors.forEach { it.accept(event) } }
+        }
         val notification = ProtocolMapper.notification(serverId, method, params)
         if (notification.bumpFeatureRevision) bumpFeatureRevision(serverId)
         if (notification.bumpRateLimitRevision) bumpRateLimitRevision(serverId)
@@ -1124,6 +1229,13 @@ class CodexRepository(
 
         val threadId = notification.threadId ?: return
         val key = ConversationKey(serverId, threadId)
+        if (notification.conversationEvent is ConversationEvent.GoalChanged) {
+            goalRevisions.computeIfAbsent(key) { AtomicLong() }.incrementAndGet()
+        }
+        RuntimeStatusMapper.notification(method, params)?.let { runtimeEvent ->
+            conversations[key]?.updateState { it.copy(runtimeStatus = it.runtimeStatus.reduce(runtimeEvent)) }
+            if (runtimeEvent == RuntimeStatusEvent.QueueChanged) requestRuntimeQueueRefresh(key)
+        }
         val event = notification.conversationEvent ?: return
         event.backgroundTerminalChange()?.let { change ->
             backgroundTerminalRefreshBuffers[key]?.let { buffer ->
@@ -1173,6 +1285,8 @@ class CodexRepository(
                 conversationEventBuffers.remove(key)
                 backgroundTerminalRefreshBuffers.remove(key)
                 historyPagingMutexes.remove(key)
+                runtimeQueueRefreshes.remove(key)?.revision?.incrementAndGet()
+                goalRevisions.remove(key)?.incrementAndGet()
                 conversations.remove(key)
             }
 
@@ -1392,6 +1506,55 @@ class CodexRepository(
             cursor = page.nextCursor
         } while (cursor != null)
         return items
+    }
+
+    private fun requestRuntimeQueueRefresh(key: ConversationKey) {
+        if (!conversations.containsKey(key)) return
+        val refresh = runtimeQueueRefreshes.computeIfAbsent(key) { RuntimeQueueRefresh() }
+        val revision = refresh.revision.incrementAndGet()
+        applicationScope.launch {
+            refresh.mutex.withLock {
+                if (revision != refresh.revision.get()) return@withLock
+                conversations[key]?.updateState {
+                    if (revision != refresh.revision.get()) it else
+                        it.copy(runtimeStatus = it.runtimeStatus.reduce(RuntimeStatusEvent.QueueChanged))
+                }
+                val result = runSuspendCatching {
+                    val api = api(key.serverId)
+                    val entries = mutableListOf<RuntimeQueuedInput>()
+                    val cursors = mutableSetOf<String>()
+                    var cursor: String? = null
+                    do {
+                        val page = RuntimeStatusMapper.queuePage(api.listQueuedInputs(key.threadId, cursor))
+                        entries += page.data
+                        cursor = page.nextCursor
+                        check(cursor == null || cursors.add(cursor)) { "输入队列返回了重复的游标" }
+                    } while (cursor != null)
+                    entries
+                }
+                // 通知触发了更新读取或连接已断开时，丢弃此请求的旧结果
+                if (revision != refresh.revision.get()) return@withLock
+                conversations[key]?.updateState { current ->
+                    if (revision != refresh.revision.get()) return@updateState current
+                    val queue = result.fold(
+                        onSuccess = { RuntimeInputQueue(entries = it) },
+                        onFailure = {
+                            (current.runtimeStatus.queue ?: RuntimeInputQueue()).copy(
+                                loading = false,
+                                error = it.toUserFacingError("无法同步待处理输入"),
+                                stale = true,
+                            )
+                        },
+                    )
+                    current.copy(runtimeStatus = current.runtimeStatus.reduce(RuntimeStatusEvent.QueueLoaded(queue)))
+                }
+            }
+        }
+    }
+
+    private class RuntimeQueueRefresh {
+        val mutex = Mutex()
+        val revision = AtomicLong()
     }
 
     private suspend fun loadAllBackgroundTerminals(

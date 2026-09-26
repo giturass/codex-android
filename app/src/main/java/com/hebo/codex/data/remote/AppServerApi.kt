@@ -95,6 +95,7 @@ class AppServerApi(
         modelProviders: List<String> = emptyList(),
         sourceKinds: Set<ThreadSourceKind> = emptySet(),
         limit: Int = THREAD_PAGE_LIMIT,
+        ancestorThreadId: String? = null,
     ): JsonObject = connection.request(
         "thread/list",
         buildJsonObject {
@@ -102,6 +103,7 @@ class AppServerApi(
             put("sortKey", sortKey.wireValue)
             put("sortDirection", sortDirection.wireValue)
             cursor?.let { put("cursor", it) }
+            ancestorThreadId?.let { put("ancestorThreadId", it) }
             cwd?.let { put("cwd", it) }
             if (archived) put("archived", true)
             searchTerm?.takeIf(String::isNotBlank)?.let { put("searchTerm", it) }
@@ -161,12 +163,16 @@ class AppServerApi(
         },
     ).jsonObject
 
-    suspend fun listThreadTurns(threadId: String, cursor: String): JsonObject = connection.request(
+    suspend fun listThreadTurns(
+        threadId: String,
+        cursor: String? = null,
+        limit: Int = THREAD_TURN_PAGE_LIMIT,
+    ): JsonObject = connection.request(
         "thread/turns/list",
         buildJsonObject {
             put("threadId", threadId)
-            put("cursor", cursor)
-            put("limit", THREAD_TURN_PAGE_LIMIT)
+            cursor?.let { put("cursor", it) }
+            put("limit", limit)
             put("sortDirection", "desc")
             put("itemsView", "notLoaded")
         },
@@ -249,6 +255,15 @@ class AppServerApi(
         buildJsonObject {
             put("threadId", threadId)
             put("limit", BACKGROUND_TERMINAL_PAGE_LIMIT)
+            cursor?.let { put("cursor", it) }
+        },
+    ).jsonObject
+
+    suspend fun listQueuedInputs(threadId: String, cursor: String? = null): JsonObject = connection.request(
+        "thread/queue/list",
+        buildJsonObject {
+            put("threadId", threadId)
+            put("limit", THREAD_PAGE_LIMIT)
             cursor?.let { put("cursor", it) }
         },
     ).jsonObject
