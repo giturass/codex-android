@@ -33,6 +33,7 @@ import com.hebo.codex.domain.ThreadActiveFlag
 import com.hebo.codex.domain.ThreadSummary
 import com.hebo.codex.domain.TokenUsage
 import com.hebo.codex.domain.TokenUsageBreakdown
+import com.hebo.codex.domain.TurnDetailsState
 import com.hebo.codex.domain.ActiveTurnPlan
 import com.hebo.codex.domain.TurnPlanStep
 import com.hebo.codex.domain.PlanStepStatus
@@ -219,12 +220,15 @@ object ProtocolMapper {
         data = requiredArray("data").map { element ->
             val turn = element.jsonObject
             val itemsView = turn.requiredString("itemsView")
-            if (itemsView != "notLoaded" || turn.requiredArray("items").isNotEmpty()) {
-                throw ProtocolException("分页回合必须使用 itemsView=notLoaded")
+            if (itemsView != "summary") {
+                throw ProtocolException("分页回合必须使用 itemsView=summary")
             }
+            val turnId = turn.requiredString("id")
             ConversationTurn(
-                id = turn.requiredString("id"),
+                id = turnId,
                 status = turn.requiredString("status").toConversationTurnStatus(),
+                items = turn.requiredArray("items").map { conversationItem(it.jsonObject, turnId) },
+                detailsState = TurnDetailsState.Unloaded,
             )
         },
         nextCursor = optionalString("nextCursor"),

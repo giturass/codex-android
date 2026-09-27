@@ -128,6 +128,6 @@ private fun List<ConversationTurn>.upsertConversationTurn(turn: ConversationTurn
     if (index == -1) return this + turn
     return toMutableList().apply {
         val current = get(index)
-        set(index, turn.copy(items = current.items))
+        set(index, current.copy(status = turn.status))
     }
 }

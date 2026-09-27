@@ -300,9 +300,9 @@ fun ChatScreen(
     val quickPhraseState by quickPhraseViewModel.state.collectAsStateWithLifecycle()
     val conversation = state.conversation
     val models = (state.modelListState as? ModelListState.Ready)?.models.orEmpty()
-    val conversationRows = remember(conversation?.items, conversation?.activeTurnId) {
+    val conversationRows = remember(conversation?.history?.turns, conversation?.activeTurnId) {
         buildConversationRows(
-            items = conversation?.items.orEmpty(),
+            turns = conversation?.history?.turns.orEmpty(),
             activeTurnId = conversation?.activeTurnId,
         )
     }
@@ -322,6 +322,7 @@ fun ChatScreen(
     var shownNoticeId by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
     var initialAnnouncementShown by rememberSaveable(initialAnnouncement) { mutableStateOf(false) }
     var activityDetailsRowKey by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
+    var activityDetailsTurnId by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
     var remoteFileTarget by remember(conversation?.threadId) { mutableStateOf<RemoteFileTarget?>(null) }
     val activeRequest = conversation?.pendingRequests?.firstOrNull { it.requestKey == activeRequestKey }
     val density = LocalDensity.current
@@ -535,13 +536,25 @@ fun ChatScreen(
                                     shellCommandDisabled = conversation.isRunning || conversation.isViewOnly ||
                                         state.connectionStatus !is ConnectionStatus.Connected,
                                     onRunShellCommand = viewModel::runShellCommand,
-                                    onOpenActivityDetails = { activityDetailsRowKey = row.key },
+                                    onOpenActivityDetails = {
+                                        activityDetailsTurnId = row.turnId
+                                        activityDetailsRowKey = row.key
+                                    },
                                 )
                                 is ConversationRow.ActivityGroup -> ActivityGroupCard(
                                     items = row.items,
                                     isSealed = row.isSealed,
                                     activeItemKeys = conversation.activeItemKeys,
-                                    onOpenDetails = { activityDetailsRowKey = row.key },
+                                    onOpenDetails = {
+                                        activityDetailsTurnId = row.turnId
+                                        activityDetailsRowKey = row.key
+                                    },
+                                )
+                                is ConversationRow.TurnActivity -> TurnActivityCard(
+                                    onOpenDetails = {
+                                        activityDetailsTurnId = row.turnId
+                                        activityDetailsRowKey = null
+                                    },
                                 )
                             }
                             val turn = forkTurnsById[row.turnId]
@@ -772,17 +785,19 @@ fun ChatScreen(
         null -> Unit
     }
 
-    conversationRows.firstOrNull { it.key == activityDetailsRowKey }?.let { row ->
-        val activityItems = when (row) {
-            is ConversationRow.ActivityGroup -> row.items
-            is ConversationRow.Item -> listOf(row.item)
+    conversation?.history?.turns?.firstOrNull { it.id == activityDetailsTurnId }?.let { turn ->
+        val details = activityDetailsContent(turn, conversationRows, activityDetailsRowKey) ?: return@let
+        LifecycleResumeEffect(viewModel, turn.id, turn.detailsState) {
+            viewModel.loadTurnDetails(turn.id)
+            onPauseOrDispose { }
         }
-        val isSealed = row !is ConversationRow.ActivityGroup || row.isSealed
         ActivityDetailsSheet(
-            items = activityItems,
-            isSealed = isSealed,
-            activeItemKeys = conversation?.activeItemKeys.orEmpty(),
-            activeActions = if (isSealed || conversation == null) {
+            turnId = turn.id,
+            detailsState = turn.detailsState,
+            items = details.items,
+            isSealed = details.isSealed,
+            activeItemKeys = conversation.activeItemKeys,
+            activeActions = if (details.isSealed) {
                 null
             } else {
                 ActivityDetailsActions(
@@ -793,15 +808,16 @@ fun ChatScreen(
                     onOpenPendingRequest = { activeRequestKey = it },
                 )
             },
-            cwd = conversation?.cwd.orEmpty(),
+            cwd = conversation.cwd,
             onOpenRemoteFile = { remoteFileTarget = it },
             onLinkError = showLinkError,
             onOpenRemotePath = openRemotePath,
             onOpenConversation = { threadId ->
-                activityDetailsRowKey = null
+                activityDetailsTurnId = null
                 onOpenRelatedConversation(threadId)
             },
-            onDismiss = { activityDetailsRowKey = null },
+            onRetry = { viewModel.retryTurnDetails(turn.id) },
+            onDismiss = { activityDetailsTurnId = null },
         )
     }
 

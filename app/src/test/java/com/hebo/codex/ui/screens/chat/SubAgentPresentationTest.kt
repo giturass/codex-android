@@ -30,7 +30,7 @@ class SubAgentPresentationTest {
                 "done", "turn", SubAgentActivityKind.COMPLETED, "child", "/root/review",
             ),
         )
-        val group = buildConversationRows(items, activeTurnId = null).single() as ConversationRow.ActivityGroup
+        val group = buildLoadedConversationRows(items, activeTurnId = null).single() as ConversationRow.ActivityGroup
 
         assertTrue(group.isSealed)
         assertTrue(group.items.all(::activityItemHasDetails))

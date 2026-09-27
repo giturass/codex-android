@@ -279,7 +279,15 @@ data class ConversationTurn(
     val id: String,
     val status: ConversationTurnStatus,
     val items: List<ConversationItem> = emptyList(),
+    val detailsState: TurnDetailsState = TurnDetailsState.Loaded,
 )
+
+sealed interface TurnDetailsState {
+    data object Unloaded : TurnDetailsState
+    class Loading : TurnDetailsState
+    data object Loaded : TurnDetailsState
+    data class Failed(val error: UserFacingError) : TurnDetailsState
+}
 
 enum class ConversationTurnStatus {
     IN_PROGRESS,

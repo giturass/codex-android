@@ -23,6 +23,7 @@ import com.hebo.codex.domain.SubAgentsState
 import com.hebo.codex.domain.ThreadGoal
 import com.hebo.codex.domain.ThreadGoalStatus
 import com.hebo.codex.domain.TurnOptions
+import com.hebo.codex.domain.TurnDetailsState
 import com.hebo.codex.domain.UserInputPart
 import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.domain.newDraftRevision
@@ -31,6 +32,8 @@ import com.hebo.codex.domain.loadInputResources
 import com.hebo.codex.util.runSuspendCatching
 import com.hebo.codex.util.toUserFacingError
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -98,9 +101,11 @@ class ChatViewModel(
     val events = mutableEvents.receiveAsFlow()
     private var draftInitialized = false
     private var conversationJob: Job? = null
+    private var conversationReady: CompletableDeferred<Unit>? = null
     private var subAgentsJob: Job? = null
     private var modelListJob: Job? = null
     private var historyPagingJob: Job? = null
+    private val turnDetailsJobs = mutableMapOf<String, Job>()
     private val draftKey = DraftKey(serverId, DraftTarget.Thread(threadId))
 
     init {
@@ -128,6 +133,8 @@ class ChatViewModel(
 
     fun resumeConversation() {
         if (conversationJob != null) return
+        val ready = CompletableDeferred<Unit>()
+        conversationReady = ready
         loadModels()
         subAgentsJob = viewModelScope.launch {
             repository.observeSubAgents(serverId, threadId).collectLatest { value ->
@@ -144,6 +151,7 @@ class ChatViewModel(
             try {
                 val conversation = repository.openConversation(serverId, threadId)
                 conversationOpened = true
+                ready.complete(Unit)
                 conversation.collectLatest { value ->
                     val initialDraft = if (draftInitialized) {
                         null
@@ -172,17 +180,22 @@ class ChatViewModel(
                     screenError = error.toUserFacingError("无法打开会话"),
                 )
             } finally {
+                ready.cancel()
                 if (conversationOpened) repository.releaseConversation(serverId, threadId)
             }
         }
     }
 
     fun pauseConversation() {
+        conversationReady?.cancel()
+        conversationReady = null
         conversationJob?.cancel()
         conversationJob = null
         subAgentsJob?.cancel()
         subAgentsJob = null
         historyPagingJob?.cancel()
+        turnDetailsJobs.values.toList().forEach { it.cancel() }
+        turnDetailsJobs.clear()
     }
 
     fun refreshSubAgents() = repository.refreshSubAgents(serverId, threadId)
@@ -192,6 +205,37 @@ class ChatViewModel(
     fun loadOlderTurns() = requestOlderTurns(retry = false)
 
     fun retryOlderTurns() = requestOlderTurns(retry = true)
+
+    fun loadTurnDetails(turnId: String) = requestTurnDetails(turnId, retry = false)
+
+    fun retryTurnDetails(turnId: String) = requestTurnDetails(turnId, retry = true)
+
+    private fun requestTurnDetails(turnId: String, retry: Boolean) {
+        val ready = conversationReady ?: return
+        if (turnId in turnDetailsJobs) return
+        val turn = mutableState.value.conversation?.history?.turns?.firstOrNull { it.id == turnId } ?: return
+        if (
+            turn.detailsState == TurnDetailsState.Loaded ||
+            turn.detailsState is TurnDetailsState.Loading ||
+            (!retry && turn.detailsState is TurnDetailsState.Failed)
+        ) {
+            return
+        }
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            try {
+                ready.await()
+                repository.loadConversationTurnDetails(serverId, threadId, turnId)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                showError(error)
+            } finally {
+                if (turnDetailsJobs[turnId] === coroutineContext[Job]) turnDetailsJobs.remove(turnId)
+            }
+        }
+        turnDetailsJobs[turnId] = job
+        job.start()
+    }
 
     private fun requestOlderTurns(retry: Boolean) {
         if (historyPagingJob != null) return

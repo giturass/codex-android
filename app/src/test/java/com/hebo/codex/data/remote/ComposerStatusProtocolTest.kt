@@ -70,7 +70,7 @@ class ComposerStatusProtocolTest {
             assertEquals("asc", filter.requiredString("sortDirection"))
             assertEquals(Json.parseToJsonElement("""["subAgentThreadSpawn"]"""), filter["sourceKinds"])
             assertFalse(filter.containsKey("parentThreadId"))
-            assertEquals(json("""{"threadId":"child","limit":1,"sortDirection":"desc","itemsView":"notLoaded"}"""), requests[1].requiredObject("params"))
+            assertEquals(json("""{"threadId":"child","limit":1,"sortDirection":"desc","itemsView":"summary"}"""), requests[1].requiredObject("params"))
             assertEquals("next-input", requests[2].requiredObject("params").requiredString("cursor"))
         } finally {
             connection.close()

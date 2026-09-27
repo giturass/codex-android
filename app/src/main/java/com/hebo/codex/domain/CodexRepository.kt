@@ -24,9 +24,6 @@ import com.hebo.codex.util.toUserFacingError
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
@@ -40,9 +37,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonElement
@@ -524,12 +519,12 @@ class CodexRepository(
                 if (page.nextCursor != null && page.nextCursor == cursor) {
                     throw ProtocolException("thread/turns/list 返回了未推进的游标")
                 }
-                val hydratedTurns = hydrateTurns(api, threadId, page.data).asReversed()
+                val olderPageTurns = page.data.asReversed()
                 var inserted = false
                 state.updateState { current ->
                     if (current.history.olderTurnsCursor != cursor) return@updateState current
                     val loadedTurnIds = current.history.turns.mapTo(mutableSetOf(), ConversationTurn::id)
-                    val olderTurns = hydratedTurns.filter { it.id !in loadedTurnIds }
+                    val olderTurns = olderPageTurns.filter { it.id !in loadedTurnIds }
                     inserted = olderTurns.isNotEmpty()
                     current.copy(
                         history = current.history.copy(
@@ -1419,6 +1414,12 @@ class CodexRepository(
     private fun requireConversation(serverId: String, threadId: String): MutableStateFlow<ConversationState> =
         conversations[ConversationKey(serverId, threadId)] ?: error("会话尚未打开")
 
+    suspend fun loadConversationTurnDetails(serverId: String, threadId: String, turnId: String) {
+        requireConversation(serverId, threadId).loadTurnDetails(turnId) {
+            loadAllTurnItems(api(serverId), threadId, turnId)
+        }
+    }
+
     private suspend fun resumeConversation(
         key: ConversationKey,
         api: AppServerApi,
@@ -1427,7 +1428,17 @@ class CodexRepository(
         return try {
             val snapshot = ProtocolMapper.resumedThreadSnapshot(api.resumeThread(key.threadId))
             snapshot.copy(
-                turns = hydrateTurns(api, key.threadId, snapshot.turns).asReversed(),
+                turns = snapshot.turns.map { turn ->
+                    // 进行中的回合需要完整基础条目，后续增量通知才能直接应用
+                    if (turn.status == ConversationTurnStatus.IN_PROGRESS) {
+                        turn.copy(
+                            items = loadAllTurnItems(api, key.threadId, turn.id),
+                            detailsState = TurnDetailsState.Loaded,
+                        )
+                    } else {
+                        turn
+                    }
+                }.asReversed(),
             )
         } catch (error: Throwable) {
             pendingResumeGoalSnapshots.remove(key)
@@ -1470,21 +1481,6 @@ class CodexRepository(
             }
             if (failOnError) throw error
         }
-    }
-
-    private suspend fun hydrateTurns(
-        api: AppServerApi,
-        threadId: String,
-        turns: List<ConversationTurn>,
-    ): List<ConversationTurn> = coroutineScope {
-        val semaphore = Semaphore(TURN_HYDRATION_CONCURRENCY)
-        turns.map { turn ->
-            async {
-                semaphore.withPermit {
-                    turn.copy(items = loadAllTurnItems(api, threadId, turn.id))
-                }
-            }
-        }.awaitAll()
     }
 
     private suspend fun loadAllTurnItems(
@@ -1900,7 +1896,6 @@ class CodexRepository(
         const val METHOD_NOT_FOUND = -32601
         const val INVALID_REQUEST = -32600
         const val SERVER_LOAD_TIMEOUT_MILLIS = 5_000L
-        const val TURN_HYDRATION_CONCURRENCY = 4
         val SUPPORTED_SERVER_REQUESTS = setOf(
             "item/commandExecution/requestApproval",
             "item/fileChange/requestApproval",

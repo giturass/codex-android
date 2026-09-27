@@ -115,7 +115,33 @@ import com.hebo.codex.domain.ConversationItem
 import com.hebo.codex.domain.ConversationItemKey
 import com.hebo.codex.domain.FileChangeKind
 import com.hebo.codex.domain.PendingServerRequest
+import com.hebo.codex.domain.TurnDetailsState
 import kotlinx.coroutines.launch
+
+@Composable
+internal fun TurnActivityCard(onOpenDetails: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(role = Role.Button, onClick = onOpenDetails)
+            .padding(horizontal = 4.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "查看处理过程",
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Icon(
+            Icons.AutoMirrored.Rounded.KeyboardArrowRight,
+            contentDescription = null,
+            modifier = Modifier.size(22.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
 
 @Composable
 internal fun ActivityGroupCard(
@@ -516,6 +542,8 @@ internal fun ConversationItem.activityStatus(
 
 @Composable
 internal fun ActivityDetailsSheet(
+    turnId: String,
+    detailsState: TurnDetailsState,
     items: List<ConversationItem>,
     isSealed: Boolean,
     activeItemKeys: Set<ConversationItemKey>,
@@ -525,13 +553,14 @@ internal fun ActivityDetailsSheet(
     onLinkError: (String) -> Unit,
     onOpenRemotePath: (String) -> Unit,
     onOpenConversation: (String) -> Unit,
+    onRetry: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberBottomSheetState(
         initialValue = SheetValue.Hidden,
         enabledValues = setOf(SheetValue.Hidden, SheetValue.PartiallyExpanded, SheetValue.Expanded),
     )
-    var expandedItemKeys by rememberSaveable {
+    var expandedItemKeys by rememberSaveable(turnId) {
         mutableStateOf(
             arrayListOf<String>().apply {
                 items.singleOrNull()
@@ -546,8 +575,8 @@ internal fun ActivityDetailsSheet(
         initialFirstVisibleItemIndex = followTargetIndex?.let(::activityHeaderLazyIndex) ?: 0,
     )
     val scrollScope = rememberCoroutineScope()
-    var autoFollow by rememberSaveable(items.first().turnId) { mutableStateOf(true) }
-    val userScrollConnection = remember(items.first().turnId) {
+    var autoFollow by rememberSaveable(turnId) { mutableStateOf(true) }
+    val userScrollConnection = remember(turnId) {
         object : NestedScrollConnection {
             override fun onPostScroll(
                 consumed: Offset,
@@ -607,50 +636,54 @@ internal fun ActivityDetailsSheet(
                 )
             }
             Box(Modifier.fillMaxWidth().weight(1f, fill = false)) {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxWidth().nestedScroll(userScrollConnection),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                        start = 20.dp,
-                        top = 22.dp,
-                        end = 20.dp,
-                        bottom = 32.dp,
-                    ),
-                ) {
-                    items.forEachIndexed { index, item ->
-                        val itemKey = item.activityItemKey()
-                        val expanded = itemKey in expandedItemKeys
-                        stickyHeader(key = "$itemKey:header") {
-                            Box(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .background(MaterialTheme.colorScheme.surfaceContainerLow),
-                            ) {
-                                ActivityTimelineHeader(
+                if (detailsState != TurnDetailsState.Loaded || items.isEmpty()) {
+                    ActivityDetailsStatus(detailsState, onRetry)
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxWidth().nestedScroll(userScrollConnection),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                            start = 20.dp,
+                            top = 22.dp,
+                            end = 20.dp,
+                            bottom = 32.dp,
+                        ),
+                    ) {
+                        items.forEachIndexed { index, item ->
+                            val itemKey = item.activityItemKey()
+                            val expanded = itemKey in expandedItemKeys
+                            stickyHeader(key = "$itemKey:header") {
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                                ) {
+                                    ActivityTimelineHeader(
+                                        item = item,
+                                        isLast = index == items.lastIndex,
+                                        isCurrent = index == followTargetIndex,
+                                        activeItemKeys = activeItemKeys,
+                                        expanded = expanded,
+                                        onToggle = {
+                                            expandedItemKeys = ArrayList(expandedItemKeys).apply {
+                                                if (!remove(itemKey)) add(itemKey)
+                                            }
+                                        },
+                                    )
+                                }
+                            }
+                            item(key = "$itemKey:body") {
+                                ActivityTimelineBody(
                                     item = item,
                                     isLast = index == items.lastIndex,
-                                    isCurrent = index == followTargetIndex,
-                                    activeItemKeys = activeItemKeys,
                                     expanded = expanded,
-                                    onToggle = {
-                                        expandedItemKeys = ArrayList(expandedItemKeys).apply {
-                                            if (!remove(itemKey)) add(itemKey)
-                                        }
-                                    },
+                                    cwd = cwd,
+                                    onOpenRemoteFile = onOpenRemoteFile,
+                                    onLinkError = onLinkError,
+                                    onOpenRemotePath = onOpenRemotePath,
+                                    onOpenConversation = onOpenConversation,
                                 )
                             }
-                        }
-                        item(key = "$itemKey:body") {
-                            ActivityTimelineBody(
-                                item = item,
-                                isLast = index == items.lastIndex,
-                                expanded = expanded,
-                                cwd = cwd,
-                                onOpenRemoteFile = onOpenRemoteFile,
-                                onLinkError = onLinkError,
-                                onOpenRemotePath = onOpenRemotePath,
-                                onOpenConversation = onOpenConversation,
-                            )
                         }
                     }
                 }
@@ -667,6 +700,35 @@ internal fun ActivityDetailsSheet(
                     },
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun ActivityDetailsStatus(
+    state: TurnDetailsState,
+    onRetry: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp).padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        when (state) {
+            TurnDetailsState.Unloaded -> TextButton(onClick = onRetry) { Text("加载处理过程") }
+            is TurnDetailsState.Loading -> {
+                CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.height(12.dp))
+                Text("正在加载处理过程", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            is TurnDetailsState.Failed -> {
+                Text(state.error.summary, textAlign = TextAlign.Center)
+                TextButton(onClick = onRetry) { Text("重试") }
+            }
+            TurnDetailsState.Loaded -> Text(
+                "此回合没有处理过程",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -1035,7 +1097,7 @@ internal fun activityItemHasDetails(item: ConversationItem): Boolean = when (ite
         item.output.isNotBlank() ||
         item.exitCode != null
 
-    is ConversationItem.UserShellCommand -> false
+    is ConversationItem.UserShellCommand -> true
 
     is ConversationItem.FileChange -> item.changes.isNotEmpty()
     is ConversationItem.Activity -> !item.summary.isNullOrBlank() ||
@@ -1084,32 +1146,13 @@ private fun ActivityItemDetails(
             }
         }
 
-        is ConversationItem.CommandExecution -> {
-            ShellCommandBlock(item.command)
-            if (item.cwd.isNotBlank()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        item.cwd,
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    CopyTextIconButton(item.cwd, "复制工作目录")
-                }
-            }
-            if (item.output.isNotBlank()) TerminalOutputBlock(item.output)
-            item.exitCode?.let { exitCode ->
-                Text(
-                    "退出码 $exitCode",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
+        is ConversationItem.CommandExecution -> ActivityCommandDetails(
+            command = item.command, cwd = item.cwd, output = item.output, exitCode = item.exitCode,
+        )
 
-        is ConversationItem.UserShellCommand -> Unit
+        is ConversationItem.UserShellCommand -> ActivityCommandDetails(
+            command = item.command, cwd = item.cwd, output = item.output, exitCode = item.exitCode,
+        )
 
         is ConversationItem.FileChange -> {
             item.changes.forEach { change ->
@@ -1158,6 +1201,32 @@ private fun ActivityItemDetails(
         }
 
         is ConversationItem.UserMessage -> Unit
+    }
+}
+
+@Composable
+private fun ActivityCommandDetails(command: String, cwd: String, output: String, exitCode: Int?) {
+    ShellCommandBlock(command)
+    if (cwd.isNotBlank()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                cwd,
+                modifier = Modifier.weight(1f),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            CopyTextIconButton(cwd, "复制工作目录")
+        }
+    }
+    if (output.isNotBlank()) TerminalOutputBlock(output)
+    exitCode?.let {
+        Text(
+            "退出码 $it",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

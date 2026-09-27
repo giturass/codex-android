@@ -12,6 +12,7 @@ import com.hebo.codex.domain.FileSystemAccessMode
 import com.hebo.codex.domain.FileSystemPermissionTarget
 import com.hebo.codex.domain.ThreadHistoryMode
 import com.hebo.codex.domain.ThreadRuntimeStatus
+import com.hebo.codex.domain.TurnDetailsState
 import com.hebo.codex.domain.UserMessagePart
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -25,7 +26,7 @@ class ProtocolMapperTest {
     private val json = Json
 
     @Test
-    fun mapsPaginatedResumeAndHydratedItems() {
+    fun mapsPaginatedResumeSummaryAndHydratedItems() {
         val response = json.parseToJsonElement(
             """
             {
@@ -46,9 +47,21 @@ class ProtocolMapperTest {
                 "data": [
                   {
                     "id": "turn-1",
-                    "status": "inProgress",
-                    "itemsView": "notLoaded",
-                    "items": []
+                    "status": "completed",
+                    "itemsView": "summary",
+                    "items": [
+                      {
+                        "type": "userMessage",
+                        "id": "user-1",
+                        "content": [{ "type": "text", "text": "定位空指针" }]
+                      },
+                      {
+                        "type": "agentMessage",
+                        "id": "answer-1",
+                        "text": "已修复登录问题",
+                        "phase": "final_answer"
+                      }
+                    ]
                   }
                 ],
                 "nextCursor": "older-turns"
@@ -89,6 +102,15 @@ class ProtocolMapperTest {
                         "aggregatedOutput": "44: login(userId)",
                         "exitCode": 0
                   }
+                },
+                {
+                  "turnId": "turn-1",
+                  "item": {
+                        "type": "agentMessage",
+                        "id": "answer-1",
+                        "text": "已修复登录问题",
+                        "phase": "final_answer"
+                  }
                 }
               ],
               "nextCursor": null
@@ -105,7 +127,15 @@ class ProtocolMapperTest {
         assertEquals(ThreadRuntimeStatus.ACTIVE, snapshot.summary.status)
         assertEquals("older-turns", snapshot.olderTurnsCursor)
         assertEquals("turn-1", snapshot.turns.single().id)
-        assertEquals(3, page.data.size)
+        assertEquals(TurnDetailsState.Unloaded, snapshot.turns.single().detailsState)
+        assertEquals(
+            listOf(
+                ConversationItem.UserMessage("user-1", "turn-1", listOf(UserMessagePart.Text("定位空指针"))),
+                ConversationItem.AgentMessage("answer-1", "turn-1", "已修复登录问题", AgentMessagePhase.FINAL_ANSWER),
+            ),
+            snapshot.turns.single().items,
+        )
+        assertEquals(4, page.data.size)
         assertEquals(
             listOf(UserMessagePart.Text("定位空指针")),
             (page.data[0] as ConversationItem.UserMessage).content,
@@ -115,6 +145,34 @@ class ProtocolMapperTest {
             (page.data[1] as ConversationItem.AgentMessage).phase,
         )
         assertEquals(ActivityStatus.COMPLETED, (page.data[2] as ConversationItem.CommandExecution).status)
+        assertEquals(snapshot.turns.single().items.last(), page.data.last())
+    }
+
+    @Test
+    fun emptySummaryStillRequiresLoadingDetails() {
+        val page = ProtocolMapper.threadTurnPage(
+            json.parseToJsonElement(
+                """{"data":[{"id":"turn-1","status":"inProgress","itemsView":"summary","items":[]}],"nextCursor":null}""",
+            ).jsonObject,
+        )
+
+        assertTrue(page.data.single().items.isEmpty())
+        assertEquals(TurnDetailsState.Unloaded, page.data.single().detailsState)
+    }
+
+    @Test
+    fun rejectsTurnPagesWithoutRequestedSummaryView() {
+        listOf("notLoaded", "full").forEach { itemsView ->
+            val response = json.parseToJsonElement(
+                """{"data":[{"id":"turn-1","status":"completed","itemsView":"$itemsView","items":[]}],"nextCursor":null}""",
+            ).jsonObject
+
+            val error = assertThrows(ProtocolException::class.java) {
+                ProtocolMapper.threadTurnPage(response)
+            }
+
+            assertEquals("分页回合必须使用 itemsView=summary", error.message)
+        }
     }
 
     @Test

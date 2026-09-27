@@ -2,6 +2,8 @@ package com.hebo.codex.ui.screens.chat
 
 import com.hebo.codex.domain.AgentMessagePhase
 import com.hebo.codex.domain.ConversationItem
+import com.hebo.codex.domain.ConversationTurn
+import com.hebo.codex.domain.TurnDetailsState
 
 internal sealed interface ConversationRow {
     val key: String
@@ -19,9 +21,34 @@ internal sealed interface ConversationRow {
         override val key: String = items.first().rowKey("activity-group")
         override val turnId: String = items.first().turnId
     }
+
+    data class TurnActivity(override val turnId: String) : ConversationRow {
+        override val key: String = "turn-activity:${turnId.length}:$turnId"
+    }
 }
 
 internal fun buildConversationRows(
+    turns: List<ConversationTurn>,
+    activeTurnId: String?,
+): List<ConversationRow> = turns.flatMap { turn ->
+    if (turn.detailsState == TurnDetailsState.Loaded) {
+        buildLoadedConversationRows(turn.items, activeTurnId)
+    } else {
+        buildList {
+            var activityAdded = false
+            turn.items.forEach { item ->
+                if (item !is ConversationItem.UserMessage && !activityAdded) {
+                    add(ConversationRow.TurnActivity(turn.id))
+                    activityAdded = true
+                }
+                if (!item.isGroupableActivity()) add(ConversationRow.Item(item))
+            }
+            if (!activityAdded) add(ConversationRow.TurnActivity(turn.id))
+        }
+    }
+}
+
+internal fun buildLoadedConversationRows(
     items: List<ConversationItem>,
     activeTurnId: String?,
 ): List<ConversationRow> {
@@ -67,6 +94,33 @@ internal fun buildConversationRows(
         } else {
             row
         }
+    }
+}
+
+internal data class ActivityDetailsContent(
+    val items: List<ConversationItem>,
+    val isSealed: Boolean,
+)
+
+internal fun activityDetailsContent(
+    turn: ConversationTurn,
+    rows: List<ConversationRow>,
+    rowKey: String?,
+): ActivityDetailsContent? {
+    if (rowKey == null) {
+        return ActivityDetailsContent(
+            items = if (turn.detailsState == TurnDetailsState.Loaded) {
+                turn.items.filter { it.isGroupableActivity() || it is ConversationItem.UserShellCommand }
+            } else {
+                emptyList()
+            },
+            isSealed = true,
+        )
+    }
+    return when (val row = rows.firstOrNull { it.turnId == turn.id && it.key == rowKey }) {
+        is ConversationRow.ActivityGroup -> ActivityDetailsContent(row.items, row.isSealed)
+        is ConversationRow.Item -> ActivityDetailsContent(listOf(row.item), isSealed = true)
+        is ConversationRow.TurnActivity, null -> null
     }
 }
 

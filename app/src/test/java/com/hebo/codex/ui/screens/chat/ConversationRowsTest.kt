@@ -20,7 +20,7 @@ class ConversationRowsTest {
             command("command-3", "turn-2"),
         )
 
-        val rows = buildConversationRows(items, activeTurnId = null)
+        val rows = buildLoadedConversationRows(items, activeTurnId = null)
 
         assertEquals(3, rows.size)
         assertTrue(rows[0] is ConversationRow.ActivityGroup)
@@ -31,7 +31,7 @@ class ConversationRowsTest {
 
     @Test
     fun `不同回合的活动不会合并`() {
-        val rows = buildConversationRows(
+        val rows = buildLoadedConversationRows(
             items = listOf(command("command-1", "turn-1"), command("command-2", "turn-2")),
             activeTurnId = null,
         )
@@ -42,7 +42,7 @@ class ConversationRowsTest {
 
     @Test
     fun `相同条目编号在不同回合中具有不同列表键`() {
-        val rows = buildConversationRows(
+        val rows = buildLoadedConversationRows(
             items = listOf(
                 ConversationItem.AgentMessage("item-1", "turn-1", "第一回合"),
                 ConversationItem.AgentMessage("item-1", "turn-2", "第二回合"),
@@ -56,7 +56,7 @@ class ConversationRowsTest {
 
     @Test
     fun `相同起始条目编号在不同回合中具有不同活动组键`() {
-        val rows = buildConversationRows(
+        val rows = buildLoadedConversationRows(
             items = listOf(
                 command("item-1", "turn-1"),
                 command("item-2", "turn-1"),
@@ -80,7 +80,7 @@ class ConversationRowsTest {
             rawContentParts = listOf("先检查目录"),
         )
 
-        val rows = buildConversationRows(
+        val rows = buildLoadedConversationRows(
             items = listOf(reasoning, command("command", "turn-1")),
             activeTurnId = null,
         )
@@ -110,7 +110,7 @@ class ConversationRowsTest {
             text = "1. 检查实现",
         )
 
-        val rows = buildConversationRows(
+        val rows = buildLoadedConversationRows(
             items = listOf(commentary, plan, command("command", "turn-1")),
             activeTurnId = "turn-1",
         )
@@ -122,7 +122,7 @@ class ConversationRowsTest {
 
     @Test
     fun `未封口的操作显示当前命令`() {
-        val rows = buildConversationRows(
+        val rows = buildLoadedConversationRows(
             items = listOf(command("command", "turn-1", ActivityStatus.IN_PROGRESS)),
             activeTurnId = "turn-1",
         )
@@ -137,7 +137,7 @@ class ConversationRowsTest {
 
     @Test
     fun `操作完成后正文出现前仍保持未封口`() {
-        val rows = buildConversationRows(
+        val rows = buildLoadedConversationRows(
             items = listOf(command("command", "turn-1")),
             activeTurnId = "turn-1",
         )
@@ -149,7 +149,7 @@ class ConversationRowsTest {
 
     @Test
     fun `封口后的单个活动仍显示活动标题`() {
-        val rows = buildConversationRows(
+        val rows = buildLoadedConversationRows(
             items = listOf(
                 command("command", "turn-1"),
                 finalAnswer("answer", "turn-1", "开始回答"),
@@ -164,7 +164,7 @@ class ConversationRowsTest {
 
     @Test
     fun `空正文不会为活动组封口`() {
-        val rows = buildConversationRows(
+        val rows = buildLoadedConversationRows(
             items = listOf(
                 command("command", "turn-1"),
                 ConversationItem.AgentMessage("answer", "turn-1", ""),
@@ -177,7 +177,7 @@ class ConversationRowsTest {
 
     @Test
     fun `最终回答条目开始时立即为活动组封口`() {
-        val rows = buildConversationRows(
+        val rows = buildLoadedConversationRows(
             items = listOf(
                 command("command", "turn-1"),
                 finalAnswer("answer", "turn-1", ""),
@@ -190,7 +190,7 @@ class ConversationRowsTest {
 
     @Test
     fun `正文后的新活动形成新的未封口活动组`() {
-        val rows = buildConversationRows(
+        val rows = buildLoadedConversationRows(
             items = listOf(
                 command("command-1", "turn-1"),
                 finalAnswer("answer", "turn-1", "继续处理"),
@@ -206,7 +206,7 @@ class ConversationRowsTest {
 
     @Test
     fun `回合结束时为没有正文的活动组封口`() {
-        val rows = buildConversationRows(
+        val rows = buildLoadedConversationRows(
             items = listOf(command("command", "turn-1")),
             activeTurnId = null,
         )
@@ -380,7 +380,7 @@ class ConversationRowsTest {
             text = "1. 检查实现",
         )
 
-        val rows = buildConversationRows(
+        val rows = buildLoadedConversationRows(
             items = listOf(command("command", "turn-1"), plan),
             activeTurnId = null,
         )
@@ -403,7 +403,7 @@ class ConversationRowsTest {
             status = ActivityStatus.COMPLETED,
         )
 
-        val rows = buildConversationRows(
+        val rows = buildLoadedConversationRows(
             items = listOf(command("command", "turn-1"), shell),
             activeTurnId = null,
         )

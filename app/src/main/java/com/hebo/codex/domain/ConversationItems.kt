@@ -55,6 +55,20 @@ internal fun ConversationState.withRestoredConversation(
     } else {
         emptyList()
     }
+    val currentTurns = history.turns.associateBy(ConversationTurn::id)
+    val restoredTurns = restored.history.turns.map { turn ->
+        val current = currentTurns[turn.id]
+        // 已结束的回合摘要未变化时，保留已加载详情及正在进行的详情请求
+        if (
+            current != null && current.status != ConversationTurnStatus.IN_PROGRESS &&
+            current.status == turn.status && turn.detailsState == TurnDetailsState.Unloaded &&
+            turn.items == current.items.summaryItems()
+        ) {
+            current
+        } else {
+            turn
+        }
+    }
     fun mergedHistory(turns: List<ConversationTurn>) = restored.history.copy(
         turns = retainedTurns + turns,
         olderTurnsCursor = if (retainedTurns.isEmpty()) {
@@ -66,7 +80,7 @@ internal fun ConversationState.withRestoredConversation(
     val restoredTurnId = restored.activeTurnId
     if (restoredTurnId == null || activeTurnId != restoredTurnId) {
         return restored.copy(
-            history = mergedHistory(restored.history.turns),
+            history = mergedHistory(restoredTurns),
         )
     }
 
@@ -78,7 +92,7 @@ internal fun ConversationState.withRestoredConversation(
     }
     if (retainedKeys.isEmpty()) {
         return restored.copy(
-            history = mergedHistory(restored.history.turns),
+            history = mergedHistory(restoredTurns),
         )
     }
 
@@ -87,13 +101,18 @@ internal fun ConversationState.withRestoredConversation(
         ?.items
         .orEmpty()
         .filter { it.key in retainedKeys }
-    val mergedTurns = restored.history.turns.map { turn ->
+    val mergedTurns = restoredTurns.map { turn ->
         if (turn.id == restoredTurnId) turn.copy(items = turn.items + retainedItems) else turn
     }
     return restored.copy(
         history = mergedHistory(mergedTurns),
         activeItemKeys = restored.activeItemKeys + retainedKeys,
     )
+}
+
+private fun List<ConversationItem>.summaryItems(): List<ConversationItem> = buildList {
+    this@summaryItems.firstOrNull { it is ConversationItem.UserMessage }?.let(::add)
+    this@summaryItems.lastOrNull { it is ConversationItem.AgentMessage }?.let(::add)
 }
 
 internal fun ConversationState.withRefreshedConversation(

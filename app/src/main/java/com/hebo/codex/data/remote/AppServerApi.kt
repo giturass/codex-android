@@ -150,7 +150,7 @@ class AppServerApi(
                 buildJsonObject {
                     put("limit", THREAD_TURN_PAGE_LIMIT)
                     put("sortDirection", "desc")
-                    put("itemsView", "notLoaded")
+                    put("itemsView", "summary")
                 },
             )
         },
@@ -174,7 +174,7 @@ class AppServerApi(
             cursor?.let { put("cursor", it) }
             put("limit", limit)
             put("sortDirection", "desc")
-            put("itemsView", "notLoaded")
+            put("itemsView", "summary")
         },
     ).jsonObject
 
