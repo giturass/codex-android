@@ -55,10 +55,8 @@ class NoticeHostState {
     private val pending = ArrayDeque<InlineNotice>()
     var current by mutableStateOf<InlineNotice?>(null)
         private set
-    var recent by mutableStateOf<InlineNotice?>(null)
-        private set
 
-    val hasContent: Boolean get() = current != null || recent != null
+    val hasContent: Boolean get() = current != null
 
     fun showMessage(message: String, technicalDetails: String? = null) {
         show(InlineNotice(message, technicalDetails))
@@ -70,19 +68,14 @@ class NoticeHostState {
 
     private fun show(notice: InlineNotice) {
         if (current == null) {
-            present(notice)
+            current = notice
         } else {
             pending.addLast(notice)
         }
     }
 
-    private fun present(notice: InlineNotice?) {
-        current = notice
-        if (notice != null && (notice.isError || notice.technicalDetails != null)) recent = notice
-    }
-
     fun dismiss(notice: InlineNotice) {
-        if (current === notice) present(pending.removeFirstOrNull())
+        if (current === notice) current = pending.removeFirstOrNull()
     }
 
     companion object {
@@ -92,9 +85,6 @@ class NoticeHostState {
                     "message" to state.current?.message,
                     "details" to state.current?.technicalDetails,
                     "error" to state.current?.isError,
-                    "recentMessage" to state.recent?.message,
-                    "recentDetails" to state.recent?.technicalDetails,
-                    "recentError" to state.recent?.isError,
                     "pending" to ArrayList(state.pending.map {
                         arrayListOf(it.message, it.technicalDetails, it.isError)
                     }),
@@ -104,9 +94,6 @@ class NoticeHostState {
                 NoticeHostState().apply {
                     current = (saved["message"] as? String)?.let {
                         InlineNotice(it, saved["details"] as? String, saved["error"] as Boolean)
-                    }
-                    recent = (saved["recentMessage"] as? String)?.let {
-                        InlineNotice(it, saved["recentDetails"] as? String, saved["recentError"] as Boolean)
                     }
                     (saved["pending"] as List<*>).forEach { value ->
                         val fields = value as List<*>
@@ -130,19 +117,12 @@ fun InlineNoticeHost(
     modifier: Modifier = Modifier,
 ) {
     val notice = state.current
-    val recent = state.recent
     val lifecycleOwner = LocalLifecycleOwner.current
     val accessibilityManager = LocalAccessibilityManager.current
-    var detailSummary by rememberSaveable(state) { mutableStateOf<String?>(null) }
-    var detailText by rememberSaveable(state) { mutableStateOf<String?>(null) }
+    var showingDetails by rememberSaveable(notice) { mutableStateOf(false) }
 
-    fun showDetails(value: InlineNotice) {
-        detailSummary = value.message
-        detailText = value.technicalDetails
-    }
-
-    LaunchedEffect(notice, lifecycleOwner, accessibilityManager, detailSummary) {
-        if (notice == null || detailSummary != null) return@LaunchedEffect
+    LaunchedEffect(notice, lifecycleOwner, accessibilityManager, showingDetails) {
+        if (notice == null || showingDetails) return@LaunchedEffect
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
             val timeout = if (notice.isError || notice.technicalDetails != null) 8_000L else 4_000L
             delay(
@@ -162,11 +142,12 @@ fun InlineNoticeHost(
             NoticeSurface(
                 message = notice.message,
                 isError = notice.isError,
-                onReadMessage = { showDetails(notice) },
+                onReadMessage = { showingDetails = true },
+                dismissLabel = "关闭提示",
                 onDismiss = { state.dismiss(notice) },
                 actions = {
                     if (notice.isError || notice.technicalDetails != null) {
-                        TextButton(onClick = { showDetails(notice) }) { Text(stringResource(R.string.common_details)) }
+                        TextButton(onClick = { showingDetails = true }) { Text(stringResource(R.string.common_details)) }
                     }
                     if (connectionStatus == ConnectionStatus.Disconnected || connectionStatus is ConnectionStatus.Failed) {
                         TextButton(onClick = onReconnect) { Text("重连") }
@@ -175,32 +156,14 @@ fun InlineNoticeHost(
             )
         } else if (connectionStatus != null && connectionStatus != ConnectionStatus.Connected) {
             ConnectionNotice(connectionStatus, onReconnect)
-        } else if (recent != null) {
-            TextButton(
-                onClick = { showDetails(recent) },
-                modifier = Modifier.padding(horizontal = 12.dp),
-            ) {
-                Icon(
-                    Icons.Rounded.Info,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    if (recent.isError) "最近一次错误 · 查看详情" else "最近一次提示 · 查看详情",
-                    modifier = Modifier.padding(start = 6.dp),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
         }
     }
-    detailSummary?.let { summary ->
+    if (showingDetails && notice != null) {
         UserFacingErrorDialog(
-            error = UserFacingError(summary, detailText),
+            error = UserFacingError(notice.message, notice.technicalDetails),
             onDismiss = {
-                detailSummary = null
-                detailText = null
+                showingDetails = false
+                state.dismiss(notice)
             },
         )
     }
@@ -233,6 +196,7 @@ private fun ConnectionNotice(
                 message = message,
                 isError = status is ConnectionStatus.Failed,
                 onReadMessage = if (error != null) ({ showingDetails = true }) else null,
+                dismissLabel = "收起提示",
                 onDismiss = { collapsed = true },
                 actions = {
                     if (error?.technicalDetails != null) {
@@ -255,6 +219,7 @@ private fun NoticeSurface(
     message: String,
     isError: Boolean,
     onReadMessage: (() -> Unit)?,
+    dismissLabel: String,
     onDismiss: () -> Unit,
     actions: @Composable () -> Unit,
 ) {
@@ -289,7 +254,7 @@ private fun NoticeSurface(
                     overflow = TextOverflow.Ellipsis,
                 )
                 IconButton(onClick = onDismiss) {
-                    Icon(Icons.Rounded.Close, contentDescription = "收起提示", modifier = Modifier.size(18.dp))
+                    Icon(Icons.Rounded.Close, contentDescription = dismissLabel, modifier = Modifier.size(18.dp))
                 }
             }
             Row(
