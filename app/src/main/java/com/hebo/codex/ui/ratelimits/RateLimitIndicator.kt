@@ -4,12 +4,14 @@ package com.hebo.codex.ui.ratelimits
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -17,6 +19,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -41,6 +45,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -408,52 +413,62 @@ private fun RateLimitResetDetails(
     state: RateLimitsUiState,
     onRequestReset: (RateLimitResetTarget) -> Unit,
 ) {
+    var detailsExpanded by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .clickable(role = Role.Button) { detailsExpanded = !detailsExpanded },
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("限额重置", style = MaterialTheme.typography.labelLarge)
+            Text("限额重置", modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
             Text(
                 "可用 ${formatCount(resetCredits.availableCount)} 次",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Icon(
+                if (detailsExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                contentDescription = if (detailsExpanded) "收起限额重置明细" else "展开限额重置明细",
+            )
         }
 
-        val credits = resetCredits.credits
-        when {
-            credits == null -> {
-                Text(
-                    "服务端仅提供可用次数，将自动选择可用额度",
+        if (detailsExpanded) {
+            val credits = resetCredits.credits
+            when {
+                credits == null -> {
+                    Text(
+                        "服务端仅提供可用次数，将自动选择可用额度",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (resetCredits.availableCount > 0L) {
+                        ResetCreditButton(
+                            enabled = !state.isResetting,
+                            isResetting = state.isResetting,
+                            onClick = {
+                                onRequestReset(RateLimitResetTarget(null, "一次可用额度"))
+                            },
+                        )
+                    }
+                }
+
+                credits.isEmpty() -> Text(
+                    "暂无可用的限额重置",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (resetCredits.availableCount > 0L) {
-                    ResetCreditButton(
-                        enabled = !state.isResetting,
+
+                else -> credits.forEachIndexed { index, credit ->
+                    if (index > 0) HorizontalDivider()
+                    RateLimitResetCreditDetails(
+                        credit = credit,
                         isResetting = state.isResetting,
-                        onClick = {
-                            onRequestReset(RateLimitResetTarget(null, "一次可用额度"))
-                        },
+                        onRequestReset = onRequestReset,
                     )
                 }
-            }
-
-            credits.isEmpty() -> Text(
-                "暂无可用的限额重置",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            else -> credits.forEachIndexed { index, credit ->
-                if (index > 0) HorizontalDivider()
-                RateLimitResetCreditDetails(
-                    credit = credit,
-                    isResetting = state.isResetting,
-                    onRequestReset = onRequestReset,
-                )
             }
         }
 
