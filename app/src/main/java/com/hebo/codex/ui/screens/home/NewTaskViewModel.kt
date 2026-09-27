@@ -103,6 +103,11 @@ class NewTaskViewModel(
         mutableState.update { it.copy(errorMessage = error.toUserFacingError("无法添加输入")) }
     }
 
+    suspend fun readRemoteFilePreview(path: String): ByteArray {
+        val serverId = requireNotNull(mutableState.value.serverId) { "请先选择服务器" }
+        return repository.readRemoteFilePreview(serverId, path)
+    }
+
     fun loadInputResources(forceRefresh: Boolean = false) {
         val current = mutableState.value
         val serverId = current.serverId ?: return

@@ -127,6 +127,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
@@ -323,6 +324,15 @@ fun ChatScreen(
     var activityDetailsRowKey by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
     var activityDetailsTurnId by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
     var remoteFileTarget by remember(conversation?.threadId) { mutableStateOf<RemoteFileTarget?>(null) }
+    var imagePreviewSource by remember(viewModel) { mutableStateOf<ChatImageSource?>(null) }
+    val imageLoader = remember(viewModel) { ChatImageLoader(viewModel::readRemoteFilePreview) }
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val previewImage: (ChatImageSource) -> Unit = { source ->
+        keyboardController?.hide()
+        focusManager.clearFocus()
+        imagePreviewSource = source
+    }
     val activeRequest = conversation?.pendingRequests?.firstOrNull { it.requestKey == activeRequestKey }
     val density = LocalDensity.current
     val showLinkError: (String) -> Unit = { message ->
@@ -523,6 +533,8 @@ fun ChatScreen(
                             when (row) {
                                 is ConversationRow.Item -> ConversationItemView(
                                     item = row.item,
+                                    imageLoader = imageLoader,
+                                    onPreviewImage = previewImage,
                                     activeItemKeys = conversation.activeItemKeys,
                                     serverName = conversation.serverName,
                                     cwd = conversation.cwd,
@@ -648,6 +660,8 @@ fun ChatScreen(
                         )
                         if (!conversation.isViewOnly) {
                             ConversationComposer(
+                                imageLoader = imageLoader,
+                                onPreviewImage = previewImage,
                                 serverId = conversation.serverId,
                                 conversationId = conversation.threadId,
                                 shellTarget = ShellCommandTarget(conversation.serverName, conversation.cwd),
@@ -869,6 +883,13 @@ fun ChatScreen(
                 }
             }
         }
+    }
+    imagePreviewSource?.let { source ->
+        ChatImagePreviewDialog(
+            source = source,
+            imageLoader = imageLoader,
+            onDismiss = { imagePreviewSource = null },
+        )
     }
     remoteFileTarget?.let { target ->
         RemoteFileSheet(
@@ -1210,6 +1231,8 @@ private fun ForkFromTurnAction(
 @Composable
 private fun ConversationItemView(
     item: ConversationItem,
+    imageLoader: ChatImageLoader,
+    onPreviewImage: (ChatImageSource) -> Unit,
     activeItemKeys: Set<ConversationItemKey>,
     serverName: String,
     cwd: String,
@@ -1220,7 +1243,7 @@ private fun ConversationItemView(
     onOpenActivityDetails: () -> Unit,
 ) {
     when (item) {
-        is ConversationItem.UserMessage -> UserMessage(item)
+        is ConversationItem.UserMessage -> UserMessage(item, imageLoader, onPreviewImage)
         is ConversationItem.UserShellCommand -> UserShellCommand(item, serverName)
         is ConversationItem.AgentMessage -> AgentMessage(
             item = item,
@@ -2011,6 +2034,8 @@ private fun ConversationAccessoryPanels(
 
 @Composable
 internal fun ConversationComposer(
+    imageLoader: ChatImageLoader,
+    onPreviewImage: (ChatImageSource) -> Unit,
     serverId: String?,
     conversationId: String?,
     shellTarget: ShellCommandTarget?,
@@ -2163,6 +2188,8 @@ internal fun ConversationComposer(
                 attachments.forEach { attachment ->
                     DraftAttachmentChip(
                         attachment = attachment,
+                        imageLoader = imageLoader,
+                        onPreviewImage = onPreviewImage,
                         onRemove = { onRemoveAttachment(attachment.id) },
                         modifier = Modifier.padding(end = 8.dp),
                     )

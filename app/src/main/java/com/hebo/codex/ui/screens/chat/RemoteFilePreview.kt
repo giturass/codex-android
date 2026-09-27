@@ -1,13 +1,16 @@
 package com.hebo.codex.ui.screens.chat
 
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.graphics.Matrix
 import android.graphics.Picture
 import android.graphics.RectF
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.IntSize
 import androidx.core.graphics.createBitmap
+import androidx.exifinterface.media.ExifInterface
 import com.caverock.androidsvg.SVG
 import dev.snipme.highlights.model.SyntaxLanguage
 import kotlinx.coroutines.Dispatchers
@@ -46,17 +49,35 @@ internal suspend fun decodeRemotePreview(
     )
 }
 
-private fun decodeBitmap(bytes: ByteArray): RemotePreview.Image? {
+internal suspend fun decodeRemoteImageThumbnail(bytes: ByteArray): ImageBitmap = withContext(Dispatchers.Default) {
+    decodeBitmap(bytes, maxDimension = MAX_IMAGE_THUMBNAIL_DIMENSION)?.let { return@withContext it.preview }
+    val text = decodeRemoteText(bytes)
+    require(text != null && text.looksLikeSvg()) { "内容不是支持的图片格式" }
+    decodeSvgPreview(text, maxPreviewDimension = MAX_IMAGE_THUMBNAIL_DIMENSION).preview
+}
+
+internal suspend fun decodeRemoteImagePreview(bytes: ByteArray): RemotePreview = withContext(Dispatchers.Default) {
+    decodeBitmap(bytes)?.let { return@withContext it }
+    val text = decodeRemoteText(bytes)
+    require(text != null && text.looksLikeSvg()) { "内容不是支持的图片格式" }
+    decodeSvgPreview(text)
+}
+
+private fun decodeBitmap(bytes: ByteArray, maxDimension: Int? = null): RemotePreview.Image? {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
     if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
 
     val supportsSubSampling = supportsBitmapRegionDecoding(bytes)
-    val sampleSize = bitmapPreviewSampleSize(
-        width = bounds.outWidth,
-        height = bounds.outHeight,
-        supportsSubSampling = supportsSubSampling,
-    )
+    val sampleSize = if (maxDimension != null) {
+        bitmapThumbnailSampleSize(bounds.outWidth, bounds.outHeight, maxDimension)
+    } else {
+        bitmapPreviewSampleSize(
+            width = bounds.outWidth,
+            height = bounds.outHeight,
+            supportsSubSampling = supportsSubSampling,
+        )
+    }
     val bitmap = BitmapFactory.decodeByteArray(
         bytes,
         0,
@@ -64,9 +85,30 @@ private fun decodeBitmap(bytes: ByteArray): RemotePreview.Image? {
         BitmapFactory.Options().apply { inSampleSize = sampleSize },
     ) ?: error("无法解码图片")
     return RemotePreview.Image(
-        preview = bitmap.asImageBitmap(),
-        encodedBytes = bytes.takeIf { supportsSubSampling },
+        preview = bitmap.applyExifOrientation(bytes).asImageBitmap(),
+        encodedBytes = bytes.takeIf { supportsSubSampling && maxDimension == null },
     )
+}
+
+private fun Bitmap.applyExifOrientation(bytes: ByteArray): Bitmap {
+    val exif = bytes.inputStream().use { ExifInterface(it) }
+    if (!exif.isFlipped && exif.rotationDegrees == 0) return this
+    val matrix = Matrix().apply {
+        if (exif.isFlipped) postScale(-1f, 1f)
+        postRotate(exif.rotationDegrees.toFloat())
+    }
+    return Bitmap.createBitmap(this, 0, 0, width, height, matrix, true).also { oriented ->
+        if (oriented !== this) recycle()
+    }
+}
+
+internal fun bitmapThumbnailSampleSize(width: Int, height: Int, maxDimension: Int = MAX_IMAGE_THUMBNAIL_DIMENSION): Int {
+    require(width > 0 && height > 0 && maxDimension > 0)
+    var sampleSize = 1
+    while ((width - 1) / sampleSize >= maxDimension || (height - 1) / sampleSize >= maxDimension) {
+        sampleSize *= 2
+    }
+    return sampleSize
 }
 
 internal fun bitmapPreviewSampleSize(
@@ -105,11 +147,11 @@ private fun decodeSvgPreview(bytes: ByteArray): RemotePreview.Svg {
     return decodeSvgPreview(text)
 }
 
-private fun decodeSvgPreview(text: String): RemotePreview.Svg {
+private fun decodeSvgPreview(text: String, maxPreviewDimension: Int = MAX_IMAGE_PREVIEW_DIMENSION): RemotePreview.Svg {
     require(!UNSAFE_XML_DECLARATION.containsMatchIn(text)) { "SVG 包含不允许的 DTD 或实体声明" }
     val svg = runCatching { SVG.getFromString(text) }
         .getOrElse { error -> throw IllegalArgumentException("无法解析 SVG：${error.message}", error) }
-    val rendered = renderSvg(svg)
+    val rendered = renderSvg(svg, maxPreviewDimension)
     return RemotePreview.Svg(
         picture = rendered.picture,
         imageSize = rendered.imageSize,
@@ -118,7 +160,7 @@ private fun decodeSvgPreview(text: String): RemotePreview.Svg {
     )
 }
 
-private fun renderSvg(svg: SVG): RenderedSvg {
+private fun renderSvg(svg: SVG, maxPreviewDimension: Int): RenderedSvg {
     val viewBox = svg.documentViewBox
     val documentWidth = svg.documentWidth.validDimension()
     val documentHeight = svg.documentHeight.validDimension()
@@ -150,7 +192,7 @@ private fun renderSvg(svg: SVG): RenderedSvg {
         height = (sourceHeight * sourceScale).roundToInt().coerceIn(1, MAX_SVG_LOGICAL_DIMENSION),
     )
     val picture = svg.renderToPicture(imageSize.width, imageSize.height)
-    val previewScale = (MAX_IMAGE_PREVIEW_DIMENSION / imageSize.maxDimension.toFloat()).coerceAtMost(1f)
+    val previewScale = (maxPreviewDimension / imageSize.maxDimension.toFloat()).coerceAtMost(1f)
     val previewWidth = (imageSize.width * previewScale).roundToInt().coerceAtLeast(1)
     val previewHeight = (imageSize.height * previewScale).roundToInt().coerceAtLeast(1)
     val preview = createBitmap(previewWidth, previewHeight)
@@ -403,6 +445,7 @@ private val UNSAFE_XML_DECLARATION = Regex("<!\\s*(?:DOCTYPE|ENTITY)\\b", RegexO
 private const val SVG_PREAMBLE_LIMIT = 4_096
 private const val DEFAULT_SVG_PREVIEW_DIMENSION = 512
 private const val MAX_IMAGE_PREVIEW_DIMENSION = 2_048
+private const val MAX_IMAGE_THUMBNAIL_DIMENSION = 256
 private const val MAX_SVG_LOGICAL_DIMENSION = 32_768
 private const val MAX_IN_MEMORY_IMAGE_PIXELS = 8_000_000L
 private const val MAX_TEXT_PREVIEW_CHARACTERS = 1_000_000

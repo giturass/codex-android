@@ -1,11 +1,10 @@
 package com.hebo.codex.ui.screens.chat
 
 import android.content.Context
-import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Base64
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -30,20 +29,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.core.net.toUri
 import com.hebo.codex.domain.FeatureEntry
 import com.hebo.codex.domain.FeatureKind
 import com.hebo.codex.domain.DraftAttachment
@@ -274,9 +267,12 @@ internal fun ComposerPalette(
 @Composable
 internal fun DraftAttachmentChip(
     attachment: DraftAttachment,
+    imageLoader: ChatImageLoader,
+    onPreviewImage: (ChatImageSource) -> Unit,
     onRemove: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val imageSource = attachment.input.chatImageSource()
     Surface(
         modifier = modifier,
         shape = MaterialTheme.shapes.medium,
@@ -284,67 +280,53 @@ internal fun DraftAttachmentChip(
         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
     ) {
         Row(
-            Modifier.padding(start = 6.dp, end = 2.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (attachment.previewUri != null) {
-                AttachmentThumbnail(attachment.previewUri)
-            } else {
-                Icon(
-                    when (attachment.input) {
-                        is UserInputPart.Image, is UserInputPart.LocalImage -> Icons.Rounded.Image
-                        is UserInputPart.Skill -> Icons.Rounded.AutoAwesome
-                        is UserInputPart.Mention -> Icons.Rounded.Apps
-                        is UserInputPart.Text -> Icons.Rounded.Description
-                    },
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp),
+            Row(
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .then(
+                        if (imageSource != null) {
+                            Modifier.clickable(onClickLabel = "预览图片", role = Role.Button) {
+                                onPreviewImage(imageSource)
+                            }
+                        } else {
+                            Modifier
+                        },
+                    )
+                    .padding(start = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (imageSource != null) {
+                    ChatImageThumbnail(
+                        source = imageSource,
+                        imageLoader = imageLoader,
+                        modifier = Modifier.size(34.dp).clip(RoundedCornerShape(8.dp)),
+                    )
+                } else {
+                    Icon(
+                        when (attachment.input) {
+                            is UserInputPart.Image, is UserInputPart.LocalImage -> Icons.Rounded.Image
+                            is UserInputPart.Skill -> Icons.Rounded.AutoAwesome
+                            is UserInputPart.Mention -> Icons.Rounded.Apps
+                            is UserInputPart.Text -> Icons.Rounded.Description
+                        },
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                Text(
+                    attachment.input.composerLabel,
+                    modifier = Modifier.padding(horizontal = 7.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-            Text(
-                attachment.input.composerLabel,
-                modifier = Modifier.padding(horizontal = 7.dp),
-                style = MaterialTheme.typography.labelMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            IconButton(onClick = onRemove, modifier = Modifier.size(32.dp)) {
+            IconButton(onClick = onRemove, modifier = Modifier.size(48.dp)) {
                 Icon(Icons.Rounded.Close, contentDescription = "移除 ${attachment.input.composerLabel}")
             }
         }
-    }
-}
-
-@Composable
-private fun AttachmentThumbnail(uri: String) {
-    val context = LocalContext.current
-    val bitmap by produceState<ImageBitmap?>(initialValue = null, uri, context) {
-        value = withContext(Dispatchers.IO) { loadThumbnail(context, uri.toUri()) }
-    }
-    if (bitmap == null) {
-        Icon(Icons.Rounded.Image, contentDescription = null, modifier = Modifier.size(34.dp))
-    } else {
-        Image(
-            bitmap = bitmap!!,
-            contentDescription = "图片预览",
-            modifier = Modifier.size(34.dp).clip(RoundedCornerShape(8.dp)),
-            contentScale = ContentScale.Crop,
-        )
-    }
-}
-
-private fun loadThumbnail(context: Context, uri: Uri): ImageBitmap? {
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-    var sampleSize = 1
-    while (bounds.outWidth / sampleSize > THUMBNAIL_MAX_SIZE ||
-        bounds.outHeight / sampleSize > THUMBNAIL_MAX_SIZE
-    ) {
-        sampleSize *= 2
-    }
-    val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
-    return context.contentResolver.openInputStream(uri)?.use {
-        BitmapFactory.decodeStream(it, null, options)?.asImageBitmap()
     }
 }
 
@@ -371,4 +353,3 @@ private val UserInputPart.composerLabel: String
     }
 
 private const val PALETTE_RESULT_LIMIT = 8
-private const val THUMBNAIL_MAX_SIZE = 256

@@ -34,6 +34,8 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.hebo.codex.R
@@ -45,7 +47,11 @@ import com.hebo.codex.domain.RequestedPermissions
 import com.hebo.codex.domain.UserMessagePart
 
 @Composable
-internal fun UserMessage(item: ConversationItem.UserMessage) {
+internal fun UserMessage(
+    item: ConversationItem.UserMessage,
+    imageLoader: ChatImageLoader,
+    onPreviewImage: (ChatImageSource) -> Unit,
+) {
     val text = item.content.filterIsInstance<UserMessagePart.Text>().joinToString("\n") { it.text }
     val attachments = item.content.filterNot { it is UserMessagePart.Text }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -66,7 +72,26 @@ internal fun UserMessage(item: ConversationItem.UserMessage) {
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        attachments.forEach { MessagePartLabel(it) }
+                        attachments.forEach { part ->
+                            val imageSource = part.chatImageSource()
+                            if (imageSource != null) {
+                                Surface(
+                                    onClick = { onPreviewImage(imageSource) },
+                                    modifier = Modifier.size(112.dp).semantics {
+                                        contentDescription = "预览图片"
+                                    },
+                                    shape = MaterialTheme.shapes.medium,
+                                    color = MaterialTheme.colorScheme.surfaceContainer,
+                                ) {
+                                    ChatImageThumbnail(
+                                        source = imageSource,
+                                        imageLoader = imageLoader,
+                                    )
+                                }
+                            } else {
+                                MessagePartLabel(part)
+                            }
+                        }
                     }
                 }
             }

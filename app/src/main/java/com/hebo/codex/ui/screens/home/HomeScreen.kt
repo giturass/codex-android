@@ -58,6 +58,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -87,6 +89,9 @@ import com.hebo.codex.ui.components.navigationAttention
 import com.hebo.codex.ui.ratelimits.RateLimitsUiState
 import com.hebo.codex.ui.quickphrases.QuickPhraseViewModel
 import com.hebo.codex.ui.screens.chat.ComposerCommand
+import com.hebo.codex.ui.screens.chat.ChatImageLoader
+import com.hebo.codex.ui.screens.chat.ChatImagePreviewDialog
+import com.hebo.codex.ui.screens.chat.ChatImageSource
 import com.hebo.codex.ui.screens.chat.ConversationComposer
 import com.hebo.codex.ui.screens.chat.ConversationFloatingHeader
 import com.hebo.codex.ui.screens.chat.ShellCommandTarget
@@ -129,6 +134,14 @@ fun HomeScreen(
     var showProjectMenu by remember { mutableStateOf(false) }
     var showCustomPathDialog by remember { mutableStateOf(false) }
     var showOptions by remember { mutableStateOf(false) }
+    val imageLoader = remember(newTaskViewModel, newTaskState.serverId) {
+        ChatImageLoader(newTaskViewModel::readRemoteFilePreview)
+    }
+    var imagePreviewSource by remember(newTaskViewModel, newTaskState.serverId) {
+        mutableStateOf<ChatImageSource?>(null)
+    }
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
 
     LifecycleResumeEffect(viewModel) {
         viewModel.reloadThreads()
@@ -215,6 +228,12 @@ fun HomeScreen(
             }
 
             else -> NewTaskContent(
+                imageLoader = imageLoader,
+                onPreviewImage = { source ->
+                    keyboardController?.hide()
+                    focusManager.clearFocus()
+                    imagePreviewSource = source
+                },
                 serverName = activeServer.name,
                 message = newTaskState.message,
                 attachments = newTaskState.attachments,
@@ -261,6 +280,13 @@ fun HomeScreen(
         }
     }
 
+    imagePreviewSource?.let { source ->
+        ChatImagePreviewDialog(
+            source = source,
+            imageLoader = imageLoader,
+            onDismiss = { imagePreviewSource = null },
+        )
+    }
     if (showCustomPathDialog) {
         CustomProjectPathDialog(
             currentPath = newTaskState.cwd,
@@ -286,6 +312,8 @@ fun HomeScreen(
 
 @Composable
 private fun NewTaskContent(
+    imageLoader: ChatImageLoader,
+    onPreviewImage: (ChatImageSource) -> Unit,
     serverName: String,
     message: String,
     attachments: List<DraftAttachment>,
@@ -374,6 +402,8 @@ private fun NewTaskContent(
                 .imePadding(),
         ) {
             ConversationComposer(
+                imageLoader = imageLoader,
+                onPreviewImage = onPreviewImage,
                 serverId = null,
                 conversationId = null,
                 shellTarget = ShellCommandTarget(serverName, cwd),
