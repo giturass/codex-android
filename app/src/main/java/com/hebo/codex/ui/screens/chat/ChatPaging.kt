@@ -17,13 +17,6 @@ internal fun shouldAdvanceChatPage(position: ChatPagingPosition): Boolean {
         ?: false
 }
 
-internal fun hasReachedChatPageAnchor(
-    position: ChatPagingPosition,
-    anchorOffset: Int,
-): Boolean = position.liveEdgeOffset?.let { it <= anchorOffset }
-    ?: position.firstVisibleItemIndex?.let { it > position.liveEdgeIndex }
-    ?: false
-
 internal fun hasReachedChatOutputEnd(position: ChatPagingPosition): Boolean {
     val outputEndIndex = position.liveEdgeIndex - 1
     if (outputEndIndex < 0) return true
@@ -64,27 +57,59 @@ internal fun shouldDockCompletedChatOutput(
 
 internal fun shouldFollowChatOutput(
     position: ChatPagingPosition,
-    pageRunwayEnabled: Boolean,
-): Boolean = if (pageRunwayEnabled) {
+    isRunning: Boolean,
+): Boolean = if (isRunning) {
     shouldAdvanceChatPage(position)
 } else {
     !hasReachedChatOutputEnd(position)
 }
 
-internal fun canReleaseChatPageRunway(
+internal fun chatPageRunwayForAdvance(
     position: ChatPagingPosition,
+    pageDistance: Int,
     liveEdgeHeight: Int,
-): Boolean {
-    val naturalLiveEdgeOffset = (position.readingEndOffset - liveEdgeHeight).coerceAtLeast(0)
-    return position.liveEdgeOffset?.let { it >= naturalLiveEdgeOffset }
-        ?: position.lastVisibleItemIndex?.let { it < position.liveEdgeIndex }
-        ?: false
+): Int {
+    // 末尾尚未进入测量范围时，先提供一页空间，翻页后按实际布局收敛
+    val liveEdgeOffset = position.liveEdgeOffset ?: return pageDistance
+    return (position.readingEndOffset - liveEdgeOffset - liveEdgeHeight + pageDistance)
+        .coerceIn(0, pageDistance)
+}
+
+internal fun remainingChatPageRunway(
+    position: ChatPagingPosition,
+    currentHeight: Int,
+    pageAnchorOffset: Int,
+    visibleAnchorOffset: Int?,
+    liveEdgeHeight: Int,
+): Int {
+    // 回看历史时锚点可能未被 LazyColumn 测量，保留原页空间直到重新可测量
+    if (visibleAnchorOffset == null) return currentHeight
+    val liveEdgeOffset = position.liveEdgeOffset
+    if (liveEdgeOffset != null) {
+        val anchoredLiveEdgeOffset = liveEdgeOffset + pageAnchorOffset - visibleAnchorOffset
+        return (position.readingEndOffset - anchoredLiveEdgeOffset - liveEdgeHeight)
+            .coerceIn(0, currentHeight)
+    }
+    return if (
+        visibleAnchorOffset <= pageAnchorOffset &&
+        position.lastVisibleItemIndex != null && position.lastVisibleItemIndex < position.liveEdgeIndex
+    ) {
+        0
+    } else {
+        currentHeight
+    }
 }
 
 internal fun chatViewportShrinkCompensation(
     previousReadingEndOffset: Int,
-    readingEndOffset: Int,
-): Int = (previousReadingEndOffset - readingEndOffset).coerceAtLeast(0)
+    position: ChatPagingPosition,
+    liveEdgeHeight: Int,
+): Int {
+    val shrink = (previousReadingEndOffset - position.readingEndOffset).coerceAtLeast(0)
+    val liveEdgeOffset = position.liveEdgeOffset ?: return if (shouldAdvanceChatPage(position)) shrink else 0
+    val coveredOutput = (liveEdgeOffset + liveEdgeHeight - position.readingEndOffset).coerceAtLeast(0)
+    return minOf(shrink, coveredOutput)
+}
 
 internal fun chatPageAdvanceDistance(
     position: ChatPagingPosition,

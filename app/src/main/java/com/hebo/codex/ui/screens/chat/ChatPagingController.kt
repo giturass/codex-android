@@ -19,14 +19,12 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.unit.Velocity
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 
 internal class ChatPagingController(
     val listState: LazyListState,
     val userScrollConnection: NestedScrollConnection,
-    val pageRunwayEnabled: Boolean,
     val pageRunwayHeightPx: Int,
     val showReturnToOutput: Boolean,
     private val updateViewportHeight: (Int) -> Unit,
@@ -51,55 +49,43 @@ internal fun rememberChatPagingController(
     conversationId: String?,
     isRunning: Boolean,
     liveEdgeIndex: Int,
-    topContentPaddingPx: Int,
-    bottomContentPaddingPx: Int,
     pageOverlapPx: Int,
     liveEdgeHeightPx: Int,
 ): ChatPagingController {
     val listState = rememberLazyListState()
     var autoFollow by rememberSaveable(conversationId) { mutableStateOf(true) }
     var initialListPositioned by remember(conversationId) { mutableStateOf(false) }
-    var retainPageRunway by remember(conversationId) { mutableStateOf(isRunning) }
-    var pageRunwayEnabled by remember(conversationId) { mutableStateOf(isRunning) }
+    var wasRunning by remember(conversationId) { mutableStateOf(isRunning) }
     var showReturnToOutput by remember(conversationId) { mutableStateOf(false) }
     var listViewportHeightPx by remember { mutableIntStateOf(0) }
-    var retainedPageRunwayHeightPx by remember(conversationId) { mutableIntStateOf(0) }
+    var pageRunwayHeightPx by remember(conversationId) { mutableIntStateOf(0) }
+    var pageAnchor by remember(conversationId) { mutableStateOf<ChatPageAnchor?>(null) }
+    var pageAdvanceInProgress by remember(conversationId) { mutableStateOf(false) }
     var currentOutputRequest by remember(conversationId) { mutableIntStateOf(0) }
     var handledCurrentOutputRequest by remember(conversationId) { mutableIntStateOf(0) }
     var completionDockRequest by remember(conversationId) { mutableIntStateOf(0) }
     var handledCompletionDockRequest by remember(conversationId) { mutableIntStateOf(0) }
     var runningOutputEndVisible by remember(conversationId) { mutableStateOf(false) }
     var completionDockInProgress by remember(conversationId) { mutableStateOf(false) }
-    val readingViewportHeightPx = (
-        listViewportHeightPx - topContentPaddingPx - bottomContentPaddingPx
-    ).coerceAtLeast(0)
-    val requiredPageRunwayHeightPx = (readingViewportHeightPx - pageOverlapPx).coerceAtLeast(0)
-    val pageRunwayHeightPx = maxOf(retainedPageRunwayHeightPx, requiredPageRunwayHeightPx)
 
-    LaunchedEffect(requiredPageRunwayHeightPx) {
-        if (requiredPageRunwayHeightPx > retainedPageRunwayHeightPx) {
-            retainedPageRunwayHeightPx = requiredPageRunwayHeightPx
-        }
-    }
     LaunchedEffect(conversationId, isRunning) {
         val shouldDock = shouldDockCompletedChatOutput(
-            wasRunning = retainPageRunway,
+            wasRunning = wasRunning,
             isRunning = isRunning,
             wasOutputEndVisible = runningOutputEndVisible,
             isUserScrollInProgress = !autoFollow && listState.isScrollInProgress,
         )
         if (isRunning) {
             runningOutputEndVisible = false
-            retainPageRunway = true
-            pageRunwayEnabled = true
         } else {
-            retainPageRunway = false
             if (shouldDock) {
                 completionDockRequest++
             } else {
-                pageRunwayEnabled = false
+                pageRunwayHeightPx = 0
+                pageAnchor = null
             }
         }
+        wasRunning = isRunning
     }
     LaunchedEffect(conversationId, isRunning, initialListPositioned, liveEdgeIndex) {
         if (!isRunning || !initialListPositioned) return@LaunchedEffect
@@ -111,26 +97,18 @@ internal fun rememberChatPagingController(
         conversationId,
         initialListPositioned,
         listViewportHeightPx,
-        pageRunwayEnabled,
         liveEdgeIndex,
-        liveEdgeHeightPx,
     ) {
         if (initialListPositioned || listViewportHeightPx <= 0) return@LaunchedEffect
         snapshotFlow { listState.layoutInfo.totalItemsCount }.first { it > liveEdgeIndex }
-        val readingEndOffset = listState.layoutInfo.readingEndOffset()
-        val scrollOffset = if (pageRunwayEnabled) {
-            -(readingEndOffset - liveEdgeHeightPx).coerceAtLeast(0)
-        } else {
-            0
-        }
-        listState.scrollToItem(liveEdgeIndex, scrollOffset)
+        listState.scrollToItem(liveEdgeIndex)
         initialListPositioned = true
     }
     LaunchedEffect(
         listState,
         autoFollow,
         initialListPositioned,
-        pageRunwayEnabled,
+        isRunning,
         liveEdgeIndex,
         pageOverlapPx,
         completionDockInProgress,
@@ -142,31 +120,49 @@ internal fun rememberChatPagingController(
                 listState.layoutInfo.chatPagingPosition(liveEdgeIndex)
             }.first {
                 it.readingEndOffset != previousReadingEndOffset ||
-                    (autoFollow && shouldFollowChatOutput(it, pageRunwayEnabled))
+                    (autoFollow && shouldFollowChatOutput(it, isRunning))
             }
             val viewportCompensation = chatViewportShrinkCompensation(
                 previousReadingEndOffset = previousReadingEndOffset,
-                readingEndOffset = position.readingEndOffset,
+                position = position,
+                liveEdgeHeight = liveEdgeHeightPx,
             )
             previousReadingEndOffset = position.readingEndOffset
             if (viewportCompensation > 0) {
                 listState.scrollBy(viewportCompensation.toFloat())
+                if (autoFollow && pageRunwayHeightPx > 0) pageAnchor = listState.pageAnchor()
                 continue
             }
             if (!autoFollow) continue
             val currentPosition = listState.layoutInfo.chatPagingPosition(liveEdgeIndex)
-            if (!pageRunwayEnabled) {
-                if (shouldFollowChatOutput(currentPosition, pageRunwayEnabled = false)) {
+            if (!isRunning) {
+                if (shouldFollowChatOutput(currentPosition, isRunning = false)) {
                     listState.scrollToItem(liveEdgeIndex)
                 }
                 continue
             }
             val pageDistance = chatPageAdvanceDistance(currentPosition, pageOverlapPx)
             if (shouldAdvanceChatPage(currentPosition) && pageDistance > 0) {
-                listState.animateScrollBy(
-                    value = pageDistance.toFloat(),
-                    animationSpec = tween(PAGE_SCROLL_ANIMATION_DURATION_MILLIS),
-                )
+                pageAdvanceInProgress = true
+                try {
+                    pageRunwayHeightPx = chatPageRunwayForAdvance(
+                        position = currentPosition,
+                        pageDistance = pageDistance,
+                        liveEdgeHeight = liveEdgeHeightPx,
+                    )
+                    val requiredEndHeight = liveEdgeHeightPx + pageRunwayHeightPx
+                    snapshotFlow { listState.layoutInfo }.first { layout ->
+                        val endItem = layout.visibleItemsInfo.firstOrNull { it.index == liveEdgeIndex }
+                        endItem == null || endItem.size == requiredEndHeight
+                    }
+                    listState.animateScrollBy(
+                        value = pageDistance.toFloat(),
+                        animationSpec = tween(PAGE_SCROLL_ANIMATION_DURATION_MILLIS),
+                    )
+                } finally {
+                    pageAnchor = listState.pageAnchor()
+                    pageAdvanceInProgress = false
+                }
             }
         }
     }
@@ -187,41 +183,54 @@ internal fun rememberChatPagingController(
             showReturnToOutput = false
         } finally {
             // 完成后即使归位动画被手势或重新布局取消，也必须释放分页留白
-            if (!retainPageRunway) pageRunwayEnabled = false
+            if (!wasRunning) {
+                pageRunwayHeightPx = 0
+                pageAnchor = null
+            }
             completionDockInProgress = false
         }
     }
-    LaunchedEffect(currentOutputRequest, initialListPositioned, liveEdgeIndex, pageOverlapPx) {
+    LaunchedEffect(currentOutputRequest, initialListPositioned, liveEdgeIndex) {
         if (!initialListPositioned || currentOutputRequest == handledCurrentOutputRequest) {
             return@LaunchedEffect
         }
         showReturnToOutput = false
+        pageRunwayHeightPx = 0
+        pageAnchor = null
         listState.animateScrollToItem(
             index = liveEdgeIndex,
-            scrollOffset = if (pageRunwayEnabled) -pageOverlapPx else 0,
         )
         handledCurrentOutputRequest = currentOutputRequest
         autoFollow = true
     }
-    LaunchedEffect(autoFollow, retainPageRunway) {
-        if (autoFollow && retainPageRunway) pageRunwayEnabled = true
-    }
     LaunchedEffect(
         listState,
-        autoFollow,
         initialListPositioned,
-        pageRunwayEnabled,
+        pageAdvanceInProgress,
+        completionDockInProgress,
         liveEdgeIndex,
         liveEdgeHeightPx,
+        pageAnchor,
     ) {
-        if (autoFollow || !initialListPositioned || !pageRunwayEnabled) return@LaunchedEffect
+        val anchor = pageAnchor ?: return@LaunchedEffect
+        if (!initialListPositioned || pageAdvanceInProgress || completionDockInProgress) return@LaunchedEffect
         snapshotFlow {
-            canReleaseChatPageRunway(
-                position = listState.layoutInfo.chatPagingPosition(liveEdgeIndex),
+            if (pageAdvanceInProgress || completionDockInProgress || pageAnchor != anchor) {
+                return@snapshotFlow null
+            }
+            val layout = listState.layoutInfo
+            remainingChatPageRunway(
+                position = layout.chatPagingPosition(liveEdgeIndex),
+                currentHeight = pageRunwayHeightPx,
+                pageAnchorOffset = anchor.offset,
+                visibleAnchorOffset = layout.visibleItemsInfo.firstOrNull { it.key == anchor.key }?.offset,
                 liveEdgeHeight = liveEdgeHeightPx,
             )
-        }.first { it }
-        pageRunwayEnabled = false
+        }.collect { height ->
+            if (height != null && !pageAdvanceInProgress && !completionDockInProgress && pageAnchor == anchor) {
+                pageRunwayHeightPx = height
+            }
+        }
     }
     LaunchedEffect(listState, autoFollow, initialListPositioned, liveEdgeIndex) {
         if (autoFollow || !initialListPositioned) return@LaunchedEffect
@@ -242,30 +251,8 @@ internal fun rememberChatPagingController(
             }
         }
     }
-    val userScrollConnection = remember(conversationId, listState, liveEdgeIndex, pageOverlapPx) {
+    val userScrollConnection = remember(conversationId) {
         object : NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (!pageRunwayEnabled || source != NestedScrollSource.UserInput || available.y >= 0f) {
-                    return Offset.Zero
-                }
-                val position = listState.layoutInfo.chatPagingPosition(liveEdgeIndex)
-                return if (hasReachedChatPageAnchor(position, anchorOffset = pageOverlapPx)) {
-                    Offset(x = 0f, y = available.y)
-                } else {
-                    Offset.Zero
-                }
-            }
-
-            override suspend fun onPreFling(available: Velocity): Velocity {
-                if (!pageRunwayEnabled || available.y >= 0f) return Velocity.Zero
-                val position = listState.layoutInfo.chatPagingPosition(liveEdgeIndex)
-                return if (hasReachedChatPageAnchor(position, anchorOffset = pageOverlapPx)) {
-                    available
-                } else {
-                    Velocity.Zero
-                }
-            }
-
             override fun onPostScroll(
                 consumed: Offset,
                 available: Offset,
@@ -279,7 +266,6 @@ internal fun rememberChatPagingController(
     return ChatPagingController(
         listState = listState,
         userScrollConnection = userScrollConnection,
-        pageRunwayEnabled = pageRunwayEnabled,
         pageRunwayHeightPx = pageRunwayHeightPx,
         showReturnToOutput = showReturnToOutput,
         updateViewportHeight = { listViewportHeightPx = it },
@@ -289,6 +275,13 @@ internal fun rememberChatPagingController(
         requestCurrentOutput = { currentOutputRequest++ },
     )
 }
+
+private data class ChatPageAnchor(val key: Any, val offset: Int)
+
+private fun LazyListState.pageAnchor(): ChatPageAnchor? =
+    layoutInfo.visibleItemsInfo.firstOrNull { it.index == firstVisibleItemIndex }?.let {
+        ChatPageAnchor(key = it.key, offset = it.offset)
+    }
 
 private fun LazyListLayoutInfo.readingEndOffset(): Int =
     (viewportEndOffset - afterContentPadding).coerceAtLeast(0)

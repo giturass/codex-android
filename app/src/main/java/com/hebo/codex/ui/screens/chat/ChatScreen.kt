@@ -267,7 +267,6 @@ private fun chatMarkdownComponents(
 
 private const val CHAT_LIST_END_KEY = "chat-list-end"
 private const val CHAT_HISTORY_PAGING_KEY = "chat-history-paging"
-private const val CHAT_LIST_PAGE_RUNWAY_KEY = "chat-list-page-runway"
 private const val HISTORY_LOAD_THRESHOLD_ITEMS = 2
 private const val PLAN_STEP_PROGRESS_FADE_DURATION_MILLIS = 150
 private val ChatPageOverlap = 64.dp
@@ -426,8 +425,6 @@ fun ChatScreen(
             endY = with(density) { ChatHazeFadeHeight.toPx() },
         )
     }
-    val topContentPaddingPx = with(density) { topContentPadding.roundToPx() }
-    val bottomContentPaddingPx = with(density) { bottomContentPadding.roundToPx() }
     val pageOverlapPx = with(density) { ChatPageOverlap.roundToPx() }
     val liveEdgeHeightPx = with(density) { 1.dp.roundToPx() }
     val history = conversation?.history
@@ -439,12 +436,10 @@ fun ChatScreen(
         conversationId = conversation?.threadId,
         isRunning = conversation?.isRunning == true,
         liveEdgeIndex = liveEdgeIndex,
-        topContentPaddingPx = topContentPaddingPx,
-        bottomContentPaddingPx = bottomContentPaddingPx,
         pageOverlapPx = pageOverlapPx,
         liveEdgeHeightPx = liveEdgeHeightPx,
     )
-    val pageRunwayHeight = with(density) { pagingController.pageRunwayHeightPx.toDp() }
+    val listEndHeight = with(density) { (liveEdgeHeightPx + pagingController.pageRunwayHeightPx).toDp() }
     LaunchedEffect(
         conversation?.threadId,
         history?.olderTurnsCursor,
@@ -568,12 +563,7 @@ fun ChatScreen(
                         }
                     }
                     item(CHAT_LIST_END_KEY) {
-                        Spacer(Modifier.height(1.dp))
-                    }
-                    if (pagingController.pageRunwayEnabled && pagingController.pageRunwayHeightPx > 0) {
-                        item(CHAT_LIST_PAGE_RUNWAY_KEY) {
-                            Spacer(Modifier.height(pageRunwayHeight))
-                        }
+                        Spacer(Modifier.height(listEndHeight))
                     }
                 }
             }
