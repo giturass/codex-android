@@ -1322,20 +1322,22 @@ class CodexRepository(
                         isViewed = conversationLeases.isHeld(key),
                     ),
                 )
-                notifyConversation(
-                    ConversationNotification(
-                        serverId = serverId,
-                        threadId = threadId,
-                        title = state.value.title,
-                        message = when {
-                            event.error != null -> event.error.summary
-                            shellItem == null -> "任务已完成，可以查看结果"
-                            shellFailed -> "Shell 命令执行失败，可以查看输出"
-                            else -> "Shell 命令已完成，可以查看输出"
-                        },
-                        attention = completionAttention,
-                    ),
-                )
+                if (state.value.parentThreadId == null) {
+                    notifyConversation(
+                        ConversationNotification(
+                            serverId = serverId,
+                            threadId = threadId,
+                            title = state.value.title,
+                            message = when {
+                                event.error != null -> event.error.summary
+                                shellItem == null -> "任务已完成，可以查看结果"
+                                shellFailed -> "Shell 命令执行失败，可以查看输出"
+                                else -> "Shell 命令已完成，可以查看输出"
+                            },
+                            attention = completionAttention,
+                        ),
+                    )
+                }
                 removePendingRequests(serverId, threadId)
                 removePendingItemUpdates(key, event.turnId)
                 releaseConversationIfUnused(key)
