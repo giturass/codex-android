@@ -271,6 +271,7 @@ internal fun DraftAttachmentChip(
     onPreviewImage: (ChatImageSource) -> Unit,
     onRemove: () -> Unit,
     modifier: Modifier = Modifier,
+    removeEnabled: Boolean = true,
 ) {
     val imageSource = attachment.input.chatImageSource()
     Surface(
@@ -306,7 +307,8 @@ internal fun DraftAttachmentChip(
                 } else {
                     Icon(
                         when (attachment.input) {
-                            is UserInputPart.Image, is UserInputPart.LocalImage -> Icons.Rounded.Image
+                            is UserInputPart.Image, is UserInputPart.UploadedImage, is UserInputPart.LocalImage -> Icons.Rounded.Image
+                            is UserInputPart.Audio, is UserInputPart.LocalAudio -> Icons.Rounded.Description
                             is UserInputPart.Skill -> Icons.Rounded.AutoAwesome
                             is UserInputPart.Mention -> Icons.Rounded.Apps
                             is UserInputPart.Text -> Icons.Rounded.Description
@@ -323,7 +325,7 @@ internal fun DraftAttachmentChip(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            IconButton(onClick = onRemove, modifier = Modifier.size(48.dp)) {
+            IconButton(onClick = onRemove, enabled = removeEnabled, modifier = Modifier.size(48.dp)) {
                 Icon(Icons.Rounded.Close, contentDescription = "移除 ${attachment.input.composerLabel}")
             }
         }
@@ -347,7 +349,10 @@ private val UserInputPart.composerLabel: String
     get() = when (this) {
         is UserInputPart.Text -> text.take(24)
         is UserInputPart.Image -> "设备图片"
+        is UserInputPart.UploadedImage -> "已上传图片"
         is UserInputPart.LocalImage -> "服务端图片"
+        is UserInputPart.Audio -> "音频"
+        is UserInputPart.LocalAudio -> "服务端音频"
         is UserInputPart.Skill -> "Skill · $name"
         is UserInputPart.Mention -> "提及 · $name"
     }

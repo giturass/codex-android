@@ -38,6 +38,7 @@ import com.hebo.codex.ConversationTarget
 import com.hebo.codex.domain.CodexRepository
 import com.hebo.codex.domain.DraftRepository
 import com.hebo.codex.domain.QuickPhraseRepository
+import com.hebo.codex.domain.QueueWithdrawalCoordinator
 import com.hebo.codex.domain.ConnectionStatus
 import com.hebo.codex.ui.components.CodexNavigationDrawer
 import com.hebo.codex.ui.components.CodexNavigationDrawerWidth
@@ -100,6 +101,7 @@ private data class ServerHubRoute(val serverId: String, val cwd: String? = null)
 fun CodexApp(
     repository: CodexRepository,
     draftRepository: DraftRepository,
+    queueWithdrawalCoordinator: QueueWithdrawalCoordinator,
     quickPhraseRepository: QuickPhraseRepository,
     notificationTargets: Flow<ConversationTarget> = emptyFlow(),
     navController: NavHostController = rememberNavController(),
@@ -405,6 +407,7 @@ fun CodexApp(
                         factory = ChatViewModel.factory(
                             repository,
                             draftRepository,
+                            queueWithdrawalCoordinator,
                             route.serverId,
                             route.threadId,
                         ),

@@ -30,6 +30,7 @@ internal class ChatPagingController(
     private val updateViewportHeight: (Int) -> Unit,
     private val prepareSubmission: () -> Unit,
     private val requestCurrentOutput: () -> Unit,
+    private val stopFollowing: () -> Unit,
 ) {
     fun onViewportHeightChanged(heightPx: Int) {
         updateViewportHeight(heightPx)
@@ -41,6 +42,11 @@ internal class ChatPagingController(
 
     fun returnToOutput() {
         requestCurrentOutput()
+    }
+
+    suspend fun locateItem(index: Int) {
+        stopFollowing()
+        listState.animateScrollToItem(index)
     }
 }
 
@@ -273,6 +279,10 @@ internal fun rememberChatPagingController(
             if (!autoFollow) currentOutputRequest++
         },
         requestCurrentOutput = { currentOutputRequest++ },
+        stopFollowing = {
+            autoFollow = false
+            showReturnToOutput = true
+        },
     )
 }
 

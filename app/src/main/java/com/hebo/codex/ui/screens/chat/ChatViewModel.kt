@@ -16,6 +16,8 @@ import com.hebo.codex.domain.DraftRepository
 import com.hebo.codex.domain.DraftTarget
 import com.hebo.codex.domain.FeatureEntry
 import com.hebo.codex.domain.ModelOption
+import com.hebo.codex.domain.QueueWithdrawalCoordinator
+import com.hebo.codex.domain.QueueWithdrawalState
 import com.hebo.codex.domain.ReviewDelivery
 import com.hebo.codex.domain.ReviewTarget
 import com.hebo.codex.domain.RemoteFileMetadata
@@ -35,6 +37,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -52,6 +55,7 @@ data class ChatDraft(
     val message: String = "",
     val attachments: List<DraftAttachment> = emptyList(),
     val options: TurnOptions = TurnOptions(),
+    val queuedInput: List<UserInputPart>? = null,
 )
 
 data class ForkRequest(val lastTurnId: String?)
@@ -77,6 +81,9 @@ data class ChatUiState(
     val isLoading: Boolean = true,
     val isLoadingResources: Boolean = false,
     val isSendingDraft: Boolean = false,
+    val isPreparingAttachment: Boolean = false,
+    val queueOperationId: String? = null,
+    val queueFeedback: String? = null,
     val terminatingBackgroundProcessIds: Set<String> = emptySet(),
     val forkRequest: ForkRequest? = null,
     val screenError: UserFacingError? = null,
@@ -92,10 +99,18 @@ sealed interface ChatEvent {
 class ChatViewModel(
     private val repository: CodexRepository,
     private val draftRepository: DraftRepository,
+    private val queueWithdrawalCoordinator: QueueWithdrawalCoordinator,
     private val serverId: String,
     private val threadId: String,
 ) : ViewModel() {
-    private val mutableState = MutableStateFlow(ChatUiState())
+    private val draftKey = DraftKey(serverId, DraftTarget.Thread(threadId))
+    private val withdrawalState = queueWithdrawalCoordinator.state(draftKey)
+    private val mutableState = MutableStateFlow(withdrawalState.value.let { withdrawal ->
+        ChatUiState(
+            isSendingDraft = withdrawal.operationId != null,
+            queueOperationId = withdrawal.operationId,
+        )
+    })
     private val mutableEvents = Channel<ChatEvent>(Channel.BUFFERED)
     val state: StateFlow<ChatUiState> = mutableState
     val events = mutableEvents.receiveAsFlow()
@@ -106,9 +121,15 @@ class ChatViewModel(
     private var modelListJob: Job? = null
     private var historyPagingJob: Job? = null
     private val turnDetailsJobs = mutableMapOf<String, Job>()
-    private val draftKey = DraftKey(serverId, DraftTarget.Thread(threadId))
+    private var appliedRestoredDraftRevision: String? = null
+
+    private val queueBusy: Boolean
+        get() = withdrawalState.value.operationId != null || mutableState.value.queueOperationId != null
 
     init {
+        viewModelScope.launch {
+            withdrawalState.collectLatest(::applyWithdrawalState)
+        }
         viewModelScope.launch {
             draftRepository.failures.collectLatest { failure ->
                 if (failure.key == draftKey) {
@@ -145,7 +166,7 @@ class ChatViewModel(
             val restoredResult = if (draftInitialized) {
                 Result.success<ConversationDraft?>(null)
             } else {
-                runSuspendCatching { draftRepository.load(draftKey) }
+                runSuspendCatching { queueWithdrawalCoordinator.loadDraft(draftKey) }
             }
             var conversationOpened = false
             try {
@@ -261,14 +282,17 @@ class ChatViewModel(
     }
 
     fun updateDraftMessage(message: String) {
+        if (queueBusy) return
         updateDraft { it.copy(message = message) }
     }
 
     fun updateDraftOptions(options: TurnOptions) {
+        if (queueBusy) return
         updateDraft { it.copy(options = options) }
     }
 
     fun addDraftAttachment(input: UserInputPart, previewUri: String? = null) {
+        if (queueBusy) return
         mutableState.update {
             it.copy(
                 draft = it.draft.copy(
@@ -284,6 +308,7 @@ class ChatViewModel(
     }
 
     fun removeDraftAttachment(id: String) {
+        if (queueBusy) return
         mutableState.update {
             it.copy(draft = it.draft.copy(attachments = it.draft.attachments.filterNot { item -> item.id == id }))
         }
@@ -291,18 +316,20 @@ class ChatViewModel(
     }
 
     fun sendDraft() {
+        if (queueBusy) return
         val current = mutableState.value
         if (current.conversation?.isViewOnly == true) return
         if (current.isSendingDraft || current.connectionStatus !is ConnectionStatus.Connected) return
         val draft = current.draft
+        if (draft.queuedInput != null) {
+            queueDraft()
+            return
+        }
         if (isShellCommandInput(draft.message)) {
             sendShellDraft(current, draft)
             return
         }
-        val input = buildList {
-            draft.message.takeIf(String::isNotBlank)?.let { add(UserInputPart.Text(it)) }
-            addAll(draft.attachments.map(DraftAttachment::input))
-        }
+        val input = draft.toInput()
         if (input.isEmpty()) return
         submitDraft(draft) {
             repository.sendMessage(serverId, threadId, input, draft.options)
@@ -326,7 +353,73 @@ class ChatViewModel(
         }
     }
 
+    fun setPreparingAttachment(preparing: Boolean) {
+        mutableState.update { it.copy(isPreparingAttachment = preparing) }
+    }
+
+    fun queueDraft() {
+        if (queueBusy) return
+        val current = mutableState.value
+        if (current.conversation?.isViewOnly != false || current.isSendingDraft || current.isPreparingAttachment ||
+            current.connectionStatus !is ConnectionStatus.Connected) return
+        val draft = current.draft
+        if (draft.queuedInput == null && isShellCommandInput(draft.message)) return
+        val input = draft.toInput()
+        if (input.isEmpty()) return
+        submitDraft(draft, failureFeedback = "排队结果未确认，请刷新队列后再重试") {
+            repository.queueInput(serverId, threadId, input)
+        }
+    }
+
+    fun cancelQueueEditing() {
+        if (queueBusy || mutableState.value.isSendingDraft) return
+        updateDraft { ChatDraft(options = it.options) }
+    }
+
+    fun clearQueueFeedback() {
+        queueWithdrawalCoordinator.clearFeedback(draftKey)
+        mutableState.update { it.copy(queueFeedback = null) }
+    }
+
+    fun withdrawQueuedInput(entryId: String, edit: Boolean) {
+        if (queueBusy) return
+        val current = mutableState.value
+        val conversation = current.conversation ?: return
+        val queue = conversation.runtimeStatus.queue ?: return
+        if (conversation.isViewOnly || current.isSendingDraft || current.isPreparingAttachment ||
+            current.connectionStatus !is ConnectionStatus.Connected || queue.loading || queue.stale || queue.error != null) return
+        if (edit && current.draft.hasContent) {
+            mutableState.update { it.copy(queueFeedback = "请先发送或清空输入框，再编辑排队消息") }
+            return
+        }
+        val entry = queue.entries.firstOrNull { it.id == entryId } ?: return
+        val restored = if (edit) current.draft.restoreQueuedInput(entry.input).toStoredDraft(conversation) else null
+        if (queueWithdrawalCoordinator.withdraw(draftKey, entry.id, restored)) {
+            applyWithdrawalState(withdrawalState.value)
+        }
+    }
+
+    private fun applyWithdrawalState(withdrawal: QueueWithdrawalState) {
+        if (withdrawalState.value !== withdrawal) return
+        val restored = withdrawal.restoredDraft?.takeIf { it.revision != appliedRestoredDraftRevision }
+        if (restored != null) {
+            appliedRestoredDraftRevision = restored.revision
+            draftInitialized = true
+        }
+        mutableState.update { current ->
+            current.copy(
+                isSendingDraft = withdrawal.operationId != null ||
+                    (current.isSendingDraft && current.queueOperationId == null),
+                queueOperationId = withdrawal.operationId,
+                draft = restored?.toChatDraft() ?: current.draft,
+                queueFeedback = withdrawal.feedback,
+                screenError = withdrawal.error ?: current.screenError,
+            )
+        }
+    }
+
     fun sendQuickPhrase(content: String) {
+        if (queueBusy) return
         val current = mutableState.value
         if (current.conversation?.isViewOnly == true) return
         if (current.isSendingDraft || current.connectionStatus !is ConnectionStatus.Connected) return
@@ -338,6 +431,28 @@ class ChatViewModel(
             }.onFailure(::showError)
             mutableState.update { it.copy(isSendingDraft = false) }
         }
+    }
+
+    suspend fun replyToAsyncQuestion(text: String): Boolean {
+        if (queueBusy) return false
+        val current = mutableState.value
+        if (text.isBlank() || current.conversation == null || current.conversation.isViewOnly) return false
+        if (current.isSendingDraft || current.connectionStatus !is ConnectionStatus.Connected) return false
+        mutableState.update { it.copy(isSendingDraft = true, screenError = null) }
+        return viewModelScope.async {
+            try {
+                runSuspendCatching {
+                    repository.sendMessage(
+                        serverId,
+                        threadId,
+                        listOf(UserInputPart.Text(text)),
+                        current.draft.options,
+                    )
+                }.onFailure(::showError).isSuccess
+            } finally {
+                mutableState.update { it.copy(isSendingDraft = false) }
+            }
+        }.await()
     }
 
     fun reportInputError(error: Throwable) {
@@ -374,6 +489,7 @@ class ChatViewModel(
     }
 
     suspend fun runShellCommand(command: String): Boolean {
+        if (queueBusy) return false
         val current = mutableState.value
         if (current.conversation?.isViewOnly == true) {
             showError(IllegalStateException("此会话当前仅可查看"))
@@ -586,6 +702,7 @@ class ChatViewModel(
     }
 
     fun clearError() {
+        queueWithdrawalCoordinator.clearError(draftKey)
         repository.clearConversationError(serverId, threadId)
         mutableState.update { it.copy(screenError = null) }
     }
@@ -603,7 +720,7 @@ class ChatViewModel(
         mutableState.update { it.copy(screenError = error.toUserFacingError()) }
     }
 
-    private fun submitDraft(draft: ChatDraft, send: suspend () -> Unit) {
+    private fun submitDraft(draft: ChatDraft, failureFeedback: String? = null, send: suspend () -> Unit) {
         mutableState.update { it.copy(isSendingDraft = true, screenError = null) }
         viewModelScope.launch {
             runSuspendCatching(send)
@@ -614,6 +731,7 @@ class ChatViewModel(
                                 it.copy(screenError = error.toUserFacingError("清理草稿失败"))
                             }
                         }
+                    queueWithdrawalCoordinator.draftChanged(draftKey)
                     mutableState.update { state ->
                         state.copy(
                             draft = if (state.draft == draft) {
@@ -626,7 +744,9 @@ class ChatViewModel(
                     }
                 }
                 .onFailure { error ->
-                    mutableState.update { it.copy(isSendingDraft = false) }
+                    mutableState.update {
+                        it.copy(isSendingDraft = false, queueFeedback = failureFeedback ?: it.queueFeedback)
+                    }
                     showError(error)
                 }
         }
@@ -640,29 +760,33 @@ class ChatViewModel(
     private fun scheduleDraft() {
         val state = mutableState.value
         val conversation = state.conversation ?: return
-        draftRepository.schedule(
+        draftRepository.schedule(state.draft.toStoredDraft(conversation))
+        queueWithdrawalCoordinator.draftChanged(draftKey)
+    }
+
+    private fun ChatDraft.toStoredDraft(conversation: ConversationState): ConversationDraft.Thread =
             ConversationDraft.Thread(
                 serverId = serverId,
                 threadId = threadId,
                 threadTitle = conversation.title,
-                message = state.draft.message,
+                message = message,
                 cwd = conversation.cwd,
-                options = state.draft.options,
-                attachments = state.draft.attachments,
+                options = options,
+                attachments = attachments,
+                queuedInput = queuedInput,
                 updatedAtMillis = System.currentTimeMillis(),
                 revision = newDraftRevision(),
-            ),
-        )
-    }
+            )
 
     companion object {
         fun factory(
             repository: CodexRepository,
             draftRepository: DraftRepository,
+            queueWithdrawalCoordinator: QueueWithdrawalCoordinator,
             serverId: String,
             threadId: String,
         ): ViewModelProvider.Factory = viewModelFactory {
-            initializer { ChatViewModel(repository, draftRepository, serverId, threadId) }
+            initializer { ChatViewModel(repository, draftRepository, queueWithdrawalCoordinator, serverId, threadId) }
         }
     }
 }
@@ -679,4 +803,5 @@ private fun ConversationDraft.Thread.toChatDraft(): ChatDraft = ChatDraft(
     message = message,
     attachments = attachments,
     options = options,
+    queuedInput = queuedInput,
 )

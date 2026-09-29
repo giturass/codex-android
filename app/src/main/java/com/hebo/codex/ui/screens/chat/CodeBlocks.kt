@@ -161,7 +161,7 @@ private fun CodeTextSurface(
 }
 
 @Composable
-private fun FullCodeDialog(title: String, text: AnnotatedString, onDismiss: () -> Unit) {
+internal fun FullCodeDialog(title: String, text: AnnotatedString, onDismiss: () -> Unit) {
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),

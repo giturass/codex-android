@@ -1,6 +1,7 @@
 package com.hebo.codex.data.local
 
 import androidx.room3.ColumnInfo
+import androidx.room3.AutoMigration
 import androidx.room3.Dao
 import androidx.room3.Database
 import androidx.room3.Entity
@@ -27,6 +28,7 @@ internal data class DraftEntity(
     @ColumnInfo(name = "attachment_count") val attachmentCount: Int,
     @ColumnInfo(name = "updated_at_millis") val updatedAtMillis: Long,
     @ColumnInfo(name = "revision") val revision: String,
+    @ColumnInfo(name = "queued_input_json") val queuedInputJson: String? = null,
 )
 
 @Dao
@@ -70,7 +72,8 @@ internal interface DraftDao {
 
 @Database(
     entities = [DraftEntity::class],
-    version = 1,
+    version = 2,
+    autoMigrations = [AutoMigration(from = 1, to = 2)],
     exportSchema = true,
 )
 abstract class CodexDatabase : RoomDatabase() {

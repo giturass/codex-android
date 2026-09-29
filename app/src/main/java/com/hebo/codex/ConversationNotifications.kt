@@ -38,6 +38,8 @@ class ConversationNotificationController(private val context: Context) {
     fun notify(event: ConversationNotification) {
         if (appInForeground || !canPostNotifications()) return
         val notificationId = "${event.serverId}:${event.threadId}".hashCode()
+        // 异步问题不会阻塞回合，完成通知不能覆盖刚收到的提问提醒
+        val notificationTag = if (event.attention == ThreadAttention.NEEDS_INPUT) "questions" else "results"
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             putExtra(EXTRA_SERVER_ID, event.serverId)
@@ -65,7 +67,7 @@ class ConversationNotificationController(private val context: Context) {
             )
             .build()
         try {
-            NotificationManagerCompat.from(context).notify(notificationId, notification)
+            NotificationManagerCompat.from(context).notify(notificationTag, notificationId, notification)
         } catch (_: SecurityException) {
             // Permission can be revoked between the explicit check and this call
         }

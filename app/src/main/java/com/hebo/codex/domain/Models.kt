@@ -316,6 +316,8 @@ sealed interface ConversationItem {
         override val turnId: String,
         val text: String,
         val phase: AgentMessagePhase? = null,
+        val delivery: AgentMessageDelivery? = null,
+        val questions: List<AsyncUserInputQuestion> = emptyList(),
     ) : ConversationItem
 
     data class Reasoning(
@@ -398,6 +400,15 @@ enum class AgentMessagePhase {
     COMMENTARY,
     FINAL_ANSWER,
 }
+
+enum class AgentMessageDelivery {
+    ASYNC,
+}
+
+data class AsyncUserInputQuestion(
+    val title: String,
+    val options: List<String> = emptyList(),
+)
 
 enum class ActivityKind {
     MCP_TOOL,
@@ -715,18 +726,6 @@ data class TurnOptions(
     val sandboxExcludeSlashTmp: Boolean = false,
     val outputSchema: String? = null,
 )
-
-sealed interface UserInputPart {
-    data class Text(val text: String) : UserInputPart
-
-    data class Image(val url: String) : UserInputPart
-
-    data class LocalImage(val path: String) : UserInputPart
-
-    data class Skill(val name: String, val path: String) : UserInputPart
-
-    data class Mention(val name: String, val path: String) : UserInputPart
-}
 
 sealed interface ReviewTarget {
     data object UncommittedChanges : ReviewTarget

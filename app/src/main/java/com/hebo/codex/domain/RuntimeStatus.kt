@@ -17,6 +17,13 @@ data class RuntimeActivity(
     val text: String? = null,
     val stale: Boolean = false,
     val truncated: Boolean = false,
+    val terminalInput: RuntimeTerminalInput? = null,
+)
+
+data class RuntimeTerminalInput(
+    val itemId: String,
+    val processId: String,
+    val stdin: String,
 )
 
 enum class RuntimeActivityStatus {
@@ -46,11 +53,13 @@ data class RuntimeQueuedInput(
     val id: String,
     val description: String,
     val truncated: Boolean = false,
+    val input: List<UserInputPart> = emptyList(),
 )
 
 sealed interface RuntimeStatusEvent {
     data class ActivityChanged(val activity: RuntimeActivity) : RuntimeStatusEvent
     data class ActivityCompleted(val id: String) : RuntimeStatusEvent
+    data class TerminalInputReceived(val turnId: String, val input: RuntimeTerminalInput) : RuntimeStatusEvent
     data class DiffChanged(val diff: RuntimeDiff) : RuntimeStatusEvent
     data object QueueChanged : RuntimeStatusEvent
     data class QueueLoaded(val queue: RuntimeInputQueue) : RuntimeStatusEvent
@@ -64,6 +73,21 @@ fun RuntimeStatus.reduce(event: RuntimeStatusEvent): RuntimeStatus = when (event
         records = (records.filterNot { it.id == event.activity.id } + event.activity).takeLast(50),
     )
     is RuntimeStatusEvent.ActivityCompleted -> copy(records = records.filterNot { it.id == event.id })
+    is RuntimeStatusEvent.TerminalInputReceived -> {
+        val id = "stdin:${event.turnId}:${event.input.itemId}:${event.input.processId}"
+        val previous = records.firstOrNull { it.id == id }
+        val stdin = previous?.terminalInput?.stdin.orEmpty() + event.input.stdin
+        val activity = RuntimeActivity(
+            id = id,
+            title = "终端输入",
+            detail = "",
+            status = RuntimeActivityStatus.INFO,
+            turnId = event.turnId,
+            truncated = previous?.truncated == true || stdin.length > MAX_TERMINAL_INPUT_LENGTH,
+            terminalInput = event.input.copy(stdin = stdin.take(MAX_TERMINAL_INPUT_LENGTH)),
+        )
+        copy(records = (records.filterNot { it.id == id } + activity).takeLast(50))
+    }
     is RuntimeStatusEvent.DiffChanged -> copy(
         diffs = (diffs.filterNot { it.turnId == event.diff.turnId } + event.diff).takeLast(5),
     )
@@ -97,3 +121,5 @@ fun RuntimeStatus.markStale(): RuntimeStatus = copy(
     tokenUsageStale = true,
     goalStale = true,
 )
+
+private const val MAX_TERMINAL_INPUT_LENGTH = 32_768

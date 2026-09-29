@@ -3,6 +3,7 @@ package com.hebo.codex.ui.screens.chat
 import com.hebo.codex.domain.AgentMessagePhase
 import com.hebo.codex.domain.ConversationItem
 import com.hebo.codex.domain.ConversationTurn
+import com.hebo.codex.domain.isAsyncQuestion
 import com.hebo.codex.domain.TurnDetailsState
 
 internal sealed interface ConversationRow {
@@ -130,7 +131,7 @@ private fun ConversationItem.isGroupableActivity(): Boolean =
         is ConversationItem.UserShellCommand,
         -> false
 
-        is ConversationItem.AgentMessage -> phase == AgentMessagePhase.COMMENTARY
+        is ConversationItem.AgentMessage -> phase == AgentMessagePhase.COMMENTARY && !isAsyncQuestion
         is ConversationItem.Reasoning,
         is ConversationItem.Plan,
         is ConversationItem.CommandExecution,
@@ -142,7 +143,7 @@ private fun ConversationItem.isGroupableActivity(): Boolean =
     }
 
 private fun ConversationItem.AgentMessage.startsFinalAnswer(): Boolean =
-    phase == AgentMessagePhase.FINAL_ANSWER || (phase == null && text.isNotBlank())
+    !isAsyncQuestion && (phase == AgentMessagePhase.FINAL_ANSWER || (phase == null && text.isNotBlank()))
 
 private fun ConversationItem.rowKey(prefix: String): String =
     "$prefix:${turnId.length}:$turnId:${id.length}:$id"

@@ -259,6 +259,31 @@ class AppServerApi(
         },
     ).jsonObject
 
+    suspend fun queueInput(threadId: String, clientUserMessageId: String, input: List<UserInputPart>): JsonObject =
+        connection.request(
+            "thread/queue/add",
+            buildJsonObject {
+                put("threadId", threadId)
+                put("clientUserMessageId", clientUserMessageId)
+                put("input", input.toWire())
+            },
+        ).jsonObject.also { response ->
+            val submission = response.requiredObject("queuedSubmission")
+            submission.requiredString("id")
+            if (submission.requiredString("clientUserMessageId") != clientUserMessageId) {
+                throw ProtocolException("排队确认与提交的消息不一致")
+            }
+            submission.requiredArray("input").forEach { userInputPart(it.jsonObject) }
+        }
+
+    suspend fun deleteQueuedInput(threadId: String, queuedSubmissionId: String): Boolean = connection.request(
+        "thread/queue/delete",
+        buildJsonObject {
+            put("threadId", threadId)
+            put("queuedSubmissionId", queuedSubmissionId)
+        },
+    ).jsonObject.requiredBoolean("deleted")
+
     suspend fun listQueuedInputs(threadId: String, cursor: String? = null): JsonObject = connection.request(
         "thread/queue/list",
         buildJsonObject {
@@ -356,43 +381,6 @@ class AppServerApi(
         options.sandboxMode?.let { put("sandboxPolicy", options.toSandboxPolicyWire(it)) }
         options.outputSchema?.takeIf(String::isNotBlank)?.let {
             put("outputSchema", Json.parseToJsonElement(it))
-        }
-    }
-
-    private fun List<UserInputPart>.toWire() = buildJsonArray {
-        forEach { part ->
-            add(
-                buildJsonObject {
-                    when (part) {
-                        is UserInputPart.Text -> {
-                            put("type", "text")
-                            put("text", part.text)
-                        }
-
-                        is UserInputPart.Image -> {
-                            put("type", "image")
-                            put("url", part.url)
-                        }
-
-                        is UserInputPart.LocalImage -> {
-                            put("type", "localImage")
-                            put("path", part.path)
-                        }
-
-                        is UserInputPart.Skill -> {
-                            put("type", "skill")
-                            put("name", part.name)
-                            put("path", part.path)
-                        }
-
-                        is UserInputPart.Mention -> {
-                            put("type", "mention")
-                            put("name", part.name)
-                            put("path", part.path)
-                        }
-                    }
-                },
-            )
         }
     }
 

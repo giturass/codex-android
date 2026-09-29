@@ -3,6 +3,8 @@ package com.hebo.codex.data.remote
 import com.hebo.codex.domain.ActivityKind
 import com.hebo.codex.domain.ActivityStatus
 import com.hebo.codex.domain.AgentMessagePhase
+import com.hebo.codex.domain.AgentMessageDelivery
+import com.hebo.codex.domain.AsyncUserInputQuestion
 import com.hebo.codex.domain.AgentTool
 import com.hebo.codex.domain.AgentState
 import com.hebo.codex.domain.AgentStatus
@@ -521,10 +523,6 @@ object ProtocolMapper {
             item.appendCommandOutput(params.requiredString("delta"))
         }
 
-        "item/commandExecution/terminalInteraction" -> itemChanged(params, method) { item ->
-            item.appendCommandOutput(params.requiredString("stdin"))
-        }
-
         "item/fileChange/patchUpdated" -> itemChanged(params, method) { item ->
             val fileChange = item as? ConversationItem.FileChange
                 ?: throw ProtocolException("fileChange patch 的目标类型不正确")
@@ -652,6 +650,12 @@ object ProtocolMapper {
                 turnId = turnId,
                 text = item.requiredString("text"),
                 phase = agentMessagePhase(item.optionalString("phase")),
+                delivery = agentMessageDelivery(item.optionalString("delivery")),
+                questions = when (val questions = item["questions"]) {
+                    null, JsonNull -> emptyList()
+                    is JsonArray -> questions.map(::asyncUserInputQuestion)
+                    else -> throw ProtocolException("助手消息 questions 必须是数组")
+                },
             )
 
             "reasoning" -> ConversationItem.Reasoning(
@@ -942,6 +946,26 @@ object ProtocolMapper {
         "commentary" -> AgentMessagePhase.COMMENTARY
         "final_answer" -> AgentMessagePhase.FINAL_ANSWER
         else -> throw ProtocolException("未知助手消息阶段：$value")
+    }
+
+    private fun agentMessageDelivery(value: String?): AgentMessageDelivery? = when (value) {
+        null -> null
+        "async" -> AgentMessageDelivery.ASYNC
+        else -> throw ProtocolException("未知助手消息投递方式：$value")
+    }
+
+    private fun asyncUserInputQuestion(element: JsonElement): AsyncUserInputQuestion {
+        val value = element as? JsonObject ?: throw ProtocolException("异步问题必须是对象")
+        val options = when (val options = value["options"]) {
+            null, JsonNull -> emptyList()
+            is JsonArray -> options.map { option ->
+                val text = option as? JsonPrimitive
+                if (text?.isString != true) throw ProtocolException("异步问题选项必须是字符串")
+                text.content
+            }
+            else -> throw ProtocolException("异步问题 options 必须是数组")
+        }
+        return AsyncUserInputQuestion(title = value.requiredString("title"), options = options)
     }
 
     private fun imageGenerationStatus(value: String): ActivityStatus = when (value) {

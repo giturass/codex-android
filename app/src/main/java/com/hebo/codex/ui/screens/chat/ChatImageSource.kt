@@ -13,6 +13,7 @@ internal sealed interface ChatImageSource {
 
 internal fun UserInputPart.chatImageSource(): ChatImageSource? = when (this) {
     is UserInputPart.Image -> ChatImageSource.Url(url)
+    is UserInputPart.UploadedImage -> ChatImageSource.FileReference(fileId)
     is UserInputPart.LocalImage -> ChatImageSource.ServerFile(path)
     else -> null
 }

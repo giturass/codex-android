@@ -12,6 +12,7 @@ import com.hebo.codex.data.remote.AppServerClientFactory
 import com.hebo.codex.domain.CodexRepository
 import com.hebo.codex.domain.DraftRepository
 import com.hebo.codex.domain.QuickPhraseRepository
+import com.hebo.codex.domain.QueueWithdrawalCoordinator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -49,5 +50,10 @@ class AppContainer(context: Context) {
         clientFactory = AppServerClientFactory(json, context.contentResolver),
         applicationScope = applicationScope,
         notifyConversation = notifications::notify,
+    )
+    val queueWithdrawalCoordinator = QueueWithdrawalCoordinator(
+        applicationScope = applicationScope,
+        draftRepository = draftRepository,
+        deleteQueuedInput = repository::deleteQueuedInput,
     )
 }

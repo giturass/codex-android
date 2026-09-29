@@ -13,6 +13,60 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class ConversationTurnDetailsTest {
     @Test
+    fun `恢复时完整读取最新回合和运行中回合且保留旧回合摘要`() = runTest {
+        val newest = ConversationTurn("newest", ConversationTurnStatus.COMPLETED, detailsState = TurnDetailsState.Unloaded)
+        val running = ConversationTurn("running", ConversationTurnStatus.IN_PROGRESS, detailsState = TurnDetailsState.Unloaded)
+        val older = ConversationTurn("older", ConversationTurnStatus.COMPLETED, detailsState = TurnDetailsState.Unloaded)
+        val reads = mutableListOf<String>()
+        val questions = listOf(
+            ConversationItem.AgentMessage(
+                id = "question", turnId = "newest", text = "", delivery = AgentMessageDelivery.ASYNC,
+                questions = listOf(AsyncUserInputQuestion("选择主题")),
+            ),
+            ConversationItem.AgentMessage("answer", "newest", "其他工作已完成"),
+        )
+
+        val turns = loadResumedTurns(listOf(newest, running, older)) { turnId ->
+            reads += turnId
+            if (turnId == "newest") questions else emptyList()
+        }
+
+        assertEquals(listOf("newest", "running"), reads)
+        assertEquals(listOf("older", "running", "newest"), turns.map(ConversationTurn::id))
+        assertEquals(TurnDetailsState.Unloaded, turns.first().detailsState)
+        assertEquals(TurnDetailsState.Loaded, turns[1].detailsState)
+        assertEquals(TurnDetailsState.Loaded, turns.last().detailsState)
+        assertEquals(questions.first(), ConversationHistory(turns).recentAsyncQuestion())
+    }
+
+    @Test
+    fun `最新运行中回合只读取一次且完整历史中的用户回复消除入口`() = runTest {
+        val newest = ConversationTurn("turn", ConversationTurnStatus.IN_PROGRESS, detailsState = TurnDetailsState.Unloaded)
+        var reads = 0
+        val turns = loadResumedTurns(listOf(newest)) {
+            reads++
+            listOf(
+                ConversationItem.AgentMessage(
+                    id = "question", turnId = "turn", text = "", delivery = AgentMessageDelivery.ASYNC,
+                    questions = listOf(AsyncUserInputQuestion("选择主题")),
+                ),
+                ConversationItem.UserMessage("reply", "turn", listOf(UserMessagePart.Text("深色"))),
+            )
+        }
+
+        assertEquals(1, reads)
+        assertEquals(TurnDetailsState.Loaded, turns.single().detailsState)
+        assertEquals(null, ConversationHistory(turns).recentAsyncQuestion())
+    }
+
+    @Test
+    fun `恢复空会话不请求任何回合详情`() = runTest {
+        val turns = loadResumedTurns(emptyList()) { error("不应加载详情") }
+
+        assertTrue(turns.isEmpty())
+    }
+
+    @Test
     fun `详情请求完成前保留摘要且重复请求只读取一次`() = runTest {
         val state = state()
         val result = CompletableDeferred<List<ConversationItem>>()

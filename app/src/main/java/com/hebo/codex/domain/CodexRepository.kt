@@ -71,6 +71,7 @@ class CodexRepository(
     private val pendingResumeGoalSnapshots = ConcurrentHashMap.newKeySet<ConversationKey>()
     private val pendingItemUpdates = ConcurrentHashMap<ItemRoute, MutableList<PendingItemUpdate>>()
     private val pendingRequestRoutes = ConcurrentHashMap<String, PendingRequestRoute>()
+    private val asyncQuestionNotifications = AsyncQuestionNotifications()
     private val conversationEventBuffers = ConcurrentHashMap<ConversationKey, ConversationEventBuffer>()
     private val backgroundTerminalRefreshBuffers =
         ConcurrentHashMap<ConversationKey, BackgroundTerminalRefreshBuffer>()
@@ -609,6 +610,35 @@ class CodexRepository(
         }
     }
 
+    suspend fun queueInput(serverId: String, threadId: String, input: List<UserInputPart>) {
+        require(input.isNotEmpty()) { "消息内容不能为空" }
+        val conversation = requireConversation(serverId, threadId).value
+        check(!conversation.isViewOnly) { "此会话当前仅可查看" }
+        try {
+            api(serverId).queueInput(threadId, UUID.randomUUID().toString(), input)
+        } finally {
+            requestRuntimeQueueRefresh(ConversationKey(serverId, threadId))
+        }
+    }
+
+    suspend fun deleteQueuedInput(serverId: String, threadId: String, entryId: String): Boolean {
+        val state = requireConversation(serverId, threadId)
+        check(!state.value.isViewOnly) { "此会话当前仅可查看" }
+        try {
+            val deleted = api(serverId).deleteQueuedInput(threadId, entryId)
+            if (deleted) state.updateState { current ->
+                current.copy(runtimeStatus = current.runtimeStatus.copy(
+                    queue = current.runtimeStatus.queue?.let { queue ->
+                        queue.copy(entries = queue.entries.filterNot { it.id == entryId })
+                    },
+                ))
+            }
+            return deleted
+        } finally {
+            requestRuntimeQueueRefresh(ConversationKey(serverId, threadId))
+        }
+    }
+
     suspend fun sendMessage(serverId: String, threadId: String, message: String) =
         sendMessage(serverId, threadId, listOf(UserInputPart.Text(message)))
 
@@ -1067,6 +1097,7 @@ class CodexRepository(
     }
 
     private fun clearConnectionState(serverId: String) {
+        asyncQuestionNotifications.clearServer(serverId)
         goalRevisions.filterKeys { it.serverId == serverId }.values.forEach { it.incrementAndGet() }
         pendingResumeGoalSnapshots.removeIf { it.serverId == serverId }
         clearServerPendingRequests(serverId)
@@ -1232,6 +1263,19 @@ class CodexRepository(
             if (runtimeEvent == RuntimeStatusEvent.QueueChanged) requestRuntimeQueueRefresh(key)
         }
         val event = notification.conversationEvent ?: return
+        conversations[key]?.value?.let { conversation ->
+            if (asyncQuestionNotifications.accept(serverId, threadId, method, event)) {
+                notifyConversation(
+                    ConversationNotification(
+                        serverId = serverId,
+                        threadId = threadId,
+                        title = conversation.title,
+                        message = "Codex 有新的问题，可以打开会话回复",
+                        attention = ThreadAttention.NEEDS_INPUT,
+                    ),
+                )
+            }
+        }
         event.backgroundTerminalChange()?.let { change ->
             backgroundTerminalRefreshBuffers[key]?.let { buffer ->
                 synchronized(buffer) {
@@ -1430,17 +1474,9 @@ class CodexRepository(
         return try {
             val snapshot = ProtocolMapper.resumedThreadSnapshot(api.resumeThread(key.threadId))
             snapshot.copy(
-                turns = snapshot.turns.map { turn ->
-                    // 进行中的回合需要完整基础条目，后续增量通知才能直接应用
-                    if (turn.status == ConversationTurnStatus.IN_PROGRESS) {
-                        turn.copy(
-                            items = loadAllTurnItems(api, key.threadId, turn.id),
-                            detailsState = TurnDetailsState.Loaded,
-                        )
-                    } else {
-                        turn
-                    }
-                }.asReversed(),
+                turns = loadResumedTurns(snapshot.turns) { turnId ->
+                    loadAllTurnItems(api, key.threadId, turnId)
+                },
             )
         } catch (error: Throwable) {
             pendingResumeGoalSnapshots.remove(key)
@@ -1800,7 +1836,8 @@ class CodexRepository(
             ?: firstNotNullOfOrNull { input ->
                 when (input) {
                     is UserInputPart.Text -> null
-                    is UserInputPart.Image, is UserInputPart.LocalImage -> "图片"
+                    is UserInputPart.Image, is UserInputPart.UploadedImage, is UserInputPart.LocalImage -> "图片"
+                    is UserInputPart.Audio, is UserInputPart.LocalAudio -> "音频"
                     is UserInputPart.Skill -> "使用 Skill：${input.name}"
                     is UserInputPart.Mention -> "提及：${input.name}"
                 }

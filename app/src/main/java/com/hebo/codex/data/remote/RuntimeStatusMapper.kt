@@ -5,6 +5,7 @@ import com.hebo.codex.domain.RuntimeActivityStatus
 import com.hebo.codex.domain.RuntimeDiff
 import com.hebo.codex.domain.RuntimeQueuedInput
 import com.hebo.codex.domain.RuntimeStatusEvent
+import com.hebo.codex.domain.RuntimeTerminalInput
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -19,6 +20,21 @@ object RuntimeStatusMapper {
 
     fun notification(method: String, params: JsonObject): RuntimeStatusEvent? = when (method) {
         "thread/queue/changed" -> RuntimeStatusEvent.QueueChanged
+        "item/commandExecution/terminalInteraction" -> {
+            val stdin = params.requiredString("stdin")
+            if (stdin.isEmpty()) {
+                null
+            } else {
+                RuntimeStatusEvent.TerminalInputReceived(
+                    turnId = params.requiredString("turnId"),
+                    input = RuntimeTerminalInput(
+                        itemId = params.requiredString("itemId"),
+                        processId = params.requiredString("processId"),
+                        stdin = stdin,
+                    ),
+                )
+            }
+        }
         "turn/completed" -> RuntimeStatusEvent.TurnCompleted(params.requiredObject("turn").requiredString("id"))
         "turn/diff/updated" -> {
             val diff = params.requiredString("diff")
@@ -101,6 +117,7 @@ object RuntimeStatusMapper {
                 id = entry.requiredString("id"),
                 description = description.take(MAX_TEXT_LENGTH),
                 truncated = description.length > MAX_TEXT_LENGTH,
+                input = entry.requiredArray("input").map { userInputPart(it.jsonObject) },
             )
         },
         nextCursor = response.optionalString("nextCursor"),

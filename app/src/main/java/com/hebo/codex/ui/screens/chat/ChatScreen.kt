@@ -150,6 +150,9 @@ import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.hebo.codex.R
 import com.hebo.codex.domain.ActivityStatus
 import com.hebo.codex.domain.AgentMessagePhase
+import com.hebo.codex.domain.isAsyncQuestion
+import com.hebo.codex.domain.recentAsyncQuestion
+import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import com.hebo.codex.domain.ApprovalDecision
 import com.hebo.codex.domain.ApprovalPolicy
 import com.hebo.codex.domain.ApprovalReviewer
@@ -218,6 +221,7 @@ import com.mikepenz.markdown.compose.elements.highlightedCodeFence
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.model.rememberMarkdownState
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
 import kotlin.math.max
 
@@ -373,6 +377,12 @@ fun ChatScreen(
         if (error != null) {
             noticeState.showError(error)
             viewModel.clearError()
+        }
+    }
+    LaunchedEffect(state.queueFeedback) {
+        state.queueFeedback?.let {
+            noticeState.showMessage(it)
+            viewModel.clearQueueFeedback()
         }
     }
     LaunchedEffect(conversation?.notices?.lastOrNull()?.id) {
@@ -543,6 +553,9 @@ fun ChatScreen(
                                     shellCommandDisabled = conversation.isRunning || conversation.isViewOnly ||
                                         state.connectionStatus !is ConnectionStatus.Connected,
                                     onRunShellCommand = viewModel::runShellCommand,
+                                    asyncReplyEnabled = !conversation.isViewOnly && !state.isSendingDraft &&
+                                        state.connectionStatus is ConnectionStatus.Connected,
+                                    onAsyncReply = viewModel::replyToAsyncQuestion,
                                     onOpenActivityDetails = {
                                         activityDetailsTurnId = row.turnId
                                         activityDetailsRowKey = row.key
@@ -657,6 +670,16 @@ fun ChatScreen(
                             onRetryQueue = viewModel::refreshRuntimeQueue,
                             onOpenConversation = onOpenRelatedConversation,
                             onTerminateCommand = viewModel::terminateBackgroundCommand,
+                            onWithdrawQueue = viewModel::withdrawQueuedInput,
+                            onLocateQuestion = {
+                                val question = conversation.history.recentAsyncQuestion()
+                                val index = conversationRows.indexOfFirst { row ->
+                                    row is ConversationRow.Item && row.item.id == question?.id && row.turnId == question.turnId
+                                }
+                                if (index >= 0) scrollScope.launch {
+                                    pagingController.locateItem(index + if (historyPaging != null) 1 else 0)
+                                }
+                            },
                         )
                         if (!conversation.isViewOnly) {
                             ConversationComposer(
@@ -677,6 +700,10 @@ fun ChatScreen(
                                 quickPhrases = quickPhraseState.phrases,
                                 isLoadingResources = state.isLoadingResources,
                                 isSending = state.isSendingDraft,
+                                isQueueEditing = state.draft.queuedInput != null,
+                                onQueue = viewModel::queueDraft,
+                                onCancelQueueEditing = viewModel::cancelQueueEditing,
+                                onPreparingAttachmentChange = viewModel::setPreparingAttachment,
                                 sendEnabled = state.connectionStatus is ConnectionStatus.Connected,
                                 placeholder = when {
                                     state.connectionStatus !is ConnectionStatus.Connected -> "服务器已断开"
@@ -1241,6 +1268,8 @@ private fun ConversationItemView(
     shellCommandDisabled: Boolean,
     onRunShellCommand: suspend (String) -> Boolean,
     onOpenActivityDetails: () -> Unit,
+    asyncReplyEnabled: Boolean,
+    onAsyncReply: suspend (String) -> Boolean,
 ) {
     when (item) {
         is ConversationItem.UserMessage -> UserMessage(item, imageLoader, onPreviewImage)
@@ -1252,6 +1281,8 @@ private fun ConversationItemView(
             onLinkError = onLinkError,
             shellCommandDisabled = shellCommandDisabled,
             onRunShellCommand = onRunShellCommand,
+            asyncReplyEnabled = asyncReplyEnabled,
+            onAsyncReply = onAsyncReply,
         )
         is ConversationItem.Plan -> PlanSnapshot(
             item = item,
@@ -1410,9 +1441,13 @@ private fun AgentMessage(
     onLinkError: (String) -> Unit,
     shellCommandDisabled: Boolean,
     onRunShellCommand: suspend (String) -> Boolean,
+    asyncReplyEnabled: Boolean,
+    onAsyncReply: suspend (String) -> Boolean,
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 2.dp)) {
-        SelectionContainer {
+        if (item.isAsyncQuestion) {
+            AsyncQuestionMessage(item, asyncReplyEnabled, onAsyncReply)
+        } else SelectionContainer {
             ChatMarkdown(
                 content = item.text.ifEmpty { "…" },
                 cwd = cwd,
@@ -1988,6 +2023,8 @@ private fun ConversationAccessoryPanels(
     onRetryQueue: () -> Unit,
     onOpenConversation: (String) -> Unit,
     onTerminateCommand: (String) -> Unit,
+    onWithdrawQueue: (String, Boolean) -> Unit,
+    onLocateQuestion: () -> Unit,
 ) {
     val density = LocalDensity.current
     val windowHeight = LocalWindowInfo.current.containerSize.height
@@ -2002,11 +2039,23 @@ private fun ConversationAccessoryPanels(
                 .heightIn(max = minOf(320.dp, availableHeight * 0.4f))
                 .verticalScroll(rememberScrollState()),
         ) {
+            if (conversation.history.recentAsyncQuestion() != null) {
+                TextButton(onClick = onLocateQuestion) { Text("查看最近提问") }
+            }
+            ThreadQueuePanel(
+                threadId = conversation.threadId,
+                queue = conversation.runtimeStatus.queue,
+                connected = connected,
+                enabled = !conversation.isViewOnly && !state.isSendingDraft && !state.isPreparingAttachment,
+                canEdit = !state.draft.hasContent,
+                operationId = state.queueOperationId,
+                onWithdraw = onWithdrawQueue,
+                onRetry = onRetryQueue,
+            )
             RuntimeStatusPanel(
                 conversation = conversation,
                 connected = connected,
                 runtimeStatus = conversation.runtimeStatus,
-                onRetryQueue = onRetryQueue,
             )
             if (conversation.isRunning) {
                 conversation.plan?.takeIf { it.steps.isNotEmpty() }?.let { plan ->
@@ -2065,6 +2114,10 @@ internal fun ConversationComposer(
     onSend: () -> Unit,
     onSendQuickPhrase: (String) -> Unit,
     onStop: (() -> Unit)?,
+    isQueueEditing: Boolean = false,
+    onQueue: (() -> Unit)? = null,
+    onCancelQueueEditing: () -> Unit = {},
+    onPreparingAttachmentChange: (Boolean) -> Unit = {},
 ) {
     var dialog by remember { mutableStateOf<ComposerDialog?>(null) }
     var addMenuExpanded by remember { mutableStateOf(false) }
@@ -2095,12 +2148,17 @@ internal fun ConversationComposer(
         contract = ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
         if (uri != null) {
-            composerScope.launch {
+            composerScope.launch(start = CoroutineStart.UNDISPATCHED) {
+                onPreparingAttachmentChange(true)
                 isAddingImage = true
-                runCatching { uri.toImageDataUrl(context) }
-                    .onSuccess { onAddAttachment(UserInputPart.Image(it), uri.toString()) }
-                    .onFailure(onInputError)
-                isAddingImage = false
+                try {
+                    runCatching { uri.toImageDataUrl(context) }
+                        .onSuccess { onAddAttachment(UserInputPart.Image(it), uri.toString()) }
+                        .onFailure(onInputError)
+                } finally {
+                    isAddingImage = false
+                    onPreparingAttachmentChange(false)
+                }
             }
         }
     }
@@ -2114,7 +2172,7 @@ internal fun ConversationComposer(
         if (activeToken?.trigger == '$' || activeToken?.trigger == '@') onLoadResources(false)
     }
     val hasInput = composerValue.text.isNotBlank() || attachments.isNotEmpty()
-    val isShellMode = shellTarget != null && isShellCommandInput(composerValue.text)
+    val isShellMode = !isQueueEditing && shellTarget != null && isShellCommandInput(composerValue.text)
     val shellCommand = shellCommandFromInput(composerValue.text)
     val shellBlockReason = shellCommandBlockReason(
         message = composerValue.text,
@@ -2122,6 +2180,10 @@ internal fun ConversationComposer(
         isRunning = isRunning,
     )
     fun enterShellMode(nextMessage: String) {
+        if (isQueueEditing) {
+            onInputError(IllegalArgumentException("请先取消队列编辑，再执行 Shell 命令"))
+            return
+        }
         val blockReason = shellModeEntryBlockReason(nextMessage, attachments.size)
         if (blockReason != null) {
             onInputError(IllegalArgumentException(blockReason))
@@ -2143,7 +2205,13 @@ internal fun ConversationComposer(
     Column(
         Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 12.dp),
     ) {
-        if (activeToken != null && (paletteEntries.isNotEmpty() || isLoadingResources)) {
+        if (isQueueEditing) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("编辑待发送消息 · 发送后排到队尾", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = onCancelQueueEditing, enabled = !isSending) { Text("丢弃草稿") }
+            }
+        }
+        if (!isSending && activeToken != null && (paletteEntries.isNotEmpty() || isLoadingResources)) {
             ComposerPalette(
                 entries = paletteEntries,
                 isLoading = isLoadingResources,
@@ -2192,13 +2260,15 @@ internal fun ConversationComposer(
                         onPreviewImage = onPreviewImage,
                         onRemove = { onRemoveAttachment(attachment.id) },
                         modifier = Modifier.padding(end = 8.dp),
+                        removeEnabled = !isSending,
                     )
                 }
             }
             Spacer(Modifier.height(6.dp))
         }
         val compactEndExtra = (if (isAddingImage) 28.dp else 0.dp) +
-            (if (isRunning && hasInput) 40.dp else 0.dp)
+            (if (isRunning && hasInput) 40.dp else 0.dp) +
+            (if (onQueue != null && isRunning && hasInput && !isShellMode && !isQueueEditing) 40.dp else 0.dp)
         MessageComposer(
             value = composerValue,
             onValueChange = {
@@ -2226,7 +2296,7 @@ internal fun ConversationComposer(
                         quickPhrases = quickPhrases,
                         quickPhraseSendEnabled = sendEnabled && !isSending,
                         enabled = !isSending,
-                        shellEntryEnabled = !hasInput,
+                        shellEntryEnabled = !hasInput && !isQueueEditing,
                         onEnterShell = shellTarget?.let {
                             { enterShellMode(composerValue.text) }
                         },
@@ -2289,6 +2359,11 @@ internal fun ConversationComposer(
                         Icon(Icons.Rounded.Stop, contentDescription = "停止")
                     }
                 }
+                if (onQueue != null && isRunning && hasInput && !isShellMode && !isQueueEditing) {
+                    IconButton(onClick = onQueue, enabled = sendEnabled && !isSending && !isAddingImage, modifier = Modifier.size(40.dp)) {
+                        Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = "排队到下一回合")
+                    }
+                }
                 val stopsActiveTurn = isRunning && !hasInput
                 val action = if (stopsActiveTurn) {
                     requireNotNull(onStop)
@@ -2300,7 +2375,7 @@ internal fun ConversationComposer(
                     enabled = if (stopsActiveTurn) {
                         !isSending
                     } else {
-                        hasInput && sendEnabled && !isSending &&
+                        hasInput && sendEnabled && !isSending && !isAddingImage &&
                             (!isShellMode || shellCommand != null && shellBlockReason == null)
                     },
                     action = if (stopsActiveTurn) {
@@ -2314,6 +2389,7 @@ internal fun ConversationComposer(
                     contentDescription = when {
                         stopsActiveTurn -> "停止"
                         isShellMode -> "执行 Shell 命令"
+                        isQueueEditing -> "重新排队"
                         else -> "发送"
                     },
                 )

@@ -26,7 +26,6 @@ import com.hebo.codex.domain.ConversationState
 import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.domain.RuntimeActivity
 import com.hebo.codex.domain.RuntimeActivityStatus
-import com.hebo.codex.domain.RuntimeInputQueue
 import com.hebo.codex.domain.RuntimeStatus
 import com.hebo.codex.domain.ThreadGoal
 import com.hebo.codex.domain.ThreadGoalStatus
@@ -41,7 +40,6 @@ import kotlin.math.roundToInt
 internal fun RuntimeStatusPanel(
     conversation: ConversationState,
     connected: Boolean,
-    onRetryQueue: () -> Unit,
     runtimeStatus: RuntimeStatus = conversation.runtimeStatus,
 ) {
     val presentation = runtimeStatusPresentation(conversation, runtimeStatus, connected) ?: return
@@ -72,27 +70,6 @@ internal fun RuntimeStatusPanel(
                 RuntimeText("已运行 ${formatDurationSeconds(goal.timeUsedSeconds)}")
             }
         }
-        presentation.queue?.let { queue ->
-            RuntimeCard("待处理输入 · ${queue.entries.size} 条") {
-                if (queue.loading) RuntimeText("正在刷新输入队列")
-                if (queue.stale && connected) RuntimeText("队列状态待重新同步")
-                queue.error?.let { error ->
-                    RuntimeText(error.summary, attention = true)
-                    TextButton(onClick = onRetryQueue, enabled = connected && !queue.loading) {
-                        Text("重试")
-                    }
-                }
-                queue.entries.forEachIndexed { index, entry ->
-                    key(entry.id) {
-                        RuntimeDetail(
-                            title = "待处理输入 ${index + 1}",
-                            text = entry.description,
-                            truncated = entry.truncated,
-                        )
-                    }
-                }
-            }
-        }
         if (conversation.pendingRequests.isNotEmpty()) {
             RuntimeText("${conversation.pendingRequests.size} 个请求等待处理")
         }
@@ -100,11 +77,7 @@ internal fun RuntimeStatusPanel(
             key(diff.turnId) {
                 RuntimeCard(if (diff.turnId == conversation.activeTurnId) "本轮汇总变更" else "回合汇总变更 ${index + 1}") {
                     if (diff.stale && connected) RuntimeText("变更待同步，显示最后收到的数据")
-                    if (diff.diff.isEmpty()) {
-                        RuntimeText("暂无文件变更")
-                    } else {
-                        RuntimeDetail("查看变更", diff.diff, diff.truncated, monospace = true)
-                    }
+                    TurnDiffSummary(diff)
                 }
             }
         }
@@ -116,13 +89,22 @@ internal fun RuntimeStatusPanel(
         }
         presentation.records.asReversed().forEach { activity ->
             key(activity.id) {
+                val terminalInput = activity.terminalInput
                 RuntimeCard(
-                    "${activity.title} · ${activity.status.label}",
+                    "${activity.title} · ${if (terminalInput == null) activity.status.label else "已发送"}",
                     attention = activity.status == RuntimeActivityStatus.FAILED || activity.status == RuntimeActivityStatus.WARNING,
                 ) {
-                    if (activity.detail.isNotBlank()) RuntimeText(activity.detail)
-                    activity.text?.let { RuntimeDetail("查看详情", it, activity.truncated) }
-                    if (activity.truncated && activity.text == null) RuntimeText("内容较长，仅展示保留的片段")
+                    if (terminalInput == null) {
+                        if (activity.detail.isNotBlank()) RuntimeText(activity.detail)
+                        activity.text?.let { RuntimeDetail("查看详情", it, activity.truncated) }
+                        if (activity.truncated && activity.text == null) RuntimeText("内容较长，仅展示保留的片段")
+                    } else {
+                        TerminalInputDetails(
+                            input = terminalInput,
+                            command = terminalInputCommand(terminalInput, conversation.items),
+                        )
+                        if (activity.truncated) RuntimeText("输入较长，仅展示保留的片段")
+                    }
                 }
             }
         }
@@ -234,7 +216,6 @@ internal data class RuntimeStatusPresentation(
     val contextRemaining: RuntimeRemainingTokens?,
     val goal: ThreadGoal?,
     val records: List<RuntimeActivity>,
-    val queue: RuntimeInputQueue?,
     val error: UserFacingError?,
 )
 
@@ -255,10 +236,7 @@ internal fun runtimeStatusPresentation(
 ): RuntimeStatusPresentation? {
     val records = runtimeStatus.records.filter { it.status != RuntimeActivityStatus.COMPLETED }
     val goal = conversation.goal?.takeUnless { it.status == ThreadGoalStatus.COMPLETE }
-    val queue = runtimeStatus.queue?.takeIf {
-        it.entries.isNotEmpty() || it.loading || it.error != null || it.stale
-    }
-    if (conversation.tokenUsage == null && goal == null && records.isEmpty() && queue == null &&
+    if (conversation.tokenUsage == null && goal == null && records.isEmpty() &&
         runtimeStatus.diffs.isEmpty() && conversation.errorMessage == null &&
         conversation.notices.isEmpty() && conversation.pendingRequests.isEmpty()
     ) return null
@@ -270,8 +248,7 @@ internal fun runtimeStatusPresentation(
     val attentionCount = records.count { it.status == RuntimeActivityStatus.FAILED || it.status == RuntimeActivityStatus.WARNING } +
         conversation.pendingRequests.size +
         conversation.notices.count { it.requiresAttention } +
-        (if (error != null) 1 else 0) +
-        (if (queue?.error != null) 1 else 0)
+        (if (error != null) 1 else 0)
     val summary = buildList {
         add("运行状态")
         when {
@@ -281,7 +258,7 @@ internal fun runtimeStatusPresentation(
         }
         if (attentionCount > 0) add("$attentionCount 项需注意")
     }.joinToString(" · ")
-    return RuntimeStatusPresentation(summary, remaining, goal, records, queue, error)
+    return RuntimeStatusPresentation(summary, remaining, goal, records, error)
 }
 
 private val RuntimeActivityStatus.label: String

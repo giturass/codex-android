@@ -203,8 +203,10 @@ internal class RoomDraftRepository(
     private suspend fun persistDraft(draft: ConversationDraft) {
         val entity = draft.toEntity()
         dao.upsert(entity)
-        val retainedFiles = json.decodeFromString<List<StoredAttachment>>(entity.attachmentsJson)
-            .filter { it.type == ATTACHMENT_EMBEDDED_IMAGE }
+        val storedAttachments = json.decodeFromString<List<StoredAttachment>>(entity.attachmentsJson)
+        val storedQueuedInput = entity.queuedInputJson?.let { json.decodeFromString<List<StoredAttachment>>(it) }.orEmpty()
+        val retainedFiles = (storedAttachments + storedQueuedInput)
+            .filter { it.type == ATTACHMENT_EMBEDDED_IMAGE || it.type == ATTACHMENT_EMBEDDED_AUDIO }
             .mapTo(mutableSetOf(), StoredAttachment::value)
         cleanAttachmentDirectory(draft.key, retainedFiles)
     }
@@ -230,6 +232,9 @@ internal class RoomDraftRepository(
 
             is ConversationDraft.Thread -> {
                 val storedAttachments = attachments.map { it.toStored(key) }
+                val storedQueuedInput = queuedInput?.mapIndexed { index, input ->
+                    DraftAttachment("queued:$index", input).toStored(key)
+                }
                 DraftEntity(
                     serverId = serverId,
                     targetType = TARGET_THREAD,
@@ -242,6 +247,7 @@ internal class RoomDraftRepository(
                     attachmentCount = storedAttachments.size,
                     updatedAtMillis = updatedAtMillis,
                     revision = revision,
+                    queuedInputJson = storedQueuedInput?.let { json.encodeToString(it) },
                 )
             }
         }
@@ -271,6 +277,9 @@ internal class RoomDraftRepository(
                 attachments = json.decodeFromString<List<StoredAttachment>>(attachmentsJson).map { it.toDomain(key) },
                 updatedAtMillis = updatedAtMillis,
                 revision = revision,
+                queuedInput = queuedInputJson?.let { value ->
+                    json.decodeFromString<List<StoredAttachment>>(value).map { it.toDomain(key).input }
+                },
             )
 
             else -> error("未知草稿类型：$targetType")
@@ -278,54 +287,73 @@ internal class RoomDraftRepository(
     }
 
     private fun DraftAttachment.toStored(key: DraftKey): StoredAttachment = when (val value = input) {
-        is UserInputPart.Text -> StoredAttachment(id, ATTACHMENT_TEXT, value = value.text)
-        is UserInputPart.LocalImage -> StoredAttachment(id, ATTACHMENT_LOCAL_IMAGE, value = value.path)
-        is UserInputPart.Skill -> StoredAttachment(id, ATTACHMENT_SKILL, name = value.name, value = value.path)
-        is UserInputPart.Mention -> StoredAttachment(id, ATTACHMENT_MENTION, name = value.name, value = value.path)
         is UserInputPart.Image -> {
             if (!value.url.startsWith("data:")) {
-                StoredAttachment(id, ATTACHMENT_IMAGE_URL, value = value.url)
+                StoredAttachment(id, ATTACHMENT_IMAGE_URL, value = value.url, detail = value.detail)
             } else {
-                val match = DATA_URL_PATTERN.matchEntire(value.url)
-                    ?: throw IllegalArgumentException("图片 data URL 无效")
-                val metadata = match.groupValues[1]
-                val mimeType = metadata.substringBefore(';')
-                require(mimeType.startsWith("image/")) { "data URL 不是图片" }
-                val file = attachmentFile(key, id)
-                if (!file.exists()) {
-                    val encoded = match.groupValues[2]
-                    val bytes = if (metadata.split(';').any { it.equals("base64", ignoreCase = true) }) {
-                        runCatching { Base64.decode(encoded, Base64.DEFAULT) }
-                            .getOrElse { throw IllegalArgumentException("图片 data URL 无效", it) }
-                    } else {
-                        Uri.decode(encoded).toByteArray(Charsets.UTF_8)
-                    }
-                    writeAtomic(file, bytes)
-                }
-                StoredAttachment(
-                    id = id,
+                storeEmbeddedMedia(
+                    key = key,
+                    url = value.url,
                     type = ATTACHMENT_EMBEDDED_IMAGE,
-                    value = file.name,
-                    mimeType = mimeType,
+                    mimeFamily = "image",
+                    detail = value.detail,
                 )
             }
         }
+        is UserInputPart.Audio -> {
+            if (!value.url.startsWith("data:")) {
+                StoredAttachment(id, "input", value = "", input = value)
+            } else {
+                storeEmbeddedMedia(key, value.url, ATTACHMENT_EMBEDDED_AUDIO, mimeFamily = "audio")
+            }
+        }
+        else -> StoredAttachment(id, "input", value = "", input = value)
+    }
+
+    private fun DraftAttachment.storeEmbeddedMedia(
+        key: DraftKey,
+        url: String,
+        type: String,
+        mimeFamily: String,
+        detail: String? = null,
+    ): StoredAttachment {
+        val match = DATA_URL_PATTERN.matchEntire(url)
+            ?: throw IllegalArgumentException("媒体 data URL 无效")
+        val metadata = match.groupValues[1]
+        val mimeType = metadata.substringBefore(';')
+        require(mimeType.startsWith("$mimeFamily/") && mimeType.length > mimeFamily.length + 1) {
+            "data URL 必须使用 $mimeFamily MIME 类型"
+        }
+        val file = attachmentFile(key, "$id:${sha256(url)}")
+        if (!file.exists()) {
+            val encoded = match.groupValues[2]
+            val bytes = if (metadata.split(';').any { it.equals("base64", ignoreCase = true) }) {
+                runCatching { Base64.decode(encoded, Base64.DEFAULT) }
+                    .getOrElse { throw IllegalArgumentException("媒体 data URL 无效", it) }
+            } else {
+                Uri.decode(encoded).toByteArray(Charsets.UTF_8)
+            }
+            writeAtomic(file, bytes)
+        }
+        return StoredAttachment(id, type, value = file.name, mimeType = mimeType, detail = detail)
     }
 
     private fun StoredAttachment.toDomain(key: DraftKey): DraftAttachment = when (type) {
+        "input" -> DraftAttachment(id, requireNotNull(input))
         ATTACHMENT_TEXT -> DraftAttachment(id, UserInputPart.Text(value))
-        ATTACHMENT_IMAGE_URL -> DraftAttachment(id, UserInputPart.Image(value))
+        ATTACHMENT_IMAGE_URL -> DraftAttachment(id, UserInputPart.Image(value, detail))
         ATTACHMENT_LOCAL_IMAGE -> DraftAttachment(id, UserInputPart.LocalImage(value))
         ATTACHMENT_SKILL -> DraftAttachment(id, UserInputPart.Skill(requireNotNull(name), value))
         ATTACHMENT_MENTION -> DraftAttachment(id, UserInputPart.Mention(requireNotNull(name), value))
-        ATTACHMENT_EMBEDDED_IMAGE -> {
+        ATTACHMENT_EMBEDDED_IMAGE, ATTACHMENT_EMBEDDED_AUDIO -> {
             val file = storedAttachmentFile(key, value)
             val bytes = file.readBytes()
             val mime = requireNotNull(mimeType)
+            val url = "data:$mime;base64,${Base64.encodeToString(bytes, Base64.NO_WRAP)}"
             DraftAttachment(
                 id = id,
-                input = UserInputPart.Image("data:$mime;base64,${Base64.encodeToString(bytes, Base64.NO_WRAP)}"),
-                previewUri = Uri.fromFile(file).toString(),
+                input = if (type == ATTACHMENT_EMBEDDED_IMAGE) UserInputPart.Image(url, detail) else UserInputPart.Audio(url),
+                previewUri = if (type == ATTACHMENT_EMBEDDED_IMAGE) Uri.fromFile(file).toString() else null,
             )
         }
 
@@ -416,6 +444,7 @@ internal class RoomDraftRepository(
         const val ATTACHMENT_TEXT = "text"
         const val ATTACHMENT_IMAGE_URL = "image_url"
         const val ATTACHMENT_EMBEDDED_IMAGE = "embedded_image"
+        const val ATTACHMENT_EMBEDDED_AUDIO = "embedded_audio"
         const val ATTACHMENT_LOCAL_IMAGE = "local_image"
         const val ATTACHMENT_SKILL = "skill"
         const val ATTACHMENT_MENTION = "mention"
@@ -435,6 +464,8 @@ private data class StoredAttachment(
     val name: String? = null,
     val value: String,
     val mimeType: String? = null,
+    val detail: String? = null,
+    val input: UserInputPart? = null,
 )
 
 @Serializable
