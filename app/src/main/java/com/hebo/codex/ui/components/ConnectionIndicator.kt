@@ -10,7 +10,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Sync
@@ -40,18 +39,21 @@ internal fun ConnectionStatusButton(
     modifier: Modifier = Modifier,
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
-    IconButton(onClick = { expanded = true }, modifier = modifier.size(48.dp)) {
-        Icon(
-            imageVector = when (status) {
-                ConnectionStatus.Connected -> Icons.Rounded.CloudDone
-                ConnectionStatus.Connecting -> Icons.Rounded.Sync
-                ConnectionStatus.Disconnected -> Icons.Rounded.CloudOff
-                is ConnectionStatus.Failed -> Icons.Rounded.ErrorOutline
-            },
-            contentDescription = "服务器连接：${status.label()}",
-            tint = if (status is ConnectionStatus.Failed) MaterialTheme.colorScheme.error
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+    val statusIcon = when (status) {
+        ConnectionStatus.Connected -> null
+        ConnectionStatus.Connecting -> Icons.Rounded.Sync
+        ConnectionStatus.Disconnected -> Icons.Rounded.CloudOff
+        is ConnectionStatus.Failed -> Icons.Rounded.ErrorOutline
+    }
+    if (statusIcon != null) {
+        IconButton(onClick = { expanded = true }, modifier = modifier.size(48.dp)) {
+            Icon(
+                imageVector = statusIcon,
+                contentDescription = "服务器连接：${status.label()}",
+                tint = if (status is ConnectionStatus.Failed) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
     if (expanded) {
         AlertDialog(
