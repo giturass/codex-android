@@ -55,7 +55,6 @@ data class ChatDraft(
     val message: String = "",
     val attachments: List<DraftAttachment> = emptyList(),
     val options: TurnOptions = TurnOptions(),
-    val queuedInput: List<UserInputPart>? = null,
 )
 
 data class ForkRequest(val lastTurnId: String?)
@@ -321,10 +320,6 @@ class ChatViewModel(
         if (current.conversation?.isViewOnly == true) return
         if (current.isSendingDraft || current.connectionStatus !is ConnectionStatus.Connected) return
         val draft = current.draft
-        if (draft.queuedInput != null) {
-            queueDraft()
-            return
-        }
         if (isShellCommandInput(draft.message)) {
             sendShellDraft(current, draft)
             return
@@ -363,7 +358,7 @@ class ChatViewModel(
         if (current.conversation?.isViewOnly != false || current.isSendingDraft || current.isPreparingAttachment ||
             current.connectionStatus !is ConnectionStatus.Connected) return
         val draft = current.draft
-        if (draft.queuedInput == null && isShellCommandInput(draft.message)) return
+        if (isShellCommandInput(draft.message)) return
         val input = draft.toInput()
         if (input.isEmpty()) return
         submitDraft(draft, failureFeedback = "排队结果未确认，请刷新队列后再重试") {
@@ -371,29 +366,24 @@ class ChatViewModel(
         }
     }
 
-    fun cancelQueueEditing() {
-        if (queueBusy || mutableState.value.isSendingDraft) return
-        updateDraft { ChatDraft(options = it.options) }
-    }
-
     fun clearQueueFeedback() {
         queueWithdrawalCoordinator.clearFeedback(draftKey)
         mutableState.update { it.copy(queueFeedback = null) }
     }
 
-    fun withdrawQueuedInput(entryId: String, edit: Boolean) {
+    fun withdrawQueuedInput(entryId: String, restoreToComposer: Boolean) {
         if (queueBusy) return
         val current = mutableState.value
         val conversation = current.conversation ?: return
         val queue = conversation.runtimeStatus.queue ?: return
         if (conversation.isViewOnly || current.isSendingDraft || current.isPreparingAttachment ||
             current.connectionStatus !is ConnectionStatus.Connected || queue.loading || queue.stale || queue.error != null) return
-        if (edit && current.draft.hasContent) {
-            mutableState.update { it.copy(queueFeedback = "请先发送或清空输入框，再编辑排队消息") }
+        if (restoreToComposer && current.draft.hasContent) {
+            mutableState.update { it.copy(queueFeedback = "请先发送或清空输入框，再移回排队消息") }
             return
         }
         val entry = queue.entries.firstOrNull { it.id == entryId } ?: return
-        val restored = if (edit) current.draft.restoreQueuedInput(entry.input).toStoredDraft(conversation) else null
+        val restored = if (restoreToComposer) current.draft.restoreQueuedInput(entry.input).toStoredDraft(conversation) else null
         if (queueWithdrawalCoordinator.withdraw(draftKey, entry.id, restored)) {
             applyWithdrawalState(withdrawalState.value)
         }
@@ -773,7 +763,6 @@ class ChatViewModel(
                 cwd = conversation.cwd,
                 options = options,
                 attachments = attachments,
-                queuedInput = queuedInput,
                 updatedAtMillis = System.currentTimeMillis(),
                 revision = newDraftRevision(),
             )
@@ -803,5 +792,4 @@ private fun ConversationDraft.Thread.toChatDraft(): ChatDraft = ChatDraft(
     message = message,
     attachments = attachments,
     options = options,
-    queuedInput = queuedInput,
 )

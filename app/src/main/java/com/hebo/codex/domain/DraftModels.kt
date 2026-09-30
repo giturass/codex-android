@@ -53,7 +53,6 @@ sealed interface ConversationDraft {
         val attachments: List<DraftAttachment>,
         override val updatedAtMillis: Long,
         override val revision: String,
-        val queuedInput: List<UserInputPart>? = null,
     ) : ConversationDraft {
         override val key: DraftKey = DraftKey(serverId, DraftTarget.Thread(threadId))
     }

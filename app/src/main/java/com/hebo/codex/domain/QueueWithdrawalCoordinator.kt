@@ -58,7 +58,7 @@ class QueueWithdrawalCoordinator(
                 }
                 if (existing.getOrNull()?.hasContent() == true) {
                     state.update {
-                        it.copy(operationId = null, feedback = "请先发送或清空输入框，再编辑排队消息")
+                        it.copy(operationId = null, feedback = "请先发送或清空输入框，再移回排队消息")
                     }
                     return@launch
                 }
@@ -90,7 +90,6 @@ class QueueWithdrawalCoordinator(
                 it.copy(
                     operationId = null,
                     restoredDraft = draftToRestore,
-                    feedback = if (saved.isSuccess) "已撤回到输入框，发送后重新排到队尾" else null,
                     error = saved.exceptionOrNull()?.let { error ->
                         operationError("消息已撤回，保存草稿失败；内容已保留，请勿清除草稿", error)
                     },

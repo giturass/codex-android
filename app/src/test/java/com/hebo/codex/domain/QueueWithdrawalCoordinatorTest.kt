@@ -28,7 +28,9 @@ class QueueWithdrawalCoordinatorTest {
         val drafts = FakeDraftRepository().apply { beforeSave = { saveGate.await() } }
         val coordinator = QueueWithdrawalCoordinator(backgroundScope, drafts) { _, _, _ -> deleteResult.await() }
         val originalScreen = backgroundScope.launch { coordinator.state(KEY).collect() }
-        val recovered = draft("撤回内容")
+        val recovered = draft("撤回内容").copy(
+            attachments = listOf(DraftAttachment("image", UserInputPart.UploadedImage("file-42", "high"))),
+        )
 
         assertTrue(coordinator.withdraw(KEY, "entry", recovered))
         assertEquals("entry", coordinator.state(KEY).value.operationId)
@@ -41,6 +43,8 @@ class QueueWithdrawalCoordinatorTest {
         assertSame(coordinator.state(KEY), reopenedState)
         assertEquals("entry", reopenedState.value.operationId)
         assertFalse(reopenedDraft.isCompleted)
+        assertNull(reopenedState.value.restoredDraft)
+        assertEquals(0, drafts.saveCalls)
 
         deleteResult.complete(true)
         runCurrent()
@@ -53,6 +57,7 @@ class QueueWithdrawalCoordinatorTest {
         assertEquals(recovered, reopenedDraft.await())
         assertEquals(recovered, drafts.load(KEY))
         assertEquals(recovered, reopenedState.value.restoredDraft)
+        assertNull(reopenedState.value.feedback)
     }
 
     @Test
@@ -141,7 +146,7 @@ class QueueWithdrawalCoordinatorTest {
         assertEquals(0, requests)
         assertEquals(newer, coordinator.loadDraft(KEY))
         assertNull(coordinator.state(KEY).value.restoredDraft)
-        assertEquals("请先发送或清空输入框，再编辑排队消息", coordinator.state(KEY).value.feedback)
+        assertEquals("请先发送或清空输入框，再移回排队消息", coordinator.state(KEY).value.feedback)
     }
 
     @Test
@@ -204,7 +209,6 @@ class QueueWithdrawalCoordinatorTest {
         attachments = emptyList(),
         updatedAtMillis = 1L,
         revision = revision,
-        queuedInput = listOf(UserInputPart.Text(message)),
     )
 
     private class FakeDraftRepository : DraftRepository {

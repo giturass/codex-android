@@ -700,9 +700,7 @@ fun ChatScreen(
                                 quickPhrases = quickPhraseState.phrases,
                                 isLoadingResources = state.isLoadingResources,
                                 isSending = state.isSendingDraft,
-                                isQueueEditing = state.draft.queuedInput != null,
                                 onQueue = viewModel::queueDraft,
-                                onCancelQueueEditing = viewModel::cancelQueueEditing,
                                 onPreparingAttachmentChange = viewModel::setPreparingAttachment,
                                 sendEnabled = state.connectionStatus is ConnectionStatus.Connected,
                                 placeholder = when {
@@ -2047,7 +2045,7 @@ private fun ConversationAccessoryPanels(
                 queue = conversation.runtimeStatus.queue,
                 connected = connected,
                 enabled = !conversation.isViewOnly && !state.isSendingDraft && !state.isPreparingAttachment,
-                canEdit = !state.draft.hasContent,
+                canRestoreToComposer = !state.draft.hasContent,
                 operationId = state.queueOperationId,
                 onWithdraw = onWithdrawQueue,
                 onRetry = onRetryQueue,
@@ -2114,9 +2112,7 @@ internal fun ConversationComposer(
     onSend: () -> Unit,
     onSendQuickPhrase: (String) -> Unit,
     onStop: (() -> Unit)?,
-    isQueueEditing: Boolean = false,
     onQueue: (() -> Unit)? = null,
-    onCancelQueueEditing: () -> Unit = {},
     onPreparingAttachmentChange: (Boolean) -> Unit = {},
 ) {
     var dialog by remember { mutableStateOf<ComposerDialog?>(null) }
@@ -2172,7 +2168,7 @@ internal fun ConversationComposer(
         if (activeToken?.trigger == '$' || activeToken?.trigger == '@') onLoadResources(false)
     }
     val hasInput = composerValue.text.isNotBlank() || attachments.isNotEmpty()
-    val isShellMode = !isQueueEditing && shellTarget != null && isShellCommandInput(composerValue.text)
+    val isShellMode = shellTarget != null && isShellCommandInput(composerValue.text)
     val shellCommand = shellCommandFromInput(composerValue.text)
     val shellBlockReason = shellCommandBlockReason(
         message = composerValue.text,
@@ -2180,10 +2176,6 @@ internal fun ConversationComposer(
         isRunning = isRunning,
     )
     fun enterShellMode(nextMessage: String) {
-        if (isQueueEditing) {
-            onInputError(IllegalArgumentException("请先取消队列编辑，再执行 Shell 命令"))
-            return
-        }
         val blockReason = shellModeEntryBlockReason(nextMessage, attachments.size)
         if (blockReason != null) {
             onInputError(IllegalArgumentException(blockReason))
@@ -2205,12 +2197,6 @@ internal fun ConversationComposer(
     Column(
         Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp, end = 16.dp, bottom = 12.dp),
     ) {
-        if (isQueueEditing) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("编辑待发送消息 · 发送后排到队尾", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                TextButton(onClick = onCancelQueueEditing, enabled = !isSending) { Text("丢弃草稿") }
-            }
-        }
         if (!isSending && activeToken != null && (paletteEntries.isNotEmpty() || isLoadingResources)) {
             ComposerPalette(
                 entries = paletteEntries,
@@ -2268,7 +2254,7 @@ internal fun ConversationComposer(
         }
         val compactEndExtra = (if (isAddingImage) 28.dp else 0.dp) +
             (if (isRunning && hasInput) 40.dp else 0.dp) +
-            (if (onQueue != null && isRunning && hasInput && !isShellMode && !isQueueEditing) 40.dp else 0.dp)
+            (if (onQueue != null && isRunning && hasInput && !isShellMode) 40.dp else 0.dp)
         MessageComposer(
             value = composerValue,
             onValueChange = {
@@ -2296,7 +2282,7 @@ internal fun ConversationComposer(
                         quickPhrases = quickPhrases,
                         quickPhraseSendEnabled = sendEnabled && !isSending,
                         enabled = !isSending,
-                        shellEntryEnabled = !hasInput && !isQueueEditing,
+                        shellEntryEnabled = !hasInput,
                         onEnterShell = shellTarget?.let {
                             { enterShellMode(composerValue.text) }
                         },
@@ -2359,7 +2345,7 @@ internal fun ConversationComposer(
                         Icon(Icons.Rounded.Stop, contentDescription = "停止")
                     }
                 }
-                if (onQueue != null && isRunning && hasInput && !isShellMode && !isQueueEditing) {
+                if (onQueue != null && isRunning && hasInput && !isShellMode) {
                     IconButton(onClick = onQueue, enabled = sendEnabled && !isSending && !isAddingImage, modifier = Modifier.size(40.dp)) {
                         Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = "排队到下一回合")
                     }
@@ -2389,7 +2375,6 @@ internal fun ConversationComposer(
                     contentDescription = when {
                         stopsActiveTurn -> "停止"
                         isShellMode -> "执行 Shell 命令"
-                        isQueueEditing -> "重新排队"
                         else -> "发送"
                     },
                 )

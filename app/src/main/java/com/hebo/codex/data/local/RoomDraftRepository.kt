@@ -204,8 +204,7 @@ internal class RoomDraftRepository(
         val entity = draft.toEntity()
         dao.upsert(entity)
         val storedAttachments = json.decodeFromString<List<StoredAttachment>>(entity.attachmentsJson)
-        val storedQueuedInput = entity.queuedInputJson?.let { json.decodeFromString<List<StoredAttachment>>(it) }.orEmpty()
-        val retainedFiles = (storedAttachments + storedQueuedInput)
+        val retainedFiles = storedAttachments
             .filter { it.type == ATTACHMENT_EMBEDDED_IMAGE || it.type == ATTACHMENT_EMBEDDED_AUDIO }
             .mapTo(mutableSetOf(), StoredAttachment::value)
         cleanAttachmentDirectory(draft.key, retainedFiles)
@@ -232,9 +231,6 @@ internal class RoomDraftRepository(
 
             is ConversationDraft.Thread -> {
                 val storedAttachments = attachments.map { it.toStored(key) }
-                val storedQueuedInput = queuedInput?.mapIndexed { index, input ->
-                    DraftAttachment("queued:$index", input).toStored(key)
-                }
                 DraftEntity(
                     serverId = serverId,
                     targetType = TARGET_THREAD,
@@ -247,7 +243,6 @@ internal class RoomDraftRepository(
                     attachmentCount = storedAttachments.size,
                     updatedAtMillis = updatedAtMillis,
                     revision = revision,
-                    queuedInputJson = storedQueuedInput?.let { json.encodeToString(it) },
                 )
             }
         }
@@ -277,9 +272,6 @@ internal class RoomDraftRepository(
                 attachments = json.decodeFromString<List<StoredAttachment>>(attachmentsJson).map { it.toDomain(key) },
                 updatedAtMillis = updatedAtMillis,
                 revision = revision,
-                queuedInput = queuedInputJson?.let { value ->
-                    json.decodeFromString<List<StoredAttachment>>(value).map { it.toDomain(key).input }
-                },
             )
 
             else -> error("未知草稿类型：$targetType")

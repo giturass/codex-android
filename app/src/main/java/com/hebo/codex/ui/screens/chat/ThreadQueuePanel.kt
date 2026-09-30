@@ -29,7 +29,7 @@ internal fun ThreadQueuePanel(
     queue: RuntimeInputQueue?,
     connected: Boolean,
     enabled: Boolean,
-    canEdit: Boolean,
+    canRestoreToComposer: Boolean,
     operationId: String?,
     onWithdraw: (String, Boolean) -> Unit,
     onRetry: () -> Unit,
@@ -58,7 +58,7 @@ internal fun ThreadQueuePanel(
                     Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
                         Text("${index + 1}. ${entry.description}", maxLines = 3, style = MaterialTheme.typography.bodySmall)
                         Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                            TextButton(onClick = { onWithdraw(entry.id, true) }, enabled = ready && canEdit) { Text("撤回编辑") }
+                            TextButton(onClick = { onWithdraw(entry.id, true) }, enabled = ready && canRestoreToComposer) { Text("移回输入框") }
                             TextButton(onClick = { onWithdraw(entry.id, false) }, enabled = ready) {
                                 Text(if (operationId == entry.id) "处理中…" else "撤销")
                             }

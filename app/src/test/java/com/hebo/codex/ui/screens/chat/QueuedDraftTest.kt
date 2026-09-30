@@ -5,38 +5,41 @@ import com.hebo.codex.domain.InputByteRange
 import com.hebo.codex.domain.InputTextElement
 import com.hebo.codex.domain.TurnOptions
 import com.hebo.codex.domain.UserInputPart
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class QueuedDraftTest {
     @Test
-    fun `撤回后未改动文本保留文本标记与原始输入顺序`() {
+    fun `移回后合并文字并保留附件和当前选项成为普通草稿`() {
         val original = mixedInput()
         val draft = ChatDraft(options = TurnOptions(model = "model")).restoreQueuedInput(original)
 
         assertEquals("看📄文件\n继续检查", draft.message)
-        assertEquals(listOf("queued:0", "queued:2", "queued:4"), draft.attachments.map { it.id })
+        assertEquals(listOf(original[0], original[2], original[4]), draft.attachments.map { it.input })
+        assertEquals(3, draft.attachments.map { it.id }.toSet().size)
         assertEquals("model", draft.options.model)
-        assertEquals(original, draft.queuedInput)
-        assertEquals(original, draft.toInput())
+        assertEquals(
+            ChatDraft(message = "看📄文件\n继续检查", attachments = draft.attachments, options = draft.options),
+            draft,
+        )
+        assertEquals(
+            listOf(UserInputPart.Text("看📄文件\n继续检查"), original[0], original[2], original[4]),
+            draft.toInput(),
+        )
     }
 
     @Test
-    fun `编辑文本会合并文本段并移除已失效的字节标记`() {
+    fun `移回后编辑文字使用普通草稿发送顺序且没有原始字节标记`() {
         val original = mixedInput()
         val draft = ChatDraft().restoreQueuedInput(original).copy(message = "改为检查其他文件")
 
         assertEquals(
-            listOf(original[0], UserInputPart.Text("改为检查其他文件"), original[2], original[4]),
+            listOf(UserInputPart.Text("改为检查其他文件"), original[0], original[2], original[4]),
             draft.toInput(),
         )
         assertTrue(draft.toInput().filterIsInstance<UserInputPart.Text>().single().textElements.isEmpty())
-        assertEquals(original, draft.queuedInput)
     }
 
     @Test
@@ -49,22 +52,23 @@ class QueuedDraftTest {
     }
 
     @Test
-    fun `移除附件不改变剩余文本标记和附件顺序`() {
+    fun `移除附件保留文字和剩余附件顺序`() {
         val original = mixedInput()
         val restored = ChatDraft().restoreQueuedInput(original)
-        val draft = restored.copy(attachments = restored.attachments.filterNot { it.id == "queued:2" })
+        val removedId = restored.attachments[1].id
+        val draft = restored.copy(attachments = restored.attachments.filterNot { it.id == removedId })
 
-        assertEquals(listOf(original[0], original[1], original[3], original[4]), draft.toInput())
+        assertEquals(listOf(UserInputPart.Text(restored.message), original[0], original[4]), draft.toInput())
     }
 
     @Test
-    fun `新增附件追加到原始队列内容之后`() {
+    fun `新增附件追加到移回的附件之后`() {
         val original = mixedInput()
         val restored = ChatDraft().restoreQueuedInput(original)
         val added = DraftAttachment("device-image", UserInputPart.Image("data:image/png;base64,new-image"))
         val draft = restored.copy(attachments = restored.attachments + added)
 
-        assertEquals(original + added.input, draft.toInput())
+        assertEquals(restored.toInput() + added.input, draft.toInput())
     }
 
     @Test
@@ -76,27 +80,14 @@ class QueuedDraftTest {
     }
 
     @Test
-    fun `以感叹号开头的原始文本保留队列标志和字面内容`() {
+    fun `移回以感叹号开头的文字遵循普通输入框的 Shell 规则`() {
         val original = listOf(UserInputPart.Text("!继续解释这个命令，不要执行"))
         val draft = ChatDraft().restoreQueuedInput(original)
 
-        assertNotNull(draft.queuedInput)
-        assertEquals(original, draft.queuedInput)
         assertEquals("!继续解释这个命令，不要执行", draft.message)
+        assertEquals(ChatDraft(message = original.single().text), draft)
+        assertTrue(isShellCommandInput(draft.message))
         assertEquals(original, draft.toInput())
-        assertNotNull(draft.copy(message = "!修改后的内容").queuedInput)
-    }
-
-    @Test
-    fun `持久化的原始输入恢复后仍保留撤回编辑语义`() {
-        val original = mixedInput()
-        val stored = Json.encodeToString(original)
-        val restoredInput = Json.decodeFromString<List<UserInputPart>>(stored)
-        val draft = ChatDraft().restoreQueuedInput(restoredInput)
-
-        assertEquals(original, draft.queuedInput)
-        assertEquals(original, draft.toInput())
-        assertEquals(original, draft.copy(message = "临时编辑").copy(message = draft.message).toInput())
     }
 
     @Test
