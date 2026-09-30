@@ -18,6 +18,8 @@ class AppServerHistoryApiTest {
                 object : AppServerWebSocket {
                     override fun start() = listener.onOpen(this)
 
+                    override fun setResponseTimeout(timeoutMillis: Long) = Unit
+
                     override fun send(text: String): Boolean {
                         val request = Json.parseToJsonElement(text).jsonObject
                         val result = when (request.requiredString("method")) {

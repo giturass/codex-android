@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -28,11 +29,14 @@ import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import java.net.SocketTimeoutException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.CoroutineContext
 import kotlin.random.Random
+
+internal const val DEFAULT_REQUEST_TIMEOUT_MILLIS = 30_000L
 
 class AppServerConnection internal constructor(
     private val webSocketFactory: AppServerWebSocketFactory,
@@ -42,7 +46,9 @@ class AppServerConnection internal constructor(
 ) {
     private val scope = CoroutineScope(parentContext + SupervisorJob(parentContext[Job]))
     private val requestIds = AtomicLong(1)
-    private val pendingRequests = ConcurrentHashMap<Long, CompletableDeferred<JsonElement>>()
+    private val pendingRequests = ConcurrentHashMap<Long, PendingRequest>()
+    private val pendingRequestsLock = Any()
+    private var responseTimeoutMillis = DEFAULT_REQUEST_TIMEOUT_MILLIS
     private val ready = CompletableDeferred<Unit>()
     private val started = AtomicBoolean(false)
     private val closed = AtomicBoolean(false)
@@ -69,12 +75,16 @@ class AppServerConnection internal constructor(
         }
     }
 
-    suspend fun request(method: String, params: JsonObject? = null): JsonElement {
+    suspend fun request(
+        method: String,
+        params: JsonObject? = null,
+        timeoutMillis: Long = DEFAULT_REQUEST_TIMEOUT_MILLIS,
+    ): JsonElement {
         ready.await()
         var attempt = 0
         while (true) {
             try {
-                return requestOnce(method, params)
+                return requestOnce(method, params, timeoutMillis)
             } catch (error: RpcException) {
                 attempt += 1
                 if (error.code != SERVER_OVERLOADED || attempt >= MAX_OVERLOAD_ATTEMPTS) throw error
@@ -167,10 +177,17 @@ class AppServerConnection internal constructor(
         ready.complete(Unit)
     }
 
-    private suspend fun requestOnce(method: String, params: JsonObject?): JsonElement {
+    private suspend fun requestOnce(
+        method: String,
+        params: JsonObject?,
+        timeoutMillis: Long = DEFAULT_REQUEST_TIMEOUT_MILLIS,
+    ): JsonElement {
         val id = requestIds.getAndIncrement()
         val response = CompletableDeferred<JsonElement>()
-        pendingRequests[id] = response
+        synchronized(pendingRequestsLock) {
+            pendingRequests[id] = PendingRequest(response, timeoutMillis)
+            updateResponseTimeout()
+        }
         try {
             send(
                 buildJsonObject {
@@ -179,10 +196,24 @@ class AppServerConnection internal constructor(
                     if (params != null) put("params", params)
                 },
             )
-            return withTimeout(REQUEST_TIMEOUT_MILLIS) { response.await() }
+            return withTimeoutOrNull(timeoutMillis) { response.await() }
+                ?: throw SocketTimeoutException("请求超时：$method")
         } finally {
-            pendingRequests.remove(id)
+            synchronized(pendingRequestsLock) {
+                pendingRequests.remove(id)
+                updateResponseTimeout()
+            }
         }
+    }
+
+    private fun updateResponseTimeout() {
+        val timeoutMillis = maxOf(
+            DEFAULT_REQUEST_TIMEOUT_MILLIS,
+            pendingRequests.values.maxOfOrNull(PendingRequest::timeoutMillis) ?: DEFAULT_REQUEST_TIMEOUT_MILLIS,
+        )
+        if (responseTimeoutMillis == timeoutMillis) return
+        responseTimeoutMillis = timeoutMillis
+        webSocket.setResponseTimeout(timeoutMillis)
     }
 
     private fun send(message: JsonObject) {
@@ -222,7 +253,7 @@ class AppServerConnection internal constructor(
             failConnection(ProtocolException("JSON-RPC 响应缺少整数 id"))
             return
         }
-        val pending = pendingRequests[responseId] ?: return
+        val pending = pendingRequests[responseId]?.response ?: return
         val error = message["error"] as? JsonObject
         if (error != null) {
             pending.completeExceptionally(
@@ -248,8 +279,11 @@ class AppServerConnection internal constructor(
     }
 
     private fun failPending(error: Throwable) {
-        pendingRequests.values.forEach { it.completeExceptionally(error) }
-        pendingRequests.clear()
+        synchronized(pendingRequestsLock) {
+            pendingRequests.values.forEach { it.response.completeExceptionally(error) }
+            pendingRequests.clear()
+            updateResponseTimeout()
+        }
     }
 
     private inner class Listener : AppServerWebSocketListener {
@@ -291,8 +325,12 @@ class AppServerConnection internal constructor(
     private val JsonPrimitive.longOrNull: Long?
         get() = content.toLongOrNull()
 
+    private data class PendingRequest(
+        val response: CompletableDeferred<JsonElement>,
+        val timeoutMillis: Long,
+    )
+
     private companion object {
-        const val REQUEST_TIMEOUT_MILLIS = 30_000L
         const val NORMAL_CLOSURE = 1000
         const val SERVER_OVERLOADED = -32001
         const val MAX_OVERLOAD_ATTEMPTS = 3

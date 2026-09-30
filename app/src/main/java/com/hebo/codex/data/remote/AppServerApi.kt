@@ -210,6 +210,7 @@ class AppServerApi(
     ): JsonObject = connection.request(
         "turn/start",
         buildTurnParams(threadId, clientMessageId, input, options),
+        timeoutMillis = input.submissionTimeoutMillis(),
     ).jsonObject
 
     suspend fun steerTurn(
@@ -225,6 +226,7 @@ class AppServerApi(
             put("clientUserMessageId", clientMessageId)
             put("input", input.toWire())
         },
+        timeoutMillis = input.submissionTimeoutMillis(),
     ).jsonObject
 
     suspend fun interruptTurn(threadId: String, turnId: String) {
@@ -267,6 +269,7 @@ class AppServerApi(
                 put("clientUserMessageId", clientUserMessageId)
                 put("input", input.toWire())
             },
+            timeoutMillis = input.submissionTimeoutMillis(),
         ).jsonObject.also { response ->
             val submission = response.requiredObject("queuedSubmission")
             submission.requiredString("id")
@@ -442,6 +445,17 @@ class AppServerApi(
     }
 }
 
+private fun List<UserInputPart>.submissionTimeoutMillis(): Long {
+    val hasEmbeddedMedia = any { part ->
+        when (part) {
+            is UserInputPart.Image -> part.url.startsWith("data:")
+            is UserInputPart.Audio -> part.url.startsWith("data:")
+            else -> false
+        }
+    }
+    return if (hasEmbeddedMedia) MEDIA_SUBMISSION_TIMEOUT_MILLIS else DEFAULT_REQUEST_TIMEOUT_MILLIS
+}
+
 internal fun decodeRemoteFileBase64(encoded: String, output: OutputStream): Long {
     var offset = 0
     var written = 0L
@@ -460,3 +474,4 @@ internal fun decodeRemoteFileBase64(encoded: String, output: OutputStream): Long
 }
 
 private const val BASE64_DECODE_CHUNK_CHARACTERS = 32 * 1024
+private const val MEDIA_SUBMISSION_TIMEOUT_MILLIS = 10 * 60_000L

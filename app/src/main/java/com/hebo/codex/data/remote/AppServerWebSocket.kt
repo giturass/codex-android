@@ -13,6 +13,7 @@ import javax.net.SocketFactory
 internal interface AppServerWebSocket {
     fun start()
     fun send(text: String): Boolean
+    fun setResponseTimeout(timeoutMillis: Long)
     fun close(code: Int, reason: String): Boolean
     fun cancel()
 }
@@ -92,6 +93,16 @@ private class JavaWebSocketAppServerWebSocket(
             delegate.send(text)
             true
         }.getOrDefault(false)
+    }
+
+    override fun setResponseTimeout(timeoutMillis: Long) {
+        // 大消息与 ping 共用发送队列，等待响应期间不能让心跳先判定断连
+        val timeoutSeconds = if (timeoutMillis <= DEFAULT_REQUEST_TIMEOUT_MILLIS) {
+            PING_INTERVAL_SECONDS
+        } else {
+            ((timeoutMillis + 999) / 1_000).toInt()
+        }
+        delegate.setConnectionLostTimeout(timeoutSeconds)
     }
 
     override fun close(code: Int, reason: String): Boolean {

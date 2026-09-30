@@ -196,39 +196,38 @@ class NewTaskViewModel(
 
         mutableState.update { it.copy(isCreatingConversation = true, errorMessage = null) }
         viewModelScope.launch {
-            val threadId = createdThreadId ?: runSuspendCatching {
-                repository.startConversation(serverId, submission.cwd, submission.options)
-            }.onFailure(::showError).getOrNull()
-            if (threadId == null) {
-                mutableState.update { it.copy(isCreatingConversation = false) }
-                return@launch
-            }
-            createdThreadId = threadId
+            try {
+                val threadId = createdThreadId ?: runSuspendCatching {
+                    repository.startConversation(serverId, submission.cwd, submission.options)
+                }.onFailure(::showError).getOrNull() ?: return@launch
+                createdThreadId = threadId
 
-            runSuspendCatching {
-                submit(serverId, threadId)
-            }
-                .onSuccess {
-                    createdThreadId = null
-                    if (clearsEditor) {
-                        mutableState.update {
-                            it.copy(message = "", attachments = emptyList(), isCreatingConversation = false)
+                runSuspendCatching {
+                    submit(serverId, threadId)
+                }
+                    .onSuccess {
+                        createdThreadId = null
+                        if (clearsEditor) {
+                            mutableState.update {
+                                it.copy(message = "", attachments = emptyList(), isCreatingConversation = false)
+                            }
+                        }
+                        mutableEvents.send(NewTaskEvent.OpenConversation(serverId, threadId))
+                    }
+                    .onFailure { sendError ->
+                        if (clearsEditor) {
+                            migrateDraftToConversation(
+                                submission = submission,
+                                threadId = threadId,
+                                sendError = sendError,
+                            )
+                        } else {
+                            showError(sendError)
                         }
                     }
-                    mutableEvents.send(NewTaskEvent.OpenConversation(serverId, threadId))
-                }
-                .onFailure { sendError ->
-                    if (clearsEditor) {
-                        migrateDraftToConversation(
-                            submission = submission,
-                            threadId = threadId,
-                            sendError = sendError,
-                        )
-                    } else {
-                        showError(sendError)
-                    }
-                }
-            mutableState.update { it.copy(isCreatingConversation = false) }
+            } finally {
+                mutableState.update { it.copy(isCreatingConversation = false) }
+            }
         }
     }
 
