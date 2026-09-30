@@ -2,16 +2,87 @@ package com.hebo.codex.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CloudDone
+import androidx.compose.material.icons.rounded.CloudOff
+import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.hebo.codex.domain.ConnectionStatus
 import com.hebo.codex.ui.theme.statusColors
+
+@Composable
+internal fun ConnectionStatusButton(
+    status: ConnectionStatus,
+    onReconnect: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    IconButton(onClick = { expanded = true }, modifier = modifier.size(48.dp)) {
+        Icon(
+            imageVector = when (status) {
+                ConnectionStatus.Connected -> Icons.Rounded.CloudDone
+                ConnectionStatus.Connecting -> Icons.Rounded.Sync
+                ConnectionStatus.Disconnected -> Icons.Rounded.CloudOff
+                is ConnectionStatus.Failed -> Icons.Rounded.ErrorOutline
+            },
+            contentDescription = "服务器连接：${status.label()}",
+            tint = if (status is ConnectionStatus.Failed) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    if (expanded) {
+        AlertDialog(
+            onDismissRequest = { expanded = false },
+            title = { Text("服务器连接") },
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        ConnectionIndicator(status)
+                        Text(status.label())
+                    }
+                    if (status is ConnectionStatus.Failed) ExpandableErrorDetails(status.error)
+                }
+            },
+            confirmButton = {
+                if (status == ConnectionStatus.Disconnected || status is ConnectionStatus.Failed) {
+                    TextButton(onClick = onReconnect) { Text("重连") }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { expanded = false }) { Text("关闭") }
+            },
+        )
+    }
+}
 
 @Composable
 fun ConnectionIndicator(status: ConnectionStatus, modifier: Modifier = Modifier) {

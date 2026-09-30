@@ -40,7 +40,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -70,6 +69,7 @@ import com.hebo.codex.domain.SshAuthentication
 import com.hebo.codex.domain.addressSummary
 import com.hebo.codex.domain.typeLabel
 import com.hebo.codex.ui.components.NoticeHostState
+import com.hebo.codex.ui.components.NoticeScaffold
 
 @Composable
 fun ProxyListScreen(
@@ -89,7 +89,8 @@ fun ProxyListScreen(
         }
     }
 
-    Scaffold(
+    NoticeScaffold(
+        noticeState = noticeState,
         topBar = {
             TopAppBar(
                 title = { Text("代理") },
@@ -211,7 +212,8 @@ fun ProxyEditorScreen(
         }
     }
 
-    Scaffold(
+    NoticeScaffold(
+        noticeState = noticeState,
         topBar = {
             TopAppBar(
                 title = { Text(if (state.isEditing) "编辑代理" else "添加代理") },

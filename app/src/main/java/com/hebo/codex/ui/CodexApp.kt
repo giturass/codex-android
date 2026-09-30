@@ -3,31 +3,29 @@ package com.hebo.codex.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.DismissibleNavigationDrawer
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -39,11 +37,13 @@ import com.hebo.codex.domain.CodexRepository
 import com.hebo.codex.domain.DraftRepository
 import com.hebo.codex.domain.QuickPhraseRepository
 import com.hebo.codex.domain.QueueWithdrawalCoordinator
-import com.hebo.codex.domain.ConnectionStatus
 import com.hebo.codex.ui.components.CodexNavigationDrawer
 import com.hebo.codex.ui.components.CodexNavigationDrawerWidth
 import com.hebo.codex.ui.components.DrawerActiveTarget
-import com.hebo.codex.ui.components.InlineNoticeHost
+import com.hebo.codex.ui.components.FloatingNoticeHost
+import com.hebo.codex.ui.components.LocalPageNoticesVisible
+import com.hebo.codex.ui.components.NoticeHostEffect
+import com.hebo.codex.ui.components.NoticeMaxWidth
 import com.hebo.codex.ui.components.rememberNoticeHostState
 import com.hebo.codex.ui.components.navigationAttention
 import com.hebo.codex.ui.ratelimits.RateLimitsUiState
@@ -121,6 +121,7 @@ fun CodexApp(
     val density = LocalDensity.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val noticeState = rememberNoticeHostState()
+    NoticeHostEffect(noticeState)
     val scope = rememberCoroutineScope()
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val activeDrawerTarget = currentBackStackEntry?.arguments?.let { arguments ->
@@ -201,20 +202,6 @@ fun CodexApp(
         val isWideLayout = maxWidth >= WideDrawerThreshold
         val drawerState = if (isWideLayout) wideDrawerState else modalDrawerState
         val drawerVisible = drawerState.isOpen || drawerState.targetValue == DrawerValue.Open
-        val connectionServerId = when {
-            currentBackStackEntry?.destination?.hasRoute<ChatRoute>() == true ||
-                currentBackStackEntry?.destination?.hasRoute<ServerHubRoute>() == true ->
-                currentBackStackEntry?.arguments?.getString("serverId")
-            currentBackStackEntry?.destination?.hasRoute<NewTaskRoute>() == true ->
-                currentBackStackEntry?.arguments?.getString("serverId") ?: homeState.activeServerId
-            drawerVisible -> homeState.activeServerId
-            else -> null
-        }
-        val connectionStatus = connectionServerId?.let {
-            homeState.connectionStatuses[it] ?: ConnectionStatus.Disconnected
-        }
-        val showNotice = noticeState.hasContent ||
-            (connectionStatus != null && connectionStatus != ConnectionStatus.Connected)
         val wideDrawerOffset = wideDrawerState.currentOffset
         val wideDrawerVisibleWidth = if (wideDrawerOffset.isNaN()) {
             if (wideDrawerState.isOpen) CodexNavigationDrawerWidth else 0.dp
@@ -425,6 +412,7 @@ fun CodexApp(
                         navigationOpen = drawerVisible,
                         onToggleNavigation = ::toggleDrawer,
                         onNewTask = { cwd -> openNewTask(route.serverId, cwd) },
+                        onReconnect = { homeViewModel.reconnectServer(route.serverId) },
                         onOpenConversation = { threadId, announcement ->
                             openConversation(route.serverId, threadId, announcement)
                         },
@@ -463,42 +451,35 @@ fun CodexApp(
             }
         }
 
-        Column(Modifier.fillMaxSize()) {
-            if (showNotice) {
-                InlineNoticeHost(
-                    state = noticeState,
-                    connectionStatus = connectionStatus,
-                    onReconnect = { connectionServerId?.let(homeViewModel::reconnectServer) },
-                    modifier = Modifier.statusBarsPadding(),
-                )
-            }
-            Box(
-                Modifier.weight(1f).then(
-                    if (showNotice) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier,
-                ),
-            ) {
-                if (isWideLayout) {
-                    DismissibleNavigationDrawer(
-                        drawerState = drawerState,
-                        drawerContent = drawerContent,
-                        content = {
-                            Box(
-                                Modifier
-                                    .fillMaxSize()
-                                    .padding(end = wideDrawerVisibleWidth),
-                            ) {
-                                content()
-                            }
-                        },
-                    )
-                } else {
-                    ModalNavigationDrawer(
-                        drawerState = drawerState,
-                        drawerContent = drawerContent,
-                        content = content,
-                    )
-                }
-            }
+        if (isWideLayout) {
+            DismissibleNavigationDrawer(
+                drawerState = drawerState,
+                drawerContent = drawerContent,
+                content = {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .padding(end = wideDrawerVisibleWidth),
+                    ) {
+                        content()
+                    }
+                },
+            )
+        } else {
+            ModalNavigationDrawer(
+                drawerState = drawerState,
+                drawerContent = drawerContent,
+                content = {
+                    CompositionLocalProvider(LocalPageNoticesVisible provides !drawerVisible) {
+                        content()
+                    }
+                },
+            )
+            FloatingNoticeHost(
+                state = noticeState,
+                visible = drawerVisible,
+                modifier = Modifier.align(Alignment.TopCenter).safeDrawingPadding().widthIn(max = NoticeMaxWidth),
+            )
         }
     }
 }

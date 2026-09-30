@@ -39,7 +39,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -62,6 +61,8 @@ import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.ui.components.ConnectionIndicator
 import com.hebo.codex.ui.components.ExpandableErrorDetails
 import com.hebo.codex.ui.components.NoticeHostState
+import com.hebo.codex.ui.components.NoticeScaffold
+import com.hebo.codex.ui.components.ConnectionStatusButton
 import com.hebo.codex.ui.components.label
 
 private val TwoPaneThreshold = 760.dp
@@ -99,7 +100,8 @@ fun ServerHubScreen(
 
         BackHandler(enabled = showDetailBack) { viewModel.selectSection(null) }
 
-        Scaffold(
+        NoticeScaffold(
+            noticeState = noticeState,
             topBar = {
                 TopAppBar(
                     title = {
@@ -128,6 +130,7 @@ fun ServerHubScreen(
                         }
                     },
                     actions = {
+                        ConnectionStatusButton(state.connectionStatus, onReconnect = viewModel::reconnect)
                         selectedSection?.let { section ->
                             SectionPrimaryAction(
                                 section = section,

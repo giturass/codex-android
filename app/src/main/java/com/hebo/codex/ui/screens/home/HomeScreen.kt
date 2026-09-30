@@ -40,7 +40,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -83,6 +82,7 @@ import com.hebo.codex.domain.projectName
 import com.hebo.codex.ui.displayDescriptionRes
 import com.hebo.codex.ui.displayLabelRes
 import com.hebo.codex.ui.components.NoticeHostState
+import com.hebo.codex.ui.components.NoticeScaffold
 import com.hebo.codex.ui.components.OptionChipRow
 import com.hebo.codex.ui.components.SettingDescription
 import com.hebo.codex.ui.components.navigationAttention
@@ -182,7 +182,8 @@ fun HomeScreen(
         }
     }
 
-    Scaffold(
+    NoticeScaffold(
+        noticeState = noticeState,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             if (activeServer == null) {
@@ -203,6 +204,8 @@ fun HomeScreen(
                     newConversationTitle = "新建任务",
                     newConversationSubtitle = if (newTaskState.cwd.isBlank()) "选择项目" else projectName(newTaskState.cwd),
                     rateLimitsState = rateLimitsState,
+                    connectionStatus = state.connectionStatuses[activeServer.id] ?: ConnectionStatus.Disconnected,
+                    onReconnect = { viewModel.reconnectServer(activeServer.id) },
                     navigationAttention = navigationAttention(state.threadAttention),
                     navigationOpen = navigationOpen,
                     onToggleNavigation = onToggleNavigation,

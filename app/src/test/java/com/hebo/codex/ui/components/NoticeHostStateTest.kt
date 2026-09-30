@@ -93,6 +93,59 @@ class NoticeHostStateTest {
         assertFalse(restored.hasContent)
     }
 
+    @Test
+    fun `关闭详情后继续下一条通知且详情不会跟随打开`() {
+        val state = NoticeHostState()
+        state.showError(UserFacingError("发送失败", "timeout"))
+        val first = requireNotNull(state.current)
+        state.showDetails(first)
+        state.showMessage("已保存")
+
+        assertSame(first, state.current)
+        assertTrue(state.showingDetails)
+
+        state.dismiss(first)
+
+        assertEquals("已保存", state.current?.message)
+        assertFalse(state.showingDetails)
+    }
+
+    @Test
+    fun `退出动画中的旧通知不能打开或关闭当前通知的详情`() {
+        val state = NoticeHostState()
+        state.showMessage("第一条")
+        val first = requireNotNull(state.current)
+        state.showMessage("第二条")
+        state.dismiss(first)
+        val second = requireNotNull(state.current)
+
+        state.showDetails(first)
+        assertFalse(state.showingDetails)
+
+        state.showDetails(second)
+        state.dismiss(first)
+        assertSame(second, state.current)
+        assertTrue(state.showingDetails)
+    }
+
+    @Test
+    fun `页面恢复时保留正在阅读的详情和后续通知`() {
+        val state = NoticeHostState()
+        state.showError(UserFacingError("发送失败", "timeout"))
+        state.showDetails(requireNotNull(state.current))
+        state.showMessage("已保存")
+
+        val restored = restore(state)
+
+        assertTrue(restored.showingDetails)
+        assertEquals("发送失败", restored.current?.message)
+        assertEquals("timeout", restored.current?.technicalDetails)
+
+        restored.dismiss(requireNotNull(restored.current))
+        assertFalse(restored.showingDetails)
+        assertEquals("已保存", restored.current?.message)
+    }
+
     private fun restore(state: NoticeHostState): NoticeHostState {
         val scope = object : SaverScope {
             override fun canBeSaved(value: Any): Boolean = true

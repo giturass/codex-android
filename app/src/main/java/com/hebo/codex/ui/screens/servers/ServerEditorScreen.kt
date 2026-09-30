@@ -29,7 +29,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -49,6 +48,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.hebo.codex.R
 import com.hebo.codex.domain.typeLabel
 import com.hebo.codex.ui.components.NoticeHostState
+import com.hebo.codex.ui.components.NoticeScaffold
 
 @Composable
 fun ServerEditorScreen(
@@ -76,7 +76,8 @@ fun ServerEditorScreen(
         }
     }
 
-    Scaffold(
+    NoticeScaffold(
+        noticeState = noticeState,
         topBar = {
             TopAppBar(
                 title = { Text(if (state.isEditing) "编辑服务器" else "添加服务器") },

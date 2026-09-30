@@ -22,11 +22,13 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -199,6 +201,8 @@ import com.hebo.codex.ui.components.OptionChipRow
 import com.hebo.codex.ui.components.SettingDescription
 import com.hebo.codex.ui.components.RemainingLinearProgressIndicator
 import com.hebo.codex.ui.components.NoticeHostState
+import com.hebo.codex.ui.components.NoticeScaffold
+import com.hebo.codex.ui.components.ConnectionStatusButton
 import com.hebo.codex.ui.quickphrases.QuickPhraseViewModel
 import com.hebo.codex.ui.ratelimits.RateLimitIndicator
 import com.hebo.codex.ui.ratelimits.RateLimitsUiState
@@ -277,6 +281,7 @@ private const val PLAN_STEP_PROGRESS_FADE_DURATION_MILLIS = 150
 private val ChatPageOverlap = 64.dp
 private val ConversationHeaderItemMinHeight = 48.dp
 private val ConversationHeaderVerticalPadding = 8.dp
+private val ConversationHeaderExpandedActionsMinWidth = 400.dp
 private val ChatHazeFadeHeight = 32.dp
 private val ChatHazeBlurRadius = 22.dp
 private val ChatHeaderContentSpacing = 48.dp
@@ -295,6 +300,7 @@ fun ChatScreen(
     navigationOpen: Boolean,
     onToggleNavigation: () -> Unit,
     onNewTask: (String) -> Unit,
+    onReconnect: () -> Unit,
     onOpenConversation: (String, String?) -> Unit,
     onOpenRelatedConversation: (String) -> Unit,
     onRefreshRateLimits: () -> Unit,
@@ -477,27 +483,34 @@ fun ChatScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
-        ConversationFloatingHeader(
-            conversation = conversation,
-            newConversationTitle = null,
-            newConversationSubtitle = null,
-            rateLimitsState = rateLimitsState,
-            navigationAttention = navigationAttention,
-            navigationOpen = navigationOpen,
-            onToggleNavigation = onToggleNavigation,
-            onOpenAttention = { onOpenConversation(it, null) },
-            actions = ConversationHeaderActions(
-                onNewTask = { conversation?.let { onNewTask(it.cwd) } },
-                onRename = { dialog = ChatDialog.Rename },
-                onFork = { dialog = ChatDialog.Fork },
-                onOpenGoal = { dialog = ChatDialog.Goal },
-            ),
-            onRefreshRateLimits = onRefreshRateLimits,
-            onConsumeRateLimitReset = onConsumeRateLimitReset,
-            shadowElevation = 1.dp,
-        )
-        Box(Modifier.weight(1f)) {
+    NoticeScaffold(
+        noticeState = noticeState,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        topBar = {
+            ConversationFloatingHeader(
+                conversation = conversation,
+                newConversationTitle = null,
+                newConversationSubtitle = null,
+                rateLimitsState = rateLimitsState,
+                connectionStatus = state.connectionStatus,
+                onReconnect = onReconnect,
+                navigationAttention = navigationAttention,
+                navigationOpen = navigationOpen,
+                onToggleNavigation = onToggleNavigation,
+                onOpenAttention = { onOpenConversation(it, null) },
+                actions = ConversationHeaderActions(
+                    onNewTask = { conversation?.let { onNewTask(it.cwd) } },
+                    onRename = { dialog = ChatDialog.Rename },
+                    onFork = { dialog = ChatDialog.Fork },
+                    onOpenGoal = { dialog = ChatDialog.Goal },
+                ),
+                onRefreshRateLimits = onRefreshRateLimits,
+                onConsumeRateLimitReset = onConsumeRateLimitReset,
+                shadowElevation = 1.dp,
+            )
+        },
+    ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
             when {
                 state.isLoading -> Box(
                     Modifier.fillMaxSize(),
@@ -998,6 +1011,8 @@ internal fun ConversationFloatingHeader(
     newConversationTitle: String?,
     newConversationSubtitle: String?,
     rateLimitsState: RateLimitsUiState,
+    connectionStatus: ConnectionStatus,
+    onReconnect: () -> Unit,
     navigationAttention: NavigationAttention?,
     navigationOpen: Boolean,
     onToggleNavigation: () -> Unit,
@@ -1018,13 +1033,19 @@ internal fun ConversationFloatingHeader(
             projectName(it.cwd)
         }
     } ?: newConversationSubtitle
-    Box(
+    BoxWithConstraints(
         modifier
             .fillMaxWidth()
             .statusBarsPadding()
             .padding(horizontal = 12.dp, vertical = ConversationHeaderVerticalPadding),
     ) {
+        val showNewTaskShortcut = maxWidth >= ConversationHeaderExpandedActionsMinWidth
         if (headerTitle == null) {
+            ConnectionStatusButton(
+                status = connectionStatus,
+                onReconnect = onReconnect,
+                modifier = Modifier.align(Alignment.CenterEnd),
+            )
             Surface(
                 onClick = onToggleNavigation,
                 modifier = Modifier.size(ConversationHeaderItemMinHeight),
@@ -1081,12 +1102,13 @@ internal fun ConversationFloatingHeader(
                             onClick = { onOpenAttention(attention.targetThreadId) },
                         )
                     }
+                    ConnectionStatusButton(connectionStatus, onReconnect)
                     RateLimitIndicator(
                         state = rateLimitsState,
                         onRefresh = onRefreshRateLimits,
                         onConsumeResetCredit = onConsumeRateLimitReset,
                     )
-                    if (actions != null) {
+                    if (actions != null && showNewTaskShortcut) {
                         IconButton(onClick = actions.onNewTask) {
                             Icon(Icons.Rounded.Add, contentDescription = "新建任务")
                         }
@@ -1100,6 +1122,16 @@ internal fun ConversationFloatingHeader(
                                 expanded = actionsExpanded,
                                 onDismissRequest = { actionsExpanded = false },
                             ) {
+                                if (!showNewTaskShortcut) {
+                                    ChatActionMenuItem(
+                                        text = "新建任务",
+                                        icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
+                                        onClick = {
+                                            actionsExpanded = false
+                                            actions.onNewTask()
+                                        },
+                                    )
+                                }
                                 ChatActionMenuItem(
                                     text = "重命名",
                                     icon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
