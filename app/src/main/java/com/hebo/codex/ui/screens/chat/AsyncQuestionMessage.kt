@@ -1,10 +1,17 @@
 package com.hebo.codex.ui.screens.chat
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -18,10 +25,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import com.hebo.codex.domain.AsyncUserInputQuestion
 import com.hebo.codex.domain.ConversationItem
@@ -80,65 +93,114 @@ private fun AsyncQuestion(
     hasError: Boolean,
     onReply: (String, () -> Unit) -> Unit,
 ) {
+    var expanded by rememberSaveable(stateKey) { mutableStateOf(true) }
     var showCustomReply by rememberSaveable(stateKey) { mutableStateOf(false) }
     var draft by rememberSaveable(stateKey) { mutableStateOf("") }
+    val titleFocusRequester = remember(stateKey) { FocusRequester() }
+    var contentHasFocus by remember(stateKey) { mutableStateOf(false) }
     val hasOptions = question.options.isNotEmpty()
+
+    fun collapse() {
+        if (contentHasFocus) titleFocusRequester.requestFocus()
+        expanded = false
+    }
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(question.title, style = MaterialTheme.typography.titleSmall)
-            question.options.forEach { option ->
-                OutlinedButton(
-                    onClick = { onReply(option) {} },
-                    enabled = enabled && option.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(option, modifier = Modifier.fillMaxWidth())
-                }
-            }
-            if (showCustomReply || !hasOptions) {
-                OutlinedTextField(
-                    value = draft,
-                    onValueChange = { draft = it },
-                    label = { Text("自定义回复") },
-                    enabled = !sending,
-                    minLines = 2,
-                    maxLines = 5,
-                    modifier = Modifier.fillMaxWidth(),
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 48.dp)
+                    .focusRequester(titleFocusRequester)
+                    .semantics { stateDescription = if (expanded) "已展开" else "已收起" }
+                    .clickable(
+                        role = Role.Button,
+                        onClickLabel = if (expanded) "收起问题" else "展开问题",
+                        onClick = { if (expanded) collapse() else expanded = true },
+                    )
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    question.title,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleSmall,
                 )
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    if (hasOptions) {
-                        TextButton(onClick = { showCustomReply = false }, enabled = !sending) {
-                            Text("收起")
+                Icon(
+                    if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (expanded) {
+                Column(
+                    modifier = Modifier
+                        .onFocusChanged { contentHasFocus = it.hasFocus }
+                        .focusGroup()
+                        .padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    question.options.forEach { option ->
+                        OutlinedButton(
+                            onClick = { onReply(option) { collapse() } },
+                            enabled = enabled && option.isNotBlank(),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(option, modifier = Modifier.fillMaxWidth())
                         }
                     }
-                    TextButton(
-                        onClick = { onReply(draft) { draft = "" } },
-                        enabled = enabled && draft.isNotBlank(),
-                    ) {
-                        Text("发送回复")
+                    if (showCustomReply || !hasOptions) {
+                        OutlinedTextField(
+                            value = draft,
+                            onValueChange = { draft = it },
+                            label = { Text("自定义回复") },
+                            enabled = !sending,
+                            minLines = 2,
+                            maxLines = 5,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            if (hasOptions) {
+                                TextButton(onClick = { showCustomReply = false }, enabled = !sending) {
+                                    Text("收起自定义回复")
+                                }
+                            }
+                            TextButton(
+                                onClick = {
+                                    onReply(draft) {
+                                        draft = ""
+                                        collapse()
+                                    }
+                                },
+                                enabled = enabled && draft.isNotBlank(),
+                            ) {
+                                Text("发送回复")
+                            }
+                        }
+                    } else {
+                        TextButton(onClick = { showCustomReply = true }, enabled = !sending) {
+                            Text("自定义回复")
+                        }
+                        Text(
+                            "点击选项直接发送",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (sending || hasError) {
+                        Text(
+                            text = if (sending) "发送中…" else "发送结果未确认，请检查聊天记录后再重试",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (hasError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                        )
                     }
                 }
-            } else {
-                TextButton(onClick = { showCustomReply = true }, enabled = !sending) {
-                    Text("自定义回复")
-                }
-                Text(
-                    "点击选项直接发送",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (sending || hasError) {
-                Text(
-                    text = if (sending) "发送中…" else "发送结果未确认，请检查聊天记录后再重试",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (hasError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-                )
             }
         }
     }
