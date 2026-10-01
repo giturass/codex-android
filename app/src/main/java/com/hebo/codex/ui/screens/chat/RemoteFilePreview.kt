@@ -49,11 +49,14 @@ internal suspend fun decodeRemotePreview(
     )
 }
 
-internal suspend fun decodeRemoteImageThumbnail(bytes: ByteArray): ImageBitmap = withContext(Dispatchers.Default) {
-    decodeBitmap(bytes, maxDimension = MAX_IMAGE_THUMBNAIL_DIMENSION)?.let { return@withContext it.preview }
+internal suspend fun decodeRemoteImageThumbnail(
+    bytes: ByteArray,
+    maxDimension: Int = MAX_IMAGE_THUMBNAIL_DIMENSION,
+): ImageBitmap = withContext(Dispatchers.Default) {
+    decodeBitmap(bytes, maxDimension = maxDimension)?.let { return@withContext it.preview }
     val text = decodeRemoteText(bytes)
     require(text != null && text.looksLikeSvg()) { "内容不是支持的图片格式" }
-    decodeSvgPreview(text, maxPreviewDimension = MAX_IMAGE_THUMBNAIL_DIMENSION).preview
+    decodeSvgPreview(text, maxPreviewDimension = maxDimension).preview
 }
 
 internal suspend fun decodeRemoteImagePreview(bytes: ByteArray): RemotePreview = withContext(Dispatchers.Default) {
@@ -445,7 +448,7 @@ private val UNSAFE_XML_DECLARATION = Regex("<!\\s*(?:DOCTYPE|ENTITY)\\b", RegexO
 private const val SVG_PREAMBLE_LIMIT = 4_096
 private const val DEFAULT_SVG_PREVIEW_DIMENSION = 512
 private const val MAX_IMAGE_PREVIEW_DIMENSION = 2_048
-private const val MAX_IMAGE_THUMBNAIL_DIMENSION = 256
+internal const val MAX_IMAGE_THUMBNAIL_DIMENSION = 256
 private const val MAX_SVG_LOGICAL_DIMENSION = 32_768
 private const val MAX_IN_MEMORY_IMAGE_PIXELS = 8_000_000L
 private const val MAX_TEXT_PREVIEW_CHARACTERS = 1_000_000

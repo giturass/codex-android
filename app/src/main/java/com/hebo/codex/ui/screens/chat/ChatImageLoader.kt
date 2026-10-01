@@ -38,11 +38,14 @@ internal class ChatImageLoader(
         emitAll(thumbnailSnapshots.mapNotNull { it[key] }.distinctUntilChanged())
     }.flowOn(Dispatchers.Default)
 
-    suspend fun loadThumbnail(source: ChatImageSource): ImageBitmap = loadPermits.withPermit {
+    suspend fun loadThumbnail(
+        source: ChatImageSource,
+        maxDimension: Int = MAX_IMAGE_THUMBNAIL_DIMENSION,
+    ): ImageBitmap = loadPermits.withPermit {
         withContext(Dispatchers.Default) {
-            val key = source.cacheKey()
+            val key = source.cacheKey(maxDimension)
             synchronized(thumbnails) { thumbnails[key] }?.let { return@withContext it }
-            val thumbnail = decodeRemoteImageThumbnail(loadBytes(source))
+            val thumbnail = decodeRemoteImageThumbnail(loadBytes(source), maxDimension)
             currentCoroutineContext().ensureActive()
             cacheThumbnail(key, thumbnail)
             thumbnail
@@ -88,14 +91,14 @@ internal class ChatImageLoader(
     }
 }
 
-private fun ChatImageSource.cacheKey(): String {
+private fun ChatImageSource.cacheKey(maxDimension: Int = MAX_IMAGE_THUMBNAIL_DIMENSION): String {
     val (kind, value) = when (this) {
         is ChatImageSource.Url -> "url:" to value
         is ChatImageSource.ServerFile -> "file:" to path
         is ChatImageSource.FileReference -> "id:" to fileId
     }
     val digest = MessageDigest.getInstance("SHA-256")
-    digest.update(kind.toByteArray())
+    digest.update("$kind$maxDimension:".toByteArray())
     return Base64.getEncoder().encodeToString(digest.digest(value.toByteArray()))
 }
 

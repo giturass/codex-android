@@ -213,6 +213,7 @@ import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 import com.mikepenz.markdown.compose.components.MarkdownComponentModel
+import com.mikepenz.markdown.compose.LocalImageWidth
 import com.mikepenz.markdown.compose.components.MarkdownComponents
 import com.mikepenz.markdown.compose.components.markdownComponents
 import com.mikepenz.markdown.compose.elements.MarkdownCodeFence
@@ -224,6 +225,7 @@ import com.mikepenz.markdown.compose.elements.highlightedCodeBlock
 import com.mikepenz.markdown.compose.elements.highlightedCodeFence
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.model.rememberMarkdownState
+import com.mikepenz.markdown.model.ImageWidth
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
@@ -232,7 +234,11 @@ import kotlin.math.max
 private fun chatMarkdownComponents(
     onRunShellCommand: (suspend (String) -> Boolean)?,
     shellCommandDisabled: Boolean,
+    imageTransformer: ChatMarkdownImageTransformer,
+    onPreviewImage: (ChatImageSource) -> Unit,
 ): MarkdownComponents = markdownComponents(
+    image = { ChatMarkdownBlockImage(it, imageTransformer, onPreviewImage) },
+    inlineImage = { ChatMarkdownInlineImage(it, imageTransformer, onPreviewImage) },
     codeBlock = highlightedCodeBlock,
     codeFence = if (onRunShellCommand == null) {
         highlightedCodeFence
@@ -335,7 +341,7 @@ fun ChatScreen(
     var activityDetailsTurnId by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
     var remoteFileTarget by remember(conversation?.threadId) { mutableStateOf<RemoteFileTarget?>(null) }
     var imagePreviewSource by remember(viewModel) { mutableStateOf<ChatImageSource?>(null) }
-    val imageLoader = remember(viewModel) { ChatImageLoader(viewModel::readRemoteFilePreview) }
+    val imageLoader = LocalChatImageLoader.current
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val previewImage: (ChatImageSource) -> Unit = { source ->
@@ -1502,12 +1508,15 @@ internal fun ChatMarkdown(
     shellCommandDisabled: Boolean = false,
 ) {
     val markdownState = rememberMarkdownState(content = content, retainState = true)
+    val imageLoader = LocalChatImageLoader.current
+    val imageTransformer = remember(imageLoader, cwd) { ChatMarkdownImageTransformer(imageLoader, cwd) }
+    var imagePreviewSource by remember(imageLoader, cwd) { mutableStateOf<ChatImageSource?>(null) }
     val externalUriHandler = LocalUriHandler.current
     var pendingExternalUri by remember { mutableStateOf<String?>(null) }
     val currentOpenRemoteFile by rememberUpdatedState(onOpenRemoteFile)
     val currentLinkError by rememberUpdatedState(onLinkError)
-    val components = remember(onRunShellCommand, shellCommandDisabled) {
-        chatMarkdownComponents(onRunShellCommand, shellCommandDisabled)
+    val components = remember(onRunShellCommand, shellCommandDisabled, imageTransformer) {
+        chatMarkdownComponents(onRunShellCommand, shellCommandDisabled, imageTransformer) { imagePreviewSource = it }
     }
     val uriHandler = remember(cwd, externalUriHandler) {
         object : UriHandler {
@@ -1521,11 +1530,22 @@ internal fun ChatMarkdown(
             }
         }
     }
-    CompositionLocalProvider(LocalUriHandler provides uriHandler) {
+    CompositionLocalProvider(
+        LocalUriHandler provides uriHandler,
+        LocalImageWidth provides ImageWidth.MAX_WIDTH,
+    ) {
         Markdown(
             markdownState = markdownState,
+            imageTransformer = imageTransformer,
             components = components,
             modifier = Modifier.fillMaxWidth(),
+        )
+    }
+    imagePreviewSource?.let { source ->
+        ChatImagePreviewDialog(
+            source = source,
+            imageLoader = imageLoader,
+            onDismiss = { imagePreviewSource = null },
         )
     }
     pendingExternalUri?.let { uri ->

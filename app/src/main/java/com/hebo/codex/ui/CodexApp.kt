@@ -17,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
@@ -50,6 +51,8 @@ import com.hebo.codex.ui.ratelimits.RateLimitsUiState
 import com.hebo.codex.ui.ratelimits.RateLimitsViewModel
 import com.hebo.codex.ui.quickphrases.QuickPhraseViewModel
 import com.hebo.codex.ui.screens.chat.ChatScreen
+import com.hebo.codex.ui.screens.chat.ChatImageLoader
+import com.hebo.codex.ui.screens.chat.LocalChatImageLoader
 import com.hebo.codex.ui.screens.chat.ChatViewModel
 import com.hebo.codex.ui.screens.home.HomeEvent
 import com.hebo.codex.ui.screens.home.HomeScreen
@@ -399,42 +402,45 @@ fun CodexApp(
                             route.threadId,
                         ),
                     )
-                    ChatScreen(
-                        viewModel = viewModel,
-                        noticeState = noticeState,
-                        quickPhraseViewModel = quickPhraseViewModel,
-                        initialAnnouncement = route.announcement,
-                        rateLimitsState = rateLimitsStates[route.serverId] ?: RateLimitsUiState(),
-                        navigationAttention = navigationAttention(
-                            attentionByThread = homeState.threadAttention,
-                            currentThreadId = route.threadId,
-                        ),
-                        navigationOpen = drawerVisible,
-                        onToggleNavigation = ::toggleDrawer,
-                        onNewTask = { cwd -> openNewTask(route.serverId, cwd) },
-                        onReconnect = { homeViewModel.reconnectServer(route.serverId) },
-                        onOpenConversation = { threadId, announcement ->
-                            openConversation(route.serverId, threadId, announcement)
-                        },
-                        onOpenRelatedConversation = { threadId ->
-                            if (threadId != route.threadId) {
-                                val previous = navController.previousBackStackEntry?.arguments
-                                if (previous?.getString("serverId") == route.serverId &&
-                                    previous.getString("threadId") == threadId
-                                ) {
-                                    navController.popBackStack()
-                                } else {
-                                    navController.navigate(ChatRoute(route.serverId, threadId)) {
-                                        launchSingleTop = true
+                    val imageLoader = remember(viewModel) { ChatImageLoader(viewModel::readRemoteFilePreview) }
+                    CompositionLocalProvider(LocalChatImageLoader provides imageLoader) {
+                        ChatScreen(
+                            viewModel = viewModel,
+                            noticeState = noticeState,
+                            quickPhraseViewModel = quickPhraseViewModel,
+                            initialAnnouncement = route.announcement,
+                            rateLimitsState = rateLimitsStates[route.serverId] ?: RateLimitsUiState(),
+                            navigationAttention = navigationAttention(
+                                attentionByThread = homeState.threadAttention,
+                                currentThreadId = route.threadId,
+                            ),
+                            navigationOpen = drawerVisible,
+                            onToggleNavigation = ::toggleDrawer,
+                            onNewTask = { cwd -> openNewTask(route.serverId, cwd) },
+                            onReconnect = { homeViewModel.reconnectServer(route.serverId) },
+                            onOpenConversation = { threadId, announcement ->
+                                openConversation(route.serverId, threadId, announcement)
+                            },
+                            onOpenRelatedConversation = { threadId ->
+                                if (threadId != route.threadId) {
+                                    val previous = navController.previousBackStackEntry?.arguments
+                                    if (previous?.getString("serverId") == route.serverId &&
+                                        previous.getString("threadId") == threadId
+                                    ) {
+                                        navController.popBackStack()
+                                    } else {
+                                        navController.navigate(ChatRoute(route.serverId, threadId)) {
+                                            launchSingleTop = true
+                                        }
                                     }
                                 }
-                            }
-                        },
-                        onRefreshRateLimits = { rateLimitsViewModel.refresh(route.serverId) },
-                        onConsumeRateLimitReset = { creditId ->
-                            rateLimitsViewModel.consumeRateLimitReset(route.serverId, creditId)
-                        },
-                    )
+                            },
+                            onRefreshRateLimits = { rateLimitsViewModel.refresh(route.serverId) },
+                            onConsumeRateLimitReset = { creditId ->
+                                rateLimitsViewModel.consumeRateLimitReset(route.serverId, creditId)
+                            },
+                        )
+                    }
                 }
                 composable<ServerHubRoute> { entry ->
                     val route = entry.toRoute<ServerHubRoute>()
