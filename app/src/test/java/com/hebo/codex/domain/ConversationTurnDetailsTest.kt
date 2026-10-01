@@ -13,30 +13,60 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class ConversationTurnDetailsTest {
     @Test
-    fun `恢复时完整读取最新回合和运行中回合且保留旧回合摘要`() = runTest {
-        val newest = ConversationTurn("newest", ConversationTurnStatus.COMPLETED, detailsState = TurnDetailsState.Unloaded)
-        val running = ConversationTurn("running", ConversationTurnStatus.IN_PROGRESS, detailsState = TurnDetailsState.Unloaded)
-        val older = ConversationTurn("older", ConversationTurnStatus.COMPLETED, detailsState = TurnDetailsState.Unloaded)
-        val reads = mutableListOf<String>()
-        val questions = listOf(
-            ConversationItem.AgentMessage(
-                id = "question", turnId = "newest", text = "", delivery = AgentMessageDelivery.ASYNC,
-                questions = listOf(AsyncUserInputQuestion("选择主题")),
-            ),
-            ConversationItem.AgentMessage("answer", "newest", "其他工作已完成"),
+    fun `恢复时仅完整读取运行中回合且保留最新与旧回合摘要`() = runTest {
+        val newest = ConversationTurn(
+            "newest", ConversationTurnStatus.COMPLETED,
+            items = listOf(answer.copy(turnId = "newest")), detailsState = TurnDetailsState.Unloaded,
         )
+        val running = ConversationTurn("running", ConversationTurnStatus.IN_PROGRESS, detailsState = TurnDetailsState.Unloaded)
+        val older = ConversationTurn(
+            "older", ConversationTurnStatus.COMPLETED,
+            items = listOf(answer.copy(turnId = "older")), detailsState = TurnDetailsState.Unloaded,
+        )
+        val reads = mutableListOf<String>()
+        val runningItems = listOf(command.copy(turnId = "running"))
 
         val turns = loadResumedTurns(listOf(newest, running, older)) { turnId ->
             reads += turnId
-            if (turnId == "newest") questions else emptyList()
+            runningItems
         }
 
-        assertEquals(listOf("newest", "running"), reads)
-        assertEquals(listOf("older", "running", "newest"), turns.map(ConversationTurn::id))
-        assertEquals(TurnDetailsState.Unloaded, turns.first().detailsState)
-        assertEquals(TurnDetailsState.Loaded, turns[1].detailsState)
-        assertEquals(TurnDetailsState.Loaded, turns.last().detailsState)
-        assertEquals(questions.first(), ConversationHistory(turns).recentAsyncQuestion())
+        assertEquals(listOf("running"), reads)
+        assertEquals(
+            listOf(older, running.copy(items = runningItems, detailsState = TurnDetailsState.Loaded), newest),
+            turns,
+        )
+    }
+
+    @Test
+    fun `已结束的最新回合在打开处理过程时才读取详情`() = runTest {
+        listOf(
+            ConversationTurnStatus.COMPLETED,
+            ConversationTurnStatus.INTERRUPTED,
+            ConversationTurnStatus.FAILED,
+        ).forEach { status ->
+            val state = state()
+            val summary = state.turn.copy(status = status)
+            val question = ConversationItem.AgentMessage(
+                id = "question", turnId = summary.id, text = "", delivery = AgentMessageDelivery.ASYNC,
+                questions = listOf(AsyncUserInputQuestion("选择主题")),
+            )
+            val details = listOf(command, question, answer)
+            var reads = 0
+            val turns = loadResumedTurns(listOf(summary)) { reads++; details }
+            state.value = state.value.copy(history = ConversationHistory(turns))
+
+            assertEquals(0, reads)
+            assertEquals(summary, state.turn)
+            assertEquals(null, state.value.history.recentAsyncQuestion())
+
+            state.loadTurnDetails(summary.id) { reads++; details }
+
+            assertEquals(1, reads)
+            assertEquals(details, state.turn.items)
+            assertEquals(TurnDetailsState.Loaded, state.turn.detailsState)
+            assertEquals(question, state.value.history.recentAsyncQuestion())
+        }
     }
 
     @Test

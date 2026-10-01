@@ -9,10 +9,9 @@ internal suspend fun loadResumedTurns(
     turnsNewestFirst: List<ConversationTurn>,
     loadItems: suspend (String) -> List<ConversationItem>,
 ): List<ConversationTurn> {
-    val latestTurnId = turnsNewestFirst.firstOrNull()?.id
     return turnsNewestFirst.map { turn ->
-        // 最新回合恢复问题与回复顺序；运行中的回合恢复增量通知所需的基础条目
-        if (turn.id == latestTurnId || turn.status == ConversationTurnStatus.IN_PROGRESS) {
+        // 运行中的回合恢复增量通知所需的基础条目；已结束的回合详情按需加载
+        if (turn.status == ConversationTurnStatus.IN_PROGRESS) {
             turn.copy(items = loadItems(turn.id), detailsState = TurnDetailsState.Loaded)
         } else {
             turn
