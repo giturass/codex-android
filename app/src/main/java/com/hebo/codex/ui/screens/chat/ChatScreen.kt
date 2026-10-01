@@ -723,7 +723,7 @@ fun ChatScreen(
                                 onPreparingAttachmentChange = viewModel::setPreparingAttachment,
                                 sendEnabled = state.connectionStatus is ConnectionStatus.Connected,
                                 placeholder = when {
-                                    state.connectionStatus !is ConnectionStatus.Connected -> "服务器已断开"
+                                    state.connectionStatus !is ConnectionStatus.Connected -> "服务器已断开，可继续编辑"
                                     conversation.isRunning -> "继续对话"
                                     else -> "向 Codex 发送消息"
                                 },

@@ -195,10 +195,12 @@ class ChatViewModel(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
-                mutableState.value = ChatUiState(
-                    isLoading = false,
-                    screenError = error.toUserFacingError("无法打开会话"),
-                )
+                mutableState.update {
+                    it.copy(
+                        isLoading = false,
+                        screenError = error.toUserFacingError("无法打开会话"),
+                    )
+                }
             } finally {
                 ready.cancel()
                 if (conversationOpened) repository.releaseConversation(serverId, threadId)
