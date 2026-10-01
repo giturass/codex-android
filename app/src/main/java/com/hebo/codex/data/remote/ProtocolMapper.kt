@@ -719,13 +719,7 @@ object ProtocolMapper {
                 },
             )
 
-            "webSearch" -> genericActivity(
-                item = item,
-                turnId = turnId,
-                kind = ActivityKind.WEB_SEARCH,
-                title = webSearchTitle(item),
-                technicalDetails = item.compactText(),
-            )
+            "webSearch" -> webSearchActivity(item, turnId)
 
             "contextCompaction" -> ConversationItem.Activity(
                 id = id,
@@ -1029,16 +1023,76 @@ object ProtocolMapper {
         else -> throw ProtocolException("未知子代理活动：$kind")
     }
 
-    private fun webSearchTitle(item: JsonObject): String {
-        val query = item.requiredString("query")
-        val action = item["action"] as? JsonObject ?: return query
-        return when (action.requiredString("type")) {
-            "search" -> action.optionalString("query") ?: query
-            "openPage" -> action.optionalString("url") ?: "搜索结果"
-            "findInPage" -> action.optionalString("pattern") ?: "页面内容"
-            "other" -> query
-            else -> throw ProtocolException("未知网页搜索操作：${action.requiredString("type")}")
+    private fun webSearchActivity(item: JsonObject, turnId: String): ConversationItem.Activity {
+        val query = item.requiredString("query").takeIf(String::isNotBlank)
+        val action = item.optionalObject("action")
+        val title: String
+        val summary: String?
+        val details: String
+        when (val type = action?.requiredString("type")) {
+            "search" -> {
+                val queries = (listOfNotNull(action.optionalString("query")) +
+                    action["queries"].optionalArray("queries").map { it.jsonPrimitive.content })
+                    .filter(String::isNotBlank)
+                    .distinct()
+                // action 的搜索词是完整参数，顶层 query 仅是服务端生成的操作摘要
+                val searchTerms = queries.ifEmpty { listOfNotNull(query) }
+                title = if (searchTerms.size > 1) "搜索网页 · ${searchTerms.size} 个关键词" else "搜索网页"
+                summary = searchTerms.firstOrNull()
+                details = when (searchTerms.size) {
+                    0 -> ""
+                    1 -> "搜索词\n${searchTerms.single()}"
+                    else -> "搜索词\n" + searchTerms.mapIndexed { index, term -> "${index + 1}. $term" }
+                        .joinToString("\n\n")
+                }
+            }
+            "openPage" -> {
+                val url = action.optionalString("url")?.takeIf(String::isNotBlank)
+                title = "打开网页"
+                summary = url
+                details = url?.let { "网址\n$it" }.orEmpty()
+            }
+            "findInPage" -> {
+                val url = action.optionalString("url")?.takeIf(String::isNotBlank)
+                val pattern = action.optionalString("pattern")?.takeIf(String::isNotBlank)
+                title = "页内查找"
+                summary = pattern
+                details = listOfNotNull(
+                    pattern?.let { "查找内容\n$it" },
+                    url?.let { "网址\n$it" },
+                ).joinToString("\n\n")
+            }
+            null, "other" -> {
+                title = "网页搜索"
+                summary = query
+                details = query?.let { "操作内容\n$it" }.orEmpty()
+            }
+            else -> throw ProtocolException("未知网页搜索操作：$type")
         }
+        return genericActivity(
+            item = item,
+            turnId = turnId,
+            kind = ActivityKind.WEB_SEARCH,
+            title = title,
+            summary = summary,
+            details = listOf(details, webSearchResultsText(item))
+                .filter(String::isNotBlank)
+                .joinToString("\n\n"),
+        )
+    }
+
+    private fun webSearchResultsText(item: JsonObject): String {
+        // results 由协议定义为开放 JSON，仅展示已知文本结果，不把未知元数据转成正文
+        val results = item["results"].optionalArray("results").mapNotNull { value ->
+            val result = value as? JsonObject ?: return@mapNotNull null
+            if (result.optionalString("type") != "text_result") return@mapNotNull null
+            listOfNotNull(
+                result.optionalString("title"),
+                result.optionalString("url"),
+                result.optionalString("snippet"),
+            ).filter(String::isNotBlank).joinToString("\n").takeIf(String::isNotBlank)
+        }
+        return if (results.isEmpty()) "" else "搜索结果\n${results.joinToString("\n\n")}"
     }
 
     private fun JsonObject.dynamicToolOutputText(): String = (this["contentItems"] as? JsonArray).orEmpty()

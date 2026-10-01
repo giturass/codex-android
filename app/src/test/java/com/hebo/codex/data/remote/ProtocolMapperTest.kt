@@ -443,7 +443,7 @@ class ProtocolMapperTest {
     }
 
     @Test
-    fun mapsActivityToHumanSummaryAndKeepsProtocolAsTechnicalDetails() {
+    fun mapsWebSearchToReadableContentWithoutTechnicalDetails() {
         val item = json.parseToJsonElement(
             """{
               "type":"webSearch",
@@ -457,9 +457,122 @@ class ProtocolMapperTest {
             as ConversationItem.Activity
 
         assertEquals(ActivityKind.WEB_SEARCH, mapped.kind)
-        assertEquals("Compose Material 3", mapped.title)
-        assertEquals(null, mapped.summary)
-        assertTrue(mapped.technicalDetails.orEmpty().contains("webSearch"))
+        assertEquals("搜索网页", mapped.title)
+        assertEquals("Compose Material 3", mapped.summary)
+        assertEquals("搜索词\nCompose Material 3", mapped.details)
+        assertEquals(null, mapped.technicalDetails)
+    }
+
+    @Test
+    fun preservesDistinctSearchTermsAcrossHistoryAndItemNotifications() {
+        val item = json.parseToJsonElement(
+            """{
+              "type":"webSearch",
+              "id":"search-1",
+              "query":"Searching Android documentation",
+              "action":{
+                "type":"search",
+                "query":"Compose Material 3",
+                "queries":["", "Compose Material 3", "Compose animation", "  ", "Android accessibility", "Compose animation"]
+              }
+            }""",
+        ).jsonObject
+        val historyItem = ProtocolMapper.conversationItem(item, "turn-1")
+            as ConversationItem.Activity
+
+        assertEquals("搜索网页 · 3 个关键词", historyItem.title)
+        assertEquals("Compose Material 3", historyItem.summary)
+        assertEquals(
+            "搜索词\n1. Compose Material 3\n\n2. Compose animation\n\n3. Android accessibility",
+            historyItem.details,
+        )
+        assertEquals(null, historyItem.technicalDetails)
+
+        listOf("item/started", "item/completed").forEach { method ->
+            val notification = ProtocolMapper.notification(
+                serverId = "server-1",
+                method = method,
+                params = json.parseToJsonElement(
+                    """{"threadId":"thread-1","turnId":"turn-1","item":$item}""",
+                ).jsonObject,
+            )
+            val event = notification.conversationEvent as ConversationEvent.ItemUpserted
+
+            assertEquals(historyItem, event.item)
+            assertEquals(method == "item/started", event.isActive)
+        }
+    }
+
+    @Test
+    fun usesTopLevelSearchSummaryWhenActionHasNoSearchTerms() {
+        val actions = listOf(
+            """{"type":"search"}""",
+            """{"type":"search","query":null,"queries":null}""",
+            """{"type":"search","query":"","queries":["", "  "]}""",
+        )
+
+        actions.forEach { action ->
+            val mapped = ProtocolMapper.conversationItem(
+                json.parseToJsonElement(
+                    """{"type":"webSearch","id":"search-1","query":"Compose Material 3","action":$action}""",
+                ).jsonObject,
+                "turn-1",
+            ) as ConversationItem.Activity
+
+            assertEquals("搜索网页", mapped.title)
+            assertEquals("Compose Material 3", mapped.summary)
+            assertEquals("搜索词\nCompose Material 3", mapped.details)
+            assertEquals(null, mapped.technicalDetails)
+        }
+    }
+
+    @Test
+    fun preservesReadableSearchResultsWithoutProtocolMetadata() {
+        val mapped = ProtocolMapper.conversationItem(
+            json.parseToJsonElement(
+                """{
+                  "type":"webSearch",
+                  "id":"search-1",
+                  "query":"Compose Material 3",
+                  "action":{"type":"search","query":"Compose Material 3"},
+                  "results":[
+                    {"type":"text_result","title":"Material 3 in Compose","url":"https://developer.android.com/compose/material3","snippet":"Build a Material 3 theme.","ref_id":"turn0search0"},
+                    {"type":"text_result","title":"Compose animation","url":"https://developer.android.com/compose/animation","snippet":"Animate state changes.","ref_id":"turn0search1"}
+                  ]
+                }""",
+            ).jsonObject,
+            "turn-1",
+        ) as ConversationItem.Activity
+
+        assertEquals(
+            "搜索词\nCompose Material 3\n\n搜索结果\n" +
+                "Material 3 in Compose\nhttps://developer.android.com/compose/material3\nBuild a Material 3 theme.\n\n" +
+                "Compose animation\nhttps://developer.android.com/compose/animation\nAnimate state changes.",
+            mapped.details,
+        )
+        assertEquals(null, mapped.technicalDetails)
+    }
+
+    @Test
+    fun skipsAbsentAndUnrecognizedSearchResults() {
+        val resultFields = listOf(
+            "",
+            """, "results":null""",
+            """, "results":[]""",
+            """, "results":[null, "opaque", 1, {"type":"future_result","title":"Unknown result"}, {"type":"text_result","title":"","url":null,"snippet":"  ","ref_id":"turn0search0"}]""",
+        )
+
+        resultFields.forEach { resultField ->
+            val mapped = ProtocolMapper.conversationItem(
+                json.parseToJsonElement(
+                    """{"type":"webSearch","id":"search-1","query":"Compose","action":{"type":"search","query":"Compose"}$resultField}""",
+                ).jsonObject,
+                "turn-1",
+            ) as ConversationItem.Activity
+
+            assertEquals("搜索词\nCompose", mapped.details)
+            assertEquals(null, mapped.technicalDetails)
+        }
     }
 
     @Test
@@ -506,30 +619,106 @@ class ProtocolMapperTest {
     }
 
     @Test
-    fun mapsAppServerWebSearchActionsUsingCamelCaseTypes() {
-        val cases = listOf(
-            """{
+    fun mapsOpenPageToReadableUrl() {
+        val mapped = ProtocolMapper.conversationItem(
+            json.parseToJsonElement(
+                """{
               "type":"webSearch",
               "id":"open-page-1",
               "query":"Compose Material 3",
               "action":{"type":"openPage","url":"https://developer.android.com/compose"}
-            }""" to "https://developer.android.com/compose",
-            """{
+            }""",
+            ).jsonObject,
+            "turn-1",
+        ) as ConversationItem.Activity
+
+        assertEquals("打开网页", mapped.title)
+        assertEquals("https://developer.android.com/compose", mapped.summary)
+        assertEquals("网址\nhttps://developer.android.com/compose", mapped.details)
+        assertEquals(null, mapped.technicalDetails)
+    }
+
+    @Test
+    fun preservesFindInPagePatternAndUrl() {
+        val mapped = ProtocolMapper.conversationItem(
+            json.parseToJsonElement(
+                """{
               "type":"webSearch",
               "id":"find-in-page-1",
               "query":"Compose Material 3",
-              "action":{"type":"findInPage","pattern":"MaterialTheme"}
-            }""" to "MaterialTheme",
+              "action":{"type":"findInPage","pattern":"MaterialTheme","url":"https://developer.android.com/compose"}
+            }""",
+            ).jsonObject,
+            "turn-1",
+        ) as ConversationItem.Activity
+
+        assertEquals("页内查找", mapped.title)
+        assertEquals("MaterialTheme", mapped.summary)
+        assertEquals("查找内容\nMaterialTheme\n\n网址\nhttps://developer.android.com/compose", mapped.details)
+        assertEquals(null, mapped.technicalDetails)
+    }
+
+    @Test
+    fun leavesEmptyWebSearchActionsWithoutInventedContent() {
+        val cases = listOf(
+            """{"type":"search","query":null,"queries":null}""" to "搜索网页",
+            """{"type":"search","query":"","queries":[]}""" to "搜索网页",
+            """{"type":"openPage"}""" to "打开网页",
+            """{"type":"openPage","url":null}""" to "打开网页",
+            """{"type":"openPage","url":"  "}""" to "打开网页",
+            """{"type":"findInPage"}""" to "页内查找",
+            """{"type":"findInPage","pattern":null,"url":null}""" to "页内查找",
+            """{"type":"findInPage","pattern":"","url":"  "}""" to "页内查找",
+            """{"type":"other"}""" to "网页搜索",
+            "null" to "网页搜索",
         )
 
-        cases.forEach { (payload, expectedSummary) ->
+        cases.forEach { (action, expectedTitle) ->
             val mapped = ProtocolMapper.conversationItem(
-                item = json.parseToJsonElement(payload).jsonObject,
-                turnId = "turn-1",
+                json.parseToJsonElement(
+                    """{"type":"webSearch","id":"search-1","query":"  ","action":$action}""",
+                ).jsonObject,
+                "turn-1",
             ) as ConversationItem.Activity
 
-            assertEquals(expectedSummary, mapped.title)
+            assertEquals(expectedTitle, mapped.title)
+            assertEquals(null, mapped.summary)
+            assertEquals("", mapped.details)
+            assertEquals(null, mapped.technicalDetails)
         }
+    }
+
+    @Test
+    fun preservesOperationSummaryForOtherAndAbsentWebSearchActions() {
+        val actionFields = listOf("", """, "action":null""", """, "action":{"type":"other"}""")
+
+        actionFields.forEach { actionField ->
+            val mapped = ProtocolMapper.conversationItem(
+                json.parseToJsonElement(
+                    """{"type":"webSearch","id":"search-1","query":"Checking Android documentation"$actionField}""",
+                ).jsonObject,
+                "turn-1",
+            ) as ConversationItem.Activity
+
+            assertEquals("网页搜索", mapped.title)
+            assertEquals("Checking Android documentation", mapped.summary)
+            assertEquals("操作内容\nChecking Android documentation", mapped.details)
+            assertEquals(null, mapped.technicalDetails)
+        }
+    }
+
+    @Test
+    fun rejectsUnknownWebSearchActionTypes() {
+        val error = assertThrows(ProtocolException::class.java) {
+            ProtocolMapper.conversationItem(
+                json.parseToJsonElement(
+                    """{"type":"webSearch","id":"search-1","query":"Compose","action":{"type":"unknown"}}""",
+                ).jsonObject,
+                "turn-1",
+            )
+        }
+
+        assertEquals("未知网页搜索操作：unknown", error.message)
     }
 
     @Test

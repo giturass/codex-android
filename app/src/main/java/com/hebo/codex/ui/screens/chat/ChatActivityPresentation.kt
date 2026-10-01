@@ -1162,9 +1162,13 @@ private fun ActivityItemDetails(
         }
 
         is ConversationItem.Activity -> {
-            val description = listOfNotNull(item.summary, item.details.takeIf(String::isNotBlank))
-                .distinct()
-                .joinToString("\n\n")
+            val description = if (item.kind == ActivityKind.WEB_SEARCH) {
+                item.details
+            } else {
+                listOfNotNull(item.summary, item.details.takeIf(String::isNotBlank))
+                    .distinct()
+                    .joinToString("\n\n")
+            }
             if (description.isNotBlank()) {
                 SelectionContainer {
                     Text(
