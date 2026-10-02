@@ -105,6 +105,16 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ./gradlew :app:testDebugUnitTest
 ```
 
+## 连接异常排查
+
+生产版本通过 Logcat 的 `CodexConnection` 标签记录连接失败、非主动断开、请求超时和会话恢复失败，正常连接、消息收发和主动取消不记录
+
+```bash
+adb logcat -d -v threadtime 'CodexConnection:W' '*:S'
+```
+
+日志包含连接编号、服务器内部 ID、失败阶段与耗时、恢复进度、待响应请求数及事件消费状态，同一连接的终止异常只记录一次，同类请求超时或恢复失败按连接和操作限频至每分钟一次，不输出地址、Token、消息正文、请求参数或原始异常消息
+
 ## 协议
 
 客户端使用省略 `jsonrpc` 字段的 JSON-RPC 2.0 消息，并在每条连接上完成 `initialize` 和 `initialized` 握手

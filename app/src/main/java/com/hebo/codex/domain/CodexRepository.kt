@@ -48,6 +48,7 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import java.io.OutputStream
+import java.net.SocketTimeoutException
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArraySet
@@ -1051,16 +1052,18 @@ class CodexRepository(
             proxy = resolveProxy(server.proxyId),
             parentContext = applicationScope.coroutineContext,
         )
+        connection.diagnostics.serverId = serverId
         try {
             connection.connect()
             val api = AppServerApi(connection)
-            restoreConversations(serverId, server, api)
+            restoreConversations(serverId, server, api, connection)
             check(connection.status.value is ConnectionStatus.Connected) { "服务器连接已中断" }
             return ManagedConnection(connection)
         } catch (error: CancellationException) {
             connection.abort()
             throw error
         } catch (error: Throwable) {
+            connection.diagnostics.warning("connection_setup_failed", error)
             connection.abort()
             throw error
         }
@@ -1111,9 +1114,13 @@ class CodexRepository(
         serverId: String,
         server: ServerProfile,
         api: AppServerApi,
+        connection: AppServerConnection,
     ) {
+        val diagnostics = connection.diagnostics
+        diagnostics.setPhase("restore")
         conversations.entries
             .filter { it.key.serverId == serverId }
+            .also { diagnostics.restoreTotal = it.size }
             .forEach { (key, state) ->
                 pendingResumeGoalSnapshots.add(key)
                 val backgroundRefresh = beginBackgroundTerminalRefresh(key)
@@ -1128,21 +1135,29 @@ class CodexRepository(
                         key = key,
                         state = state,
                         buffer = backgroundRefresh,
-                        result = runSuspendCatching { loadAllBackgroundTerminals(api, key.threadId) },
+                        result = runSuspendCatching { loadAllBackgroundTerminals(api, key.threadId) }
+                            .onFailure { error ->
+                                if (error !is SocketTimeoutException) {
+                                    diagnostics.warning("restore_background_terminals_failed", error)
+                                }
+                            },
                     )
                 } else {
+                    val error = requireNotNull(result.exceptionOrNull())
+                    if (error !is SocketTimeoutException) diagnostics.warning("restore_failed", error)
                     cancelBackgroundTerminalRefresh(key, backgroundRefresh)
                     pendingResumeGoalSnapshots.remove(key)
                     state.updateState {
                         it.copy(
                             activeItemKeys = emptySet(),
                             isRunning = false,
-                            errorMessage = requireNotNull(result.exceptionOrNull())
-                                .toUserFacingError("恢复会话失败"),
+                            errorMessage = error.toUserFacingError("恢复会话失败"),
                         )
                     }
                 }
+                diagnostics.restoreCompleted += 1
             }
+        diagnostics.setPhase("ready")
     }
 
     private fun observeConnection(

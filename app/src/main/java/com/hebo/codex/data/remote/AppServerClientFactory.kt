@@ -1,6 +1,7 @@
 package com.hebo.codex.data.remote
 
 import android.content.ContentResolver
+import android.util.Log
 import androidx.core.net.toUri
 import com.hebo.codex.domain.ProxyConfiguration
 import kotlinx.serialization.json.Json
@@ -33,6 +34,7 @@ class AppServerClientFactory(
                 ?.let { proxyTimeout -> proxyTimeout * 2 + INITIALIZATION_TIMEOUT_MILLIS }
                 ?: INITIALIZATION_TIMEOUT_MILLIS,
             parentContext = parentContext,
+            logWarning = { message -> Log.w("CodexConnection", message) },
         )
     }
 
