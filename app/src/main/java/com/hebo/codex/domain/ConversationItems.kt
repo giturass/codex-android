@@ -64,7 +64,7 @@ internal fun ConversationState.withRestoredConversation(
             current.status == turn.status && turn.detailsState == TurnDetailsState.Unloaded &&
             turn.items == current.items.summaryItems()
         ) {
-            current
+            current.copy(error = turn.error)
         } else {
             turn
         }

@@ -231,10 +231,14 @@ object ProtocolMapper {
                 status = turn.requiredString("status").toConversationTurnStatus(),
                 items = turn.requiredArray("items").map { conversationItem(it.jsonObject, turnId) },
                 detailsState = TurnDetailsState.Unloaded,
+                error = turn.turnError(),
             )
         },
         nextCursor = optionalString("nextCursor"),
     )
+
+    private fun JsonObject.turnError() = (this["error"] as? JsonObject)?.optionalString("message")
+        ?.let { serverError("任务执行失败", it) }
 
     fun activeTurnPlan(params: JsonObject): ActiveTurnPlan = ActiveTurnPlan(
         turnId = params.requiredString("turnId"),
@@ -444,8 +448,7 @@ object ProtocolMapper {
             ConversationEvent.TurnCompleted(
                 turnId = turn.requiredString("id"),
                 status = turn.requiredString("status").toConversationTurnStatus(),
-                error = (turn["error"] as? JsonObject)?.optionalString("message")
-                    ?.let { serverError("任务执行失败", it) },
+                error = turn.turnError(),
             )
         }
 

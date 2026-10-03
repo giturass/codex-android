@@ -215,6 +215,36 @@ class ConversationItemsTest {
         )
     }
 
+    @Test
+    fun `恢复摘要保留已加载详情并使用服务端最新失败原因`() {
+        val oldError = UserFacingError("任务执行失败", "旧错误")
+        val latestError = UserFacingError("任务执行失败", "服务端错误详情")
+        val items = listOf(
+            command("command-1", ActivityStatus.FAILED),
+            agentMessage("answer-1", "turn-1", "执行失败"),
+        )
+        val loaded = ConversationTurn(
+            id = "turn-1",
+            status = ConversationTurnStatus.FAILED,
+            items = items,
+            error = oldError,
+        )
+        val current = conversationState().copy(history = ConversationHistory(turns = listOf(loaded)))
+
+        listOf(latestError, null).forEach { restoredError ->
+            val summary = loaded.copy(
+                items = listOf(items.last()),
+                detailsState = TurnDetailsState.Unloaded,
+                error = restoredError,
+            )
+            val restored = conversationState().copy(history = ConversationHistory(turns = listOf(summary)))
+
+            val merged = current.withRestoredConversation(restored)
+
+            assertEquals(loaded.copy(error = restoredError), merged.history.turns.single())
+        }
+    }
+
     private fun agentMessage(id: String, turnId: String, text: String) = ConversationItem.AgentMessage(
         id = id,
         turnId = turnId,

@@ -43,6 +43,7 @@ import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.AccountTree
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Block
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.Compress
 import androidx.compose.material.icons.rounded.EditNote
@@ -60,6 +61,7 @@ import androidx.compose.material.icons.rounded.Webhook
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -76,6 +78,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -106,9 +109,12 @@ import com.hebo.codex.domain.AgentMessagePhase
 import com.hebo.codex.domain.ChangedFile
 import com.hebo.codex.domain.ConversationItem
 import com.hebo.codex.domain.ConversationItemKey
+import com.hebo.codex.domain.ConversationTurnStatus
 import com.hebo.codex.domain.FileChangeKind
 import com.hebo.codex.domain.PendingServerRequest
 import com.hebo.codex.domain.TurnDetailsState
+import com.hebo.codex.domain.UserFacingError
+import com.hebo.codex.ui.components.UserFacingErrorDialog
 import kotlinx.coroutines.launch
 
 @Composable
@@ -329,6 +335,8 @@ internal fun ConversationItem.activityStatus(
 @Composable
 internal fun ActivityDetailsSheet(
     turnId: String,
+    turnStatus: ConversationTurnStatus,
+    turnError: UserFacingError?,
     detailsState: TurnDetailsState,
     items: List<ConversationItem>,
     isSealed: Boolean,
@@ -340,11 +348,13 @@ internal fun ActivityDetailsSheet(
     onOpenRemotePath: (String) -> Unit,
     onOpenConversation: (String) -> Unit,
     onRetry: () -> Unit,
+    onViewAnswer: (() -> Unit)?,
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberBottomSheetState(
         initialValue = SheetValue.Hidden,
-        enabledValues = setOf(SheetValue.Hidden, SheetValue.PartiallyExpanded, SheetValue.Expanded),
+        // 半展开会让面板底部落到屏幕外，状态栏需要始终可见
+        enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
     )
     var expandedItemKeys by rememberSaveable(turnId) {
         mutableStateOf(
@@ -361,6 +371,7 @@ internal fun ActivityDetailsSheet(
         initialFirstVisibleItemIndex = followTargetIndex?.let(::activityHeaderLazyIndex) ?: 0,
     )
     val scrollScope = rememberCoroutineScope()
+    val currentOnViewAnswer by rememberUpdatedState(onViewAnswer)
     var autoFollow by rememberSaveable(turnId) { mutableStateOf(true) }
     val userScrollConnection = remember(turnId) {
         object : NestedScrollConnection {
@@ -396,7 +407,8 @@ internal fun ActivityDetailsSheet(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 20.dp, end = 12.dp, top = 2.dp, bottom = 6.dp),
+                    .padding(start = 20.dp, end = 12.dp, top = 2.dp, bottom = 6.dp)
+                    .heightIn(min = 48.dp),
             ) {
                 Text(
                     text = "处理过程",
@@ -494,7 +506,73 @@ internal fun ActivityDetailsSheet(
                     },
                 )
             }
+            ActivityTurnStatusBar(
+                turnStatus = turnStatus,
+                turnError = turnError,
+                onViewAnswer = if (onViewAnswer == null) null else {
+                    {
+                        scrollScope.launch {
+                            sheetState.hide()
+                            currentOnViewAnswer?.invoke()
+                        }
+                        Unit
+                    }
+                },
+            )
         }
+    }
+}
+
+@Composable
+private fun ActivityTurnStatusBar(
+    turnStatus: ConversationTurnStatus,
+    turnError: UserFacingError?,
+    onViewAnswer: (() -> Unit)?,
+) {
+    var showError by rememberSaveable(turnError) { mutableStateOf(false) }
+    val isFailed = turnStatus == ConversationTurnStatus.FAILED
+    val contentColor = if (isFailed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+    val (label, icon) = when (turnStatus) {
+        ConversationTurnStatus.IN_PROGRESS -> "正在处理" to Icons.Rounded.HourglassTop
+        ConversationTurnStatus.COMPLETED -> "本轮已完成" to Icons.Rounded.Check
+        ConversationTurnStatus.INTERRUPTED -> "已中断" to Icons.Rounded.Block
+        ConversationTurnStatus.FAILED -> "执行失败" to Icons.Rounded.ErrorOutline
+    }
+    Column(Modifier.fillMaxWidth()) {
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Row(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                modifier = Modifier.weight(1f).semantics(mergeDescendants = true) {
+                    liveRegion = LiveRegionMode.Polite
+                },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (turnStatus == ConversationTurnStatus.IN_PROGRESS) {
+                    CircularProgressIndicator(Modifier.size(20.dp), color = contentColor, strokeWidth = 2.dp)
+                } else {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = contentColor,
+                    )
+                }
+                Text(label, color = contentColor, style = MaterialTheme.typography.bodyMedium)
+            }
+            if (isFailed && turnError != null) {
+                TextButton(onClick = { showError = true }) { Text("查看原因") }
+            } else if (turnStatus != ConversationTurnStatus.IN_PROGRESS && onViewAnswer != null) {
+                TextButton(onClick = onViewAnswer) { Text("查看回复") }
+            }
+        }
+    }
+    if (showError && turnError != null) {
+        UserFacingErrorDialog(error = turnError, onDismiss = { showError = false })
     }
 }
 

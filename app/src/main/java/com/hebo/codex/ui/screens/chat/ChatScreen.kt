@@ -815,12 +815,15 @@ fun ChatScreen(
 
     conversation?.history?.turns?.firstOrNull { it.id == activityDetailsTurnId }?.let { turn ->
         val details = activityDetailsContent(turn, conversation.activeTurnId)
+        val answerIndex = finalAnswerRowIndex(conversationRows, turn.id)
         LifecycleResumeEffect(viewModel, turn.id, turn.detailsState) {
             viewModel.loadTurnDetails(turn.id)
             onPauseOrDispose { }
         }
         ActivityDetailsSheet(
             turnId = turn.id,
+            turnStatus = turn.status,
+            turnError = turn.error,
             detailsState = turn.detailsState,
             items = details.items,
             isSealed = details.isSealed,
@@ -845,6 +848,15 @@ fun ChatScreen(
                 onOpenRelatedConversation(threadId)
             },
             onRetry = { viewModel.retryTurnDetails(turn.id) },
+            onViewAnswer = answerIndex?.let { index ->
+                {
+                    activityDetailsTurnId = null
+                    scrollScope.launch {
+                        pagingController.locateItem(index + if (historyPaging != null) 1 else 0)
+                    }
+                    Unit
+                }
+            },
             onDismiss = { activityDetailsTurnId = null },
         )
     }

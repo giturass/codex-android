@@ -7,12 +7,14 @@ import com.hebo.codex.domain.CommandAction
 import com.hebo.codex.domain.ConversationEvent
 import com.hebo.codex.domain.ConversationItem
 import com.hebo.codex.domain.ConversationRunStatus
+import com.hebo.codex.domain.ConversationTurnStatus
 import com.hebo.codex.domain.FileChangeKind
 import com.hebo.codex.domain.FileSystemAccessMode
 import com.hebo.codex.domain.FileSystemPermissionTarget
 import com.hebo.codex.domain.ThreadHistoryMode
 import com.hebo.codex.domain.ThreadRuntimeStatus
 import com.hebo.codex.domain.TurnDetailsState
+import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.domain.UserMessagePart
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -158,6 +160,29 @@ class ProtocolMapperTest {
 
         assertTrue(page.data.single().items.isEmpty())
         assertEquals(TurnDetailsState.Unloaded, page.data.single().detailsState)
+    }
+
+    @Test
+    fun mapsTurnErrorIdenticallyForHistoryAndCompletion() {
+        val error = UserFacingError("任务执行失败", "服务端执行失败详情")
+        listOf(error, null).forEach { expectedError ->
+            val errorJson = if (expectedError == null) "null" else """{"message":"${error.technicalDetails}"}"""
+            val turn = """{"id":"turn-1","status":"failed","itemsView":"summary","items":[],"error":$errorJson}"""
+            val history = ProtocolMapper.threadTurnPage(
+                json.parseToJsonElement("""{"data":[$turn],"nextCursor":null}""").jsonObject,
+            )
+            val notification = ProtocolMapper.notification(
+                serverId = "server-1",
+                method = "turn/completed",
+                params = json.parseToJsonElement("""{"threadId":"thread-1","turn":$turn}""").jsonObject,
+            )
+
+            assertEquals(expectedError, history.data.single().error)
+            assertEquals(
+                ConversationEvent.TurnCompleted("turn-1", ConversationTurnStatus.FAILED, expectedError),
+                notification.conversationEvent,
+            )
+        }
     }
 
     @Test

@@ -94,7 +94,7 @@ internal fun ConversationState.reduceConversationEvent(
     is ConversationEvent.TurnCompleted -> copy(
         history = history.copy(
             turns = history.turns.upsertConversationTurn(
-                ConversationTurn(event.turnId, event.status),
+                ConversationTurn(event.turnId, event.status, error = event.error),
             ),
         ),
         activeTurnId = null,
@@ -128,6 +128,6 @@ private fun List<ConversationTurn>.upsertConversationTurn(turn: ConversationTurn
     if (index == -1) return this + turn
     return toMutableList().apply {
         val current = get(index)
-        set(index, current.copy(status = turn.status))
+        set(index, current.copy(status = turn.status, error = turn.error))
     }
 }

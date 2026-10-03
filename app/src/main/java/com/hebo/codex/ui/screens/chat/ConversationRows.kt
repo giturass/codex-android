@@ -36,6 +36,12 @@ internal fun buildConversationRows(
     }
 }
 
+internal fun finalAnswerRowIndex(rows: List<ConversationRow>, turnId: String): Int? =
+    rows.indexOfLast { row ->
+        val message = (row as? ConversationRow.Item)?.item as? ConversationItem.AgentMessage
+        message != null && message.turnId == turnId && message.text.isNotBlank() && message.startsFinalAnswer()
+    }.takeIf { it >= 0 }
+
 internal data class ActivityDetailsContent(
     val items: List<ConversationItem>,
     val isSealed: Boolean,

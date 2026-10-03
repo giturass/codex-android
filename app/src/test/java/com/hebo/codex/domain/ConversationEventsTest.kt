@@ -64,6 +64,26 @@ class ConversationEventsTest {
         assertEquals(error, result.errorMessage)
         assertTrue(result.activeItemKeys.isEmpty())
         assertEquals(ConversationTurnStatus.FAILED, result.history.turns.single().status)
+        assertEquals(error, result.history.turns.single().error)
+    }
+
+    @Test
+    fun `失败原因保留在已存在回合中且新回合不会清除`() {
+        val error = UserFacingError("任务执行失败", "服务端执行错误")
+        val item = ConversationItem.AgentMessage("item-1", "turn-1", "正在处理")
+        val running = conversationState()
+            .reduceConversationEvent(ConversationEvent.TurnStarted("turn-1"))
+            .withConversationItem(item, isActive = true)
+
+        val failed = running.reduceConversationEvent(
+            ConversationEvent.TurnCompleted("turn-1", ConversationTurnStatus.FAILED, error),
+        )
+        val next = failed.reduceConversationEvent(ConversationEvent.TurnStarted("turn-2"))
+
+        assertNull(next.errorMessage)
+        assertEquals(listOf(item), next.history.turns.first().items)
+        assertEquals(error, next.history.turns.first().error)
+        assertNull(next.history.turns.last().error)
     }
 
     @Test

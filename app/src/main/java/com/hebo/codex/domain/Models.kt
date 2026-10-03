@@ -280,6 +280,7 @@ data class ConversationTurn(
     val status: ConversationTurnStatus,
     val items: List<ConversationItem> = emptyList(),
     val detailsState: TurnDetailsState = TurnDetailsState.Loaded,
+    val error: UserFacingError? = null,
 )
 
 sealed interface TurnDetailsState {
