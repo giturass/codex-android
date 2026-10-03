@@ -1,5 +1,10 @@
 package com.hebo.codex.ui.components
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
@@ -26,6 +31,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -46,10 +52,25 @@ internal fun ConnectionStatusButton(
         is ConnectionStatus.Failed -> Icons.Rounded.ErrorOutline
     }
     if (statusIcon != null) {
+        val iconModifier = if (status == ConnectionStatus.Connecting) {
+            val transition = rememberInfiniteTransition(label = "连接图标旋转")
+            val rotation by transition.animateFloat(
+                initialValue = 0f,
+                targetValue = 360f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(durationMillis = 1_000, easing = LinearEasing),
+                ),
+                label = "连接图标旋转角度",
+            )
+            Modifier.graphicsLayer { rotationZ = rotation }
+        } else {
+            Modifier
+        }
         IconButton(onClick = { expanded = true }, modifier = modifier.size(48.dp)) {
             Icon(
                 imageVector = statusIcon,
                 contentDescription = "服务器连接：${status.label()}",
+                modifier = iconModifier,
                 tint = if (status is ConnectionStatus.Failed) MaterialTheme.colorScheme.error
                     else MaterialTheme.colorScheme.onSurfaceVariant,
             )
