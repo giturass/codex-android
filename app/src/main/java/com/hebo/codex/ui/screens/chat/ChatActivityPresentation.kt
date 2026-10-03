@@ -7,11 +7,7 @@ package com.hebo.codex.ui.screens.chat
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -77,7 +73,6 @@ import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -87,10 +82,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
@@ -141,146 +134,6 @@ internal fun TurnActivityCard(onOpenDetails: () -> Unit) {
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-}
-
-@Composable
-internal fun ActivityGroupCard(
-    items: List<ConversationItem>,
-    isSealed: Boolean,
-    activeItemKeys: Set<ConversationItemKey>,
-    onOpenDetails: () -> Unit,
-) {
-    if (items.isEmpty()) return
-    val singleItem = items.singleOrNull()
-    val canOpenDetails = singleItem == null || activityItemHasDetails(singleItem)
-    val status = singleItem?.activityStatus(activeItemKeys)
-        ?: activityGroupStatus(items, isSealed, activeItemKeys)
-    val isSealedGroup = singleItem == null && isSealed
-    val contentColor = when (status) {
-        ActivityStatus.FAILED, ActivityStatus.DECLINED -> MaterialTheme.colorScheme.error
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    val aggregateColor = MaterialTheme.colorScheme.onSurfaceVariant
-    val sealedGroupStatusIcon = if (isSealedGroup) {
-        when (status) {
-            ActivityStatus.DECLINED -> Icons.Rounded.Block
-            ActivityStatus.INTERRUPTED -> Icons.Rounded.Block
-            ActivityStatus.IN_PROGRESS, ActivityStatus.COMPLETED, ActivityStatus.FAILED -> null
-        }
-    } else {
-        null
-    }
-    val hasLeadingContent = singleItem != null || sealedGroupStatusIcon != null
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .then(
-                if (canOpenDetails) {
-                    Modifier.clickable(role = Role.Button, onClick = onOpenDetails)
-                } else {
-                    Modifier
-                },
-            )
-            .padding(horizontal = 4.dp, vertical = 10.dp)
-            .semantics {
-                stateDescription = activityStatusDescription(status)
-            },
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (singleItem != null) {
-            ActivityTimelineIcon(singleItem, activeItemKeys)
-        } else if (sealedGroupStatusIcon != null) {
-            Box(Modifier.size(30.dp), contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = sealedGroupStatusIcon,
-                    contentDescription = null,
-                    modifier = Modifier.size(22.dp),
-                    tint = contentColor,
-                )
-            }
-        }
-        if (hasLeadingContent) Spacer(Modifier.width(10.dp))
-        if (singleItem == null && isSealed) {
-            ActivityGroupMetrics(
-                metrics = activityGroupMetrics(items),
-                color = aggregateColor,
-                modifier = Modifier.weight(1f),
-            )
-        } else if (singleItem == null) {
-            ActiveActivityGroupTitle(
-                text = activityGroupLabel(items, isSealed, activeItemKeys),
-                modifier = Modifier.weight(1f),
-            )
-        } else {
-            Text(
-                text = activityGroupLabel(items, isSealed, activeItemKeys),
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodyLarge,
-                color = contentColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        if (canOpenDetails) {
-            Icon(
-                Icons.AutoMirrored.Rounded.KeyboardArrowRight,
-                contentDescription = "查看处理过程详情",
-                modifier = Modifier.size(22.dp),
-                tint = if (isSealedGroup && status == ActivityStatus.FAILED) aggregateColor else contentColor,
-            )
-        }
-    }
-}
-
-@Composable
-private fun ActiveActivityGroupTitle(
-    text: String,
-    modifier: Modifier = Modifier,
-) {
-    val baseColor = MaterialTheme.colorScheme.onSurfaceVariant
-    val highlightColor = lerp(baseColor, MaterialTheme.colorScheme.onSurface, 0.35f)
-    var titleWidth by remember { mutableFloatStateOf(0f) }
-    val transition = rememberInfiniteTransition(label = "活动组标题流光")
-    val progress by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2_000, easing = LinearEasing),
-        ),
-        label = "活动组标题流光进度",
-    )
-    val shimmerWidth = titleWidth * 0.45f
-    val shimmerCenter = -shimmerWidth / 2f + progress * (titleWidth + shimmerWidth)
-    val shimmerStart = shimmerCenter - shimmerWidth / 2f
-    val shimmerEnd = shimmerCenter + shimmerWidth / 2f
-    val titleBrush = if (titleWidth > 0f) {
-        Brush.linearGradient(
-            colorStops = arrayOf(
-                0f to baseColor,
-                0.35f to baseColor,
-                0.5f to highlightColor,
-                0.65f to baseColor,
-                1f to baseColor,
-            ),
-            start = Offset(shimmerStart, 0f),
-            end = Offset(shimmerEnd, 0f),
-        )
-    } else {
-        Brush.linearGradient(listOf(baseColor, baseColor))
-    }
-
-    Text(
-        text = text,
-        modifier = modifier,
-        style = MaterialTheme.typography.bodyLarge.copy(
-            brush = titleBrush,
-        ),
-        onTextLayout = { result -> titleWidth = result.getLineRight(0) },
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-    )
 }
 
 internal data class ActivityDetailsActions(
@@ -450,73 +303,6 @@ private fun ActivityGroupMetric.contentDescription(): String {
     return "$description，其中 $failedCount ${failedUnit}失败"
 }
 
-internal fun activityGroupLabel(
-    items: List<ConversationItem>,
-    isSealed: Boolean,
-    activeItemKeys: Set<ConversationItemKey> = emptySet(),
-): String {
-    items.singleOrNull()?.let { return activityItemTitle(it) }
-    if (!isSealed) return activeActivityLabel(items, activeItemKeys)
-
-    return activityGroupMetrics(items).joinToString(" · ") { metric ->
-        when (metric.type) {
-            ActivityGroupMetricType.REASONING -> "推理 ${metric.count}"
-            ActivityGroupMetricType.PROGRESS -> "进度 ${metric.count}"
-            ActivityGroupMetricType.COMMAND -> "命令 ${metric.count}"
-            ActivityGroupMetricType.FILE -> "文件 ${metric.count}"
-            ActivityGroupMetricType.AGENT -> "协作 ${metric.count}"
-            ActivityGroupMetricType.ACTIVITY -> "操作 ${metric.count}"
-        }
-    }
-}
-
-private fun activeActivityLabel(
-    items: List<ConversationItem>,
-    activeItemKeys: Set<ConversationItemKey>,
-): String {
-    val activeItem = items.lastOrNull { it.activityStatus(activeItemKeys) == ActivityStatus.IN_PROGRESS }
-        ?: items.last()
-    return when (activeItem) {
-        is ConversationItem.Reasoning -> reasoningSummaryTitle(activeItem.summaryParts) ?: "推理中"
-
-        is ConversationItem.Plan -> activeItem.text
-            .lineSequence()
-            .lastOrNull(String::isNotBlank)
-            ?.trim()
-            ?: "制定计划中"
-
-        is ConversationItem.CommandExecution -> activeItem.command.commandPreview()
-        is ConversationItem.UserShellCommand -> activeItem.command.commandPreview()
-        is ConversationItem.FileChange -> activeItem.changes
-            .map(::changedFileLabel)
-            .map(ChangedFileLabel::path)
-            .distinct()
-            .joinToString("、")
-            .ifBlank { "修改文件" }
-
-        is ConversationItem.Activity -> activeItem.title
-        is ConversationItem.AgentCollaboration -> activeItem.tool.title()
-        is ConversationItem.SubAgentActivity -> activeItem.kind.title()
-        is ConversationItem.AgentMessage -> agentMessageTitle(activeItem.text)
-        is ConversationItem.UserMessage -> error("活动组包含用户消息")
-    }
-}
-
-private fun activityGroupStatus(
-    items: List<ConversationItem>,
-    isSealed: Boolean,
-    activeItemKeys: Set<ConversationItemKey>,
-): ActivityStatus {
-    if (!isSealed) return ActivityStatus.IN_PROGRESS
-    val statuses = items.map { item -> item.activityStatus(activeItemKeys) }
-    return when {
-        ActivityStatus.FAILED in statuses -> ActivityStatus.FAILED
-        ActivityStatus.DECLINED in statuses -> ActivityStatus.DECLINED
-        ActivityStatus.INTERRUPTED in statuses -> ActivityStatus.INTERRUPTED
-        else -> ActivityStatus.COMPLETED
-    }
-}
-
 internal fun ConversationItem.activityStatus(
     activeItemKeys: Set<ConversationItemKey> = emptySet(),
 ): ActivityStatus {
@@ -626,6 +412,14 @@ internal fun ActivityDetailsSheet(
                         Text("停止")
                     }
                 }
+            }
+            val metrics = remember(items) { activityGroupMetrics(items) }
+            if (detailsState == TurnDetailsState.Loaded && metrics.isNotEmpty()) {
+                ActivityGroupMetrics(
+                    metrics = metrics,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
+                )
             }
             val pendingRequest = activeActions?.pendingRequest
             if (pendingRequest != null) {

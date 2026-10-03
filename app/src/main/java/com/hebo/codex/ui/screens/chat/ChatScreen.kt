@@ -161,7 +161,6 @@ import com.hebo.codex.domain.ApprovalReviewer
 import com.hebo.codex.domain.ApprovalType
 import com.hebo.codex.domain.ConnectionStatus
 import com.hebo.codex.domain.ConversationItem
-import com.hebo.codex.domain.ConversationItemKey
 import com.hebo.codex.domain.ConversationState
 import com.hebo.codex.domain.DraftAttachment
 import com.hebo.codex.domain.FeatureEntry
@@ -316,11 +315,8 @@ fun ChatScreen(
     val quickPhraseState by quickPhraseViewModel.state.collectAsStateWithLifecycle()
     val conversation = state.conversation
     val models = (state.modelListState as? ModelListState.Ready)?.models.orEmpty()
-    val conversationRows = remember(conversation?.history?.turns, conversation?.activeTurnId) {
-        buildConversationRows(
-            turns = conversation?.history?.turns.orEmpty(),
-            activeTurnId = conversation?.activeTurnId,
-        )
+    val conversationRows = remember(conversation?.history?.turns) {
+        buildConversationRows(conversation?.history?.turns.orEmpty())
     }
     val forkTurns = remember(conversation?.history?.turns, conversation?.activeTurnId) {
         buildForkTurns(
@@ -337,7 +333,6 @@ fun ChatScreen(
     var activeRequestKey by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
     var shownNoticeId by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
     var initialAnnouncementShown by rememberSaveable(initialAnnouncement) { mutableStateOf(false) }
-    var activityDetailsRowKey by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
     var activityDetailsTurnId by rememberSaveable(conversation?.threadId) { mutableStateOf<String?>(null) }
     var remoteFileTarget by remember(conversation?.threadId) { mutableStateOf<RemoteFileTarget?>(null) }
     var imagePreviewSource by remember(viewModel) { mutableStateOf<ChatImageSource?>(null) }
@@ -564,7 +559,6 @@ fun ChatScreen(
                                     item = row.item,
                                     imageLoader = imageLoader,
                                     onPreviewImage = previewImage,
-                                    activeItemKeys = conversation.activeItemKeys,
                                     serverName = conversation.serverName,
                                     cwd = conversation.cwd,
                                     onOpenRemoteFile = { remoteFileTarget = it },
@@ -575,24 +569,10 @@ fun ChatScreen(
                                     asyncReplyEnabled = !conversation.isViewOnly && !state.isSendingDraft &&
                                         state.connectionStatus is ConnectionStatus.Connected,
                                     onAsyncReply = viewModel::replyToAsyncQuestion,
-                                    onOpenActivityDetails = {
-                                        activityDetailsTurnId = row.turnId
-                                        activityDetailsRowKey = row.key
-                                    },
-                                )
-                                is ConversationRow.ActivityGroup -> ActivityGroupCard(
-                                    items = row.items,
-                                    isSealed = row.isSealed,
-                                    activeItemKeys = conversation.activeItemKeys,
-                                    onOpenDetails = {
-                                        activityDetailsTurnId = row.turnId
-                                        activityDetailsRowKey = row.key
-                                    },
                                 )
                                 is ConversationRow.TurnActivity -> TurnActivityCard(
                                     onOpenDetails = {
                                         activityDetailsTurnId = row.turnId
-                                        activityDetailsRowKey = null
                                     },
                                 )
                             }
@@ -834,7 +814,7 @@ fun ChatScreen(
     }
 
     conversation?.history?.turns?.firstOrNull { it.id == activityDetailsTurnId }?.let { turn ->
-        val details = activityDetailsContent(turn, conversationRows, activityDetailsRowKey) ?: return@let
+        val details = activityDetailsContent(turn, conversation.activeTurnId)
         LifecycleResumeEffect(viewModel, turn.id, turn.detailsState) {
             viewModel.loadTurnDetails(turn.id)
             onPauseOrDispose { }
@@ -845,7 +825,7 @@ fun ChatScreen(
             items = details.items,
             isSealed = details.isSealed,
             activeItemKeys = conversation.activeItemKeys,
-            activeActions = if (details.isSealed) {
+            activeActions = if (turn.id != conversation.activeTurnId) {
                 null
             } else {
                 ActivityDetailsActions(
@@ -1296,14 +1276,12 @@ private fun ConversationItemView(
     item: ConversationItem,
     imageLoader: ChatImageLoader,
     onPreviewImage: (ChatImageSource) -> Unit,
-    activeItemKeys: Set<ConversationItemKey>,
     serverName: String,
     cwd: String,
     onOpenRemoteFile: (RemoteFileTarget) -> Unit,
     onLinkError: (String) -> Unit,
     shellCommandDisabled: Boolean,
     onRunShellCommand: suspend (String) -> Boolean,
-    onOpenActivityDetails: () -> Unit,
     asyncReplyEnabled: Boolean,
     onAsyncReply: suspend (String) -> Boolean,
 ) {
@@ -1320,19 +1298,7 @@ private fun ConversationItemView(
             asyncReplyEnabled = asyncReplyEnabled,
             onAsyncReply = onAsyncReply,
         )
-        is ConversationItem.Plan -> PlanSnapshot(
-            item = item,
-            isActive = ConversationItemKey(item.turnId, item.id) in activeItemKeys,
-            cwd = cwd,
-            onOpenRemoteFile = onOpenRemoteFile,
-            onLinkError = onLinkError,
-        )
-        else -> ActivityGroupCard(
-            items = listOf(item),
-            isSealed = true,
-            activeItemKeys = activeItemKeys,
-            onOpenDetails = onOpenActivityDetails,
-        )
+        else -> error("处理过程条目应在详情面板展示")
     }
 }
 
@@ -1431,42 +1397,6 @@ internal fun formatShellDuration(durationMillis: Long): String = when {
     durationMillis < 1_000L -> "小于 1 秒"
     durationMillis % 1_000L < 100L -> "${durationMillis / 1_000L} 秒"
     else -> "${durationMillis / 1_000L}.${durationMillis % 1_000L / 100L} 秒"
-}
-
-@Composable
-private fun PlanSnapshot(
-    item: ConversationItem.Plan,
-    isActive: Boolean,
-    cwd: String,
-    onOpenRemoteFile: (RemoteFileTarget) -> Unit,
-    onLinkError: (String) -> Unit,
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-    ) {
-        Column(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("执行计划", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
-                if (isActive) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                }
-            }
-            SelectionContainer {
-                ChatMarkdown(
-                    content = item.text.ifEmpty { "正在制定计划…" },
-                    cwd = cwd,
-                    onOpenRemoteFile = onOpenRemoteFile,
-                    onLinkError = onLinkError,
-                )
-            }
-        }
-    }
 }
 
 @Composable

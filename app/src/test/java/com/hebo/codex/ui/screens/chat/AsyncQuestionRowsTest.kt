@@ -13,17 +13,26 @@ import org.junit.Test
 
 class AsyncQuestionRowsTest {
     @Test
-    fun `异步问题单独展示且不会结束仍在运行的活动组`() {
+    fun `异步问题单独展示且不会停止运行中详情的跟随`() {
         val commentary = ConversationItem.AgentMessage(
             id = "progress", turnId = "turn-1", text = "正在检查", phase = AgentMessagePhase.COMMENTARY,
         )
-        val question = question()
+        listOf(
+            question(),
+            question().copy(phase = null, text = "偏好是什么"),
+        ).forEach { question ->
+            val turn = ConversationTurn(
+                id = "turn-1",
+                status = ConversationTurnStatus.IN_PROGRESS,
+                items = listOf(commentary, question),
+            )
+            val rows = buildConversationRows(listOf(turn))
+            val details = activityDetailsContent(turn, activeTurnId = turn.id)
 
-        val rows = buildLoadedConversationRows(listOf(commentary, question), activeTurnId = "turn-1")
-
-        assertEquals(2, rows.size)
-        assertFalse((rows.first() as ConversationRow.ActivityGroup).isSealed)
-        assertEquals(question, (rows.last() as ConversationRow.Item).item)
+            assertEquals(listOf(ConversationRow.TurnActivity(turn.id), ConversationRow.Item(question)), rows)
+            assertFalse(details.isSealed)
+            assertEquals(listOf(commentary), details.items)
+        }
     }
 
     @Test
@@ -38,7 +47,6 @@ class AsyncQuestionRowsTest {
                     detailsState = TurnDetailsState.Unloaded,
                 ),
             ),
-            activeTurnId = null,
         )
 
         assertEquals(question, (rows.last() as ConversationRow.Item).item)

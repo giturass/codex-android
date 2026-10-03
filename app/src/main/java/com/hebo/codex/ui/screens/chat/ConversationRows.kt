@@ -15,14 +15,6 @@ internal sealed interface ConversationRow {
         override val turnId: String = item.turnId
     }
 
-    data class ActivityGroup(
-        val items: List<ConversationItem>,
-        val isSealed: Boolean,
-    ) : ConversationRow {
-        override val key: String = items.first().rowKey("activity-group")
-        override val turnId: String = items.first().turnId
-    }
-
     data class TurnActivity(override val turnId: String) : ConversationRow {
         override val key: String = "turn-activity:${turnId.length}:$turnId"
     }
@@ -30,71 +22,17 @@ internal sealed interface ConversationRow {
 
 internal fun buildConversationRows(
     turns: List<ConversationTurn>,
-    activeTurnId: String?,
 ): List<ConversationRow> = turns.flatMap { turn ->
-    if (turn.detailsState == TurnDetailsState.Loaded) {
-        buildLoadedConversationRows(turn.items, activeTurnId)
-    } else {
-        buildList {
-            var activityAdded = false
-            turn.items.forEach { item ->
-                if (item !is ConversationItem.UserMessage && !activityAdded) {
-                    add(ConversationRow.TurnActivity(turn.id))
-                    activityAdded = true
-                }
-                if (!item.isGroupableActivity()) add(ConversationRow.Item(item))
+    buildList {
+        var activityAdded = false
+        turn.items.forEach { item ->
+            if (item !is ConversationItem.UserMessage && !activityAdded) {
+                add(ConversationRow.TurnActivity(turn.id))
+                activityAdded = true
             }
-            if (!activityAdded) add(ConversationRow.TurnActivity(turn.id))
+            if (!item.isProcessActivity()) add(ConversationRow.Item(item))
         }
-    }
-}
-
-internal fun buildLoadedConversationRows(
-    items: List<ConversationItem>,
-    activeTurnId: String?,
-): List<ConversationRow> {
-    val rows = mutableListOf<ConversationRow>()
-    var activityItems = mutableListOf<ConversationItem>()
-
-    fun flushActivities() {
-        if (activityItems.isNotEmpty()) {
-            rows += ConversationRow.ActivityGroup(
-                items = activityItems.toList(),
-                isSealed = false,
-            )
-        }
-        activityItems = mutableListOf()
-    }
-
-    fun sealActivityGroups(turnId: String) {
-        rows.indices.forEach { index ->
-            val row = rows[index] as? ConversationRow.ActivityGroup ?: return@forEach
-            if (!row.isSealed && row.items.first().turnId == turnId) {
-                rows[index] = row.copy(isSealed = true)
-            }
-        }
-    }
-
-    items.forEach { item ->
-        if (item.isGroupableActivity() &&
-            (activityItems.isEmpty() || activityItems.last().turnId == item.turnId)
-        ) {
-            activityItems += item
-        } else {
-            flushActivities()
-            if (item is ConversationItem.AgentMessage && item.startsFinalAnswer()) {
-                sealActivityGroups(item.turnId)
-            }
-            if (item.isGroupableActivity()) activityItems += item else rows += ConversationRow.Item(item)
-        }
-    }
-    flushActivities()
-    return rows.map { row ->
-        if (row is ConversationRow.ActivityGroup && row.items.first().turnId != activeTurnId) {
-            row.copy(isSealed = true)
-        } else {
-            row
-        }
+        if (!activityAdded) add(ConversationRow.TurnActivity(turn.id))
     }
 }
 
@@ -105,27 +43,25 @@ internal data class ActivityDetailsContent(
 
 internal fun activityDetailsContent(
     turn: ConversationTurn,
-    rows: List<ConversationRow>,
-    rowKey: String?,
-): ActivityDetailsContent? {
-    if (rowKey == null) {
-        return ActivityDetailsContent(
-            items = if (turn.detailsState == TurnDetailsState.Loaded) {
-                turn.items.filter { it.isGroupableActivity() || it is ConversationItem.UserShellCommand }
-            } else {
-                emptyList()
-            },
-            isSealed = true,
-        )
+    activeTurnId: String?,
+): ActivityDetailsContent {
+    val lastActivityIndex = turn.items.indexOfLast {
+        it.isProcessActivity() || it is ConversationItem.UserShellCommand
     }
-    return when (val row = rows.firstOrNull { it.turnId == turn.id && it.key == rowKey }) {
-        is ConversationRow.ActivityGroup -> ActivityDetailsContent(row.items, row.isSealed)
-        is ConversationRow.Item -> ActivityDetailsContent(listOf(row.item), isSealed = true)
-        is ConversationRow.TurnActivity, null -> null
+    val lastAnswerIndex = turn.items.indexOfLast {
+        it is ConversationItem.AgentMessage && it.startsFinalAnswer()
     }
+    return ActivityDetailsContent(
+        items = if (turn.detailsState == TurnDetailsState.Loaded) {
+            turn.items.filter { it.isProcessActivity() || it is ConversationItem.UserShellCommand }
+        } else {
+            emptyList()
+        },
+        isSealed = turn.id != activeTurnId || lastAnswerIndex > lastActivityIndex,
+    )
 }
 
-private fun ConversationItem.isGroupableActivity(): Boolean =
+private fun ConversationItem.isProcessActivity(): Boolean =
     when (this) {
         is ConversationItem.UserMessage,
         is ConversationItem.UserShellCommand,

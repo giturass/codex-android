@@ -5,6 +5,8 @@ import com.hebo.codex.domain.AgentState
 import com.hebo.codex.domain.AgentStatus
 import com.hebo.codex.domain.AgentTool
 import com.hebo.codex.domain.ConversationItem
+import com.hebo.codex.domain.ConversationTurn
+import com.hebo.codex.domain.ConversationTurnStatus
 import com.hebo.codex.domain.SubAgentActivityKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -23,21 +25,22 @@ class SubAgentPresentationTest {
     }
 
     @Test
-    fun agentActionsRemainNavigableInSealedHistoryGroups() {
+    fun agentActionsRemainNavigableInSealedTurnDetails() {
         val items = listOf(
             collaboration(),
             ConversationItem.SubAgentActivity(
                 "done", "turn", SubAgentActivityKind.COMPLETED, "child", "/root/review",
             ),
         )
-        val group = buildLoadedConversationRows(items, activeTurnId = null).single() as ConversationRow.ActivityGroup
+        val turn = ConversationTurn("turn", ConversationTurnStatus.COMPLETED, items)
+        val details = activityDetailsContent(turn, activeTurnId = null)
 
-        assertTrue(group.isSealed)
-        assertTrue(group.items.all(::activityItemHasDetails))
-        assertEquals(items, group.items)
-        assertEquals(listOf(ActivityGroupMetric(ActivityGroupMetricType.AGENT, 2)), activityGroupMetrics(group.items))
-        assertEquals("协作 2", activityGroupLabel(group.items, group.isSealed))
-        assertEquals("/root/review", activityItemSubtitle(group.items.last()))
+        assertEquals(listOf(ConversationRow.TurnActivity(turn.id)), buildConversationRows(listOf(turn)))
+        assertTrue(details.isSealed)
+        assertTrue(details.items.all(::activityItemHasDetails))
+        assertEquals(items, details.items)
+        assertEquals(listOf(ActivityGroupMetric(ActivityGroupMetricType.AGENT, 2)), activityGroupMetrics(details.items))
+        assertEquals("/root/review", activityItemSubtitle(details.items.last()))
     }
 
     @Test
