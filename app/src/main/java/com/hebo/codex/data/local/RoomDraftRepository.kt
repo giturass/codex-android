@@ -19,6 +19,7 @@ import com.hebo.codex.domain.TurnOptions
 import com.hebo.codex.domain.UserInputPart
 import com.hebo.codex.domain.hasContent
 import com.hebo.codex.domain.newDraftRevision
+import com.hebo.codex.domain.shouldPersist
 import com.hebo.codex.domain.toSummary
 import java.io.File
 import java.security.MessageDigest
@@ -66,10 +67,17 @@ internal class RoomDraftRepository(
 
     override val failures: Flow<DraftFailure> = mutableFailures
     override val summaries: Flow<List<DraftSummary>> = combine(databaseDrafts, pending) { entities, changes ->
-        val merged = entities.associate { it.key to it.toSummary() }.toMutableMap()
+        val merged = entities
+            .filter { it.message.isNotBlank() || it.attachmentCount > 0 }
+            .associate { it.key to it.toSummary() }
+            .toMutableMap()
         changes.values.forEach { change ->
             when (change) {
-                is PendingMutation.Save -> merged[change.key] = change.draft.toSummary()
+                is PendingMutation.Save -> if (change.draft.hasContent()) {
+                    merged[change.key] = change.draft.toSummary()
+                } else {
+                    merged.remove(change.key)
+                }
                 is PendingMutation.Delete -> merged.remove(change.key)
             }
         }
@@ -104,7 +112,7 @@ internal class RoomDraftRepository(
 
     override fun schedule(draft: ConversationDraft) {
         if (draft.serverId in deletedServers) return
-        val change = if (draft.hasContent()) PendingMutation.Save(draft) else PendingMutation.Delete(draft.key)
+        val change = if (draft.shouldPersist()) PendingMutation.Save(draft) else PendingMutation.Delete(draft.key)
         pending.update { it + (change.key to change) }
         schedulePersistence(change.key, SAVE_DEBOUNCE_MILLIS)
     }
@@ -115,7 +123,7 @@ internal class RoomDraftRepository(
 
     override suspend fun save(draft: ConversationDraft) {
         require(draft.serverId !in deletedServers) { "服务器已删除" }
-        if (!draft.hasContent()) {
+        if (!draft.shouldPersist()) {
             delete(draft.key)
             return
         }
@@ -464,6 +472,7 @@ private data class StoredThreadOptions(
     val model: String?,
     val modelProvider: String?,
     val serviceTier: String?,
+    val reasoningEffort: String?,
     val approvalPolicy: String?,
     val approvalsReviewer: String?,
     val sandboxMode: String?,
@@ -476,6 +485,7 @@ private data class StoredThreadOptions(
         model = model,
         modelProvider = modelProvider,
         serviceTier = serviceTier,
+        reasoningEffort = reasoningEffort,
         approvalPolicy = approvalPolicy?.let(ApprovalPolicy::valueOf),
         approvalsReviewer = approvalsReviewer?.let(ApprovalReviewer::valueOf),
         sandboxMode = sandboxMode?.let(SandboxMode::valueOf),
@@ -490,6 +500,7 @@ private data class StoredThreadOptions(
             model = value.model,
             modelProvider = value.modelProvider,
             serviceTier = value.serviceTier,
+            reasoningEffort = value.reasoningEffort,
             approvalPolicy = value.approvalPolicy?.name,
             approvalsReviewer = value.approvalsReviewer?.name,
             sandboxMode = value.sandboxMode?.name,

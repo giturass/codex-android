@@ -16,6 +16,7 @@ import com.hebo.codex.domain.DraftRepository
 import com.hebo.codex.domain.DraftTarget
 import com.hebo.codex.domain.FeatureEntry
 import com.hebo.codex.domain.ModelOption
+import com.hebo.codex.domain.MessageSubmission
 import com.hebo.codex.domain.QueueWithdrawalCoordinator
 import com.hebo.codex.domain.QueueWithdrawalState
 import com.hebo.codex.domain.ReviewDestination
@@ -178,7 +179,7 @@ class ChatViewModel(
                     } else {
                         draftInitialized = true
                         (restoredResult.getOrNull() as? ConversationDraft.Thread)?.toChatDraft()
-                            ?: ChatDraft(options = value.defaultTurnOptions())
+                            ?: ChatDraft()
                     }
                     mutableState.update {
                         it.copy(
@@ -329,7 +330,7 @@ class ChatViewModel(
         val input = draft.toInput()
         if (input.isEmpty()) return
         submitDraft(draft) {
-            repository.sendMessage(serverId, threadId, input, draft.options)
+            repository.sendMessage(serverId, threadId, input, draft.options) == MessageSubmission.TURN_STARTED
         }
     }
 
@@ -347,6 +348,7 @@ class ChatViewModel(
         }
         submitDraft(draft) {
             repository.runShellCommand(serverId, threadId, requireNotNull(command))
+            false
         }
     }
 
@@ -365,6 +367,7 @@ class ChatViewModel(
         if (input.isEmpty()) return
         submitDraft(draft, failureFeedback = "排队结果未确认，请刷新队列后再重试") {
             repository.queueInput(serverId, threadId, input)
+            false
         }
     }
 
@@ -420,6 +423,10 @@ class ChatViewModel(
         viewModelScope.launch {
             runSuspendCatching {
                 repository.sendMessage(serverId, threadId, input, current.draft.options)
+            }.onSuccess { submission ->
+                if (submission == MessageSubmission.TURN_STARTED) {
+                    clearAppliedOptions(current.draft.options)
+                }
             }.onFailure(::showError)
             mutableState.update { it.copy(isSendingDraft = false) }
         }
@@ -440,6 +447,10 @@ class ChatViewModel(
                         listOf(UserInputPart.Text(text)),
                         current.draft.options,
                     )
+                }.onSuccess { submission ->
+                    if (submission == MessageSubmission.TURN_STARTED) {
+                        clearAppliedOptions(current.draft.options)
+                    }
                 }.onFailure(::showError).isSuccess
             } finally {
                 mutableState.update { it.copy(isSendingDraft = false) }
@@ -712,11 +723,15 @@ class ChatViewModel(
         mutableState.update { it.copy(screenError = error.toUserFacingError()) }
     }
 
-    private fun submitDraft(draft: ChatDraft, failureFeedback: String? = null, send: suspend () -> Unit) {
+    private fun submitDraft(
+        draft: ChatDraft,
+        failureFeedback: String? = null,
+        send: suspend () -> Boolean,
+    ) {
         mutableState.update { it.copy(isSendingDraft = true, screenError = null) }
         viewModelScope.launch {
             runSuspendCatching(send)
-                .onSuccess {
+                .onSuccess { optionsApplied ->
                     runSuspendCatching { draftRepository.delete(draftKey) }
                         .onFailure { error ->
                             mutableState.update {
@@ -726,14 +741,11 @@ class ChatViewModel(
                     queueWithdrawalCoordinator.draftChanged(draftKey)
                     mutableState.update { state ->
                         state.copy(
-                            draft = if (state.draft == draft) {
-                                ChatDraft(options = state.conversation.defaultTurnOptions())
-                            } else {
-                                state.draft
-                            },
+                            draft = state.draft.afterSuccessfulSubmission(draft, optionsApplied),
                             isSendingDraft = false,
                         )
                     }
+                    scheduleDraft()
                 }
                 .onFailure { error ->
                     mutableState.update {
@@ -747,6 +759,10 @@ class ChatViewModel(
     private fun updateDraft(transform: (ChatDraft) -> ChatDraft) {
         mutableState.update { it.copy(draft = transform(it.draft)) }
         scheduleDraft()
+    }
+
+    private fun clearAppliedOptions(options: TurnOptions) {
+        updateDraft { it.withoutAppliedOptions(options) }
     }
 
     private fun scheduleDraft() {
@@ -781,14 +797,6 @@ class ChatViewModel(
         }
     }
 }
-
-private fun ConversationState?.defaultTurnOptions(): TurnOptions = this?.let {
-    TurnOptions(
-        model = it.model,
-        serviceTier = it.serviceTier,
-        reasoningEffort = it.reasoningEffort,
-    )
-} ?: TurnOptions()
 
 private fun ConversationDraft.Thread.toChatDraft(): ChatDraft = ChatDraft(
     message = message,

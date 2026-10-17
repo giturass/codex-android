@@ -32,6 +32,9 @@ class ProtocolMapperTest {
         val response = json.parseToJsonElement(
             """
             {
+              "model": "gpt-6",
+              "serviceTier": "priority",
+              "reasoningEffort": "ultra",
               "thread": {
                 "id": "thr-1",
                 "sessionId": "session-1",
@@ -124,6 +127,9 @@ class ProtocolMapperTest {
         val page = ProtocolMapper.threadItemPage(itemsResponse, "turn-1")
 
         assertEquals("thr-1", snapshot.summary.id)
+        assertEquals("gpt-6", snapshot.model)
+        assertEquals("priority", snapshot.serviceTier)
+        assertEquals("ultra", snapshot.reasoningEffort)
         assertEquals("session-1", snapshot.summary.sessionId)
         assertEquals("修复登录问题", snapshot.summary.title)
         assertEquals(ThreadRuntimeStatus.ACTIVE, snapshot.summary.status)

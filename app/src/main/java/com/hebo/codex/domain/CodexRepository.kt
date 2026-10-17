@@ -568,7 +568,7 @@ class CodexRepository(
         threadId: String,
         input: List<UserInputPart>,
         options: TurnOptions = TurnOptions(),
-    ) {
+    ): MessageSubmission {
         require(input.isNotEmpty()) { "消息内容不能为空" }
         val text = input.filterIsInstance<UserInputPart.Text>().joinToString("\n") { it.text }.trim()
         require(text.isNotEmpty() || input.any { it !is UserInputPart.Text }) { "消息内容不能为空" }
@@ -586,10 +586,12 @@ class CodexRepository(
         setThreadAttention(serverId, threadId, ThreadAttention.RUNNING)
 
         try {
+            val targetApi = api(serverId)
+            val settingsRevision = state.value.settingsRevision
             val result = if (activeTurnId == null) {
-                api(serverId).startTurn(threadId, clientId, input, options)
+                targetApi.startTurn(threadId, clientId, input, options)
             } else {
-                api(serverId).steerTurn(threadId, activeTurnId, clientId, input)
+                targetApi.steerTurn(threadId, activeTurnId, clientId, input)
             }
             val turnId = if (activeTurnId == null) {
                 result.requiredObject("turn").requiredString("id")
@@ -597,8 +599,14 @@ class CodexRepository(
                 result.requiredString("turnId")
             }
             state.updateState { current ->
-                current.reduceConversationEvent(ConversationEvent.TurnStarted(turnId))
+                val accepted = if (activeTurnId == null) {
+                    current.withAcceptedTurnOptions(options, settingsRevision)
+                } else {
+                    current
+                }
+                accepted.reduceConversationEvent(ConversationEvent.TurnStarted(turnId))
             }
+            return if (activeTurnId == null) MessageSubmission.TURN_STARTED else MessageSubmission.TURN_STEERED
         } catch (error: Throwable) {
             state.updateState { current ->
                 current.copy(

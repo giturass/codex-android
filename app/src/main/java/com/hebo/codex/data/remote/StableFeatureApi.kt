@@ -38,6 +38,7 @@ class StableFeatureApi(
                 StableRpcMethod.MODEL_LIST,
                 buildJsonObject {
                     put("limit", PAGE_LIMIT)
+                    put("includeHidden", true)
                     cursor?.let { put("cursor", it) }
                 },
             ).jsonObject
@@ -734,10 +735,10 @@ class StableFeatureApi(
         model = requiredString("model"),
         displayName = requiredString("displayName"),
         description = requiredString("description"),
-        isDefault = optionalBoolean("isDefault") ?: false,
-        hidden = optionalBoolean("hidden") ?: false,
+        isDefault = requiredBoolean("isDefault"),
+        hidden = requiredBoolean("hidden"),
         inputModalities = array("inputModalities").map { it.primitiveContent() },
-        reasoningEfforts = array("supportedReasoningEfforts").map { element ->
+        reasoningEfforts = requiredArray("supportedReasoningEfforts").map { element ->
             val value = element.jsonObject
             val effort = value.requiredString("reasoningEffort")
             OptionValue(effort, effort, value.requiredString("description"))

@@ -440,6 +440,17 @@ object ProtocolMapper {
         )
 
         "thread/name/updated" -> ConversationEvent.NameUpdated(params.optionalString("threadName"))
+        "thread/settings/updated" -> params.requiredObject("threadSettings").let { settings ->
+            ConversationEvent.SettingsUpdated(
+                cwd = settings.requiredString("cwd"),
+                model = settings.requiredString("model"),
+                serviceTier = settings.optionalString("serviceTier"),
+                reasoningEffort = settings.optionalString("effort"),
+                approvalPolicy = settings.getValue("approvalPolicy").compactText(),
+                approvalsReviewer = settings.requiredString("approvalsReviewer"),
+                sandbox = settings.requiredObject("sandboxPolicy").compactText(),
+            )
+        }
         "thread/archived", "thread/deleted", "thread/closed" -> ConversationEvent.Closed(
             ConversationNotice(
                 id = UUID.randomUUID().toString(),

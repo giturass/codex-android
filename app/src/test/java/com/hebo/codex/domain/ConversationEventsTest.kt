@@ -8,6 +8,90 @@ import org.junit.Test
 
 class ConversationEventsTest {
     @Test
+    fun `新回合确认后的模型与深度由后续回合继承`() {
+        val before = conversationState().copy(model = "gpt-5", reasoningEffort = "low")
+        val accepted = before.withAcceptedTurnOptions(
+            TurnOptions(model = "gpt-6", reasoningEffort = "ultra", serviceTier = "priority"),
+            before.settingsRevision,
+        )
+        val completed = accepted.reduceConversationEvent(
+            ConversationEvent.TurnCompleted("turn-1", ConversationTurnStatus.COMPLETED, null),
+        )
+        val next = completed.withAcceptedTurnOptions(TurnOptions(), completed.settingsRevision)
+            .reduceConversationEvent(ConversationEvent.TurnStarted("turn-2"))
+
+        assertEquals("gpt-6", next.model)
+        assertEquals("ultra", next.reasoningEffort)
+        assertEquals("priority", next.serviceTier)
+    }
+
+    @Test
+    fun `设置通知同时同步模型深度工作目录和权限并清除可空设置`() {
+        val before = conversationState().copy(
+            model = "gpt-5",
+            reasoningEffort = "high",
+            serviceTier = "priority",
+        )
+        val updated = before.reduceConversationEvent(settingsUpdated(reasoningEffort = null))
+
+        assertEquals("gpt-6", updated.model)
+        assertNull(updated.reasoningEffort)
+        assertNull(updated.serviceTier)
+        assertEquals("/workspace/updated", updated.cwd)
+        assertEquals("on-request", updated.approvalPolicy)
+        assertEquals("auto_review", updated.approvalsReviewer)
+        assertEquals("{\"type\":\"workspaceWrite\"}", updated.sandbox)
+    }
+
+    @Test
+    fun `设置通知无论在提交确认前后到达都保留服务端实际深度`() {
+        val before = conversationState().copy(model = "gpt-5", reasoningEffort = "low")
+        val requested = TurnOptions(model = "requested-model", reasoningEffort = "ultra", serviceTier = "priority")
+        val notification = settingsUpdated(reasoningEffort = "custom")
+
+        val notificationFirst = before.reduceConversationEvent(notification)
+            .withAcceptedTurnOptions(requested, before.settingsRevision)
+        val responseFirst = before.withAcceptedTurnOptions(requested, before.settingsRevision)
+            .reduceConversationEvent(notification)
+
+        listOf(notificationFirst, responseFirst).forEach { state ->
+            assertEquals("gpt-6", state.model)
+            assertEquals("custom", state.reasoningEffort)
+            assertNull(state.serviceTier)
+        }
+    }
+
+    @Test
+    fun `值未变化的服务端确认也不能被较旧提交覆盖`() {
+        val notification = settingsUpdated(reasoningEffort = "low")
+        val before = conversationState().reduceConversationEvent(notification)
+        val confirmed = before.reduceConversationEvent(notification)
+
+        val accepted = confirmed.withAcceptedTurnOptions(
+            TurnOptions(reasoningEffort = "ultra"),
+            before.settingsRevision,
+        )
+
+        assertEquals("low", accepted.reasoningEffort)
+    }
+
+    @Test
+    fun `恢复快照先到达时提交确认不会覆盖恢复的设置`() {
+        val before = conversationState().copy(model = "gpt-5", reasoningEffort = "low")
+        val resumed = before.withRefreshedConversation(
+            conversationState().copy(model = "gpt-6", reasoningEffort = "custom"),
+        )
+
+        val accepted = resumed.withAcceptedTurnOptions(
+            TurnOptions(model = "requested-model", reasoningEffort = "ultra"),
+            before.settingsRevision,
+        )
+
+        assertEquals("gpt-6", accepted.model)
+        assertEquals("custom", accepted.reasoningEffort)
+    }
+
+    @Test
     fun `新用量和目标与同步标记一起应用且互不清除对方标记`() {
         val state = conversationState().copy(runtimeStatus = RuntimeStatus().markStale())
         val breakdown = TokenUsageBreakdown(123, 100, 0, 23, 0)
@@ -123,5 +207,15 @@ class ConversationEventsTest {
         threadId = "thread-1",
         title = "测试会话",
         cwd = "/workspace",
+    )
+
+    private fun settingsUpdated(reasoningEffort: String?) = ConversationEvent.SettingsUpdated(
+        cwd = "/workspace/updated",
+        model = "gpt-6",
+        serviceTier = null,
+        reasoningEffort = reasoningEffort,
+        approvalPolicy = "on-request",
+        approvalsReviewer = "auto_review",
+        sandbox = "{\"type\":\"workspaceWrite\"}",
     )
 }

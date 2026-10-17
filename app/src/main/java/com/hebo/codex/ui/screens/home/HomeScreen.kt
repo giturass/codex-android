@@ -77,12 +77,17 @@ import com.hebo.codex.domain.QuickPhrase
 import com.hebo.codex.domain.SandboxMode
 import com.hebo.codex.domain.ThreadOptions
 import com.hebo.codex.domain.UserInputPart
+import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.domain.projectName
+import com.hebo.codex.domain.resolveModelOption
+import com.hebo.codex.domain.selectModel
 import com.hebo.codex.ui.displayDescriptionRes
 import com.hebo.codex.ui.displayLabelRes
 import com.hebo.codex.ui.components.NoticeHostState
 import com.hebo.codex.ui.components.NoticeScaffold
+import com.hebo.codex.ui.components.ExpandableErrorDetails
 import com.hebo.codex.ui.components.OptionChipRow
+import com.hebo.codex.ui.components.ReasoningEffortSelector
 import com.hebo.codex.ui.components.SettingDescription
 import com.hebo.codex.ui.components.navigationAttention
 import com.hebo.codex.ui.ratelimits.RateLimitsUiState
@@ -239,7 +244,11 @@ fun HomeScreen(
                 serverName = activeServer.name,
                 message = newTaskState.message,
                 attachments = newTaskState.attachments,
-                modelLabel = composerModelLabel(newTaskState.options.model, null, state.models),
+                modelLabel = composerModelLabel(
+                    model = newTaskState.options.model,
+                    reasoningEffort = newTaskState.options.reasoningEffort,
+                    models = state.models,
+                ),
                 cwd = newTaskState.cwd,
                 projects = state.recentProjects,
                 projectSelectionKey = activeServer.id,
@@ -303,6 +312,9 @@ fun HomeScreen(
         ThreadOptionsSheet(
             value = newTaskState.options,
             models = state.models,
+            isLoadingModels = state.isLoadingModels,
+            modelsError = state.modelsError,
+            onRetryModels = viewModel::retryLoadModels,
             onDismiss = { showOptions = false },
             onSave = {
                 newTaskViewModel.updateOptions(it)
@@ -591,13 +603,15 @@ private fun CustomProjectPathDialog(
 private fun ThreadOptionsSheet(
     value: ThreadOptions,
     models: List<ModelOption>,
+    isLoadingModels: Boolean,
+    modelsError: UserFacingError?,
+    onRetryModels: () -> Unit,
     onDismiss: () -> Unit,
     onSave: (ThreadOptions) -> Unit,
 ) {
     val selectableModels = models.filterNot(ModelOption::hidden)
-    var modelId by remember(value) { mutableStateOf(value.model) }
+    var modelOptions by remember(value) { mutableStateOf(value) }
     var modelProvider by remember(value) { mutableStateOf(value.modelProvider.orEmpty()) }
-    var serviceTier by remember(value) { mutableStateOf(value.serviceTier.orEmpty()) }
     var sandbox by remember(value) { mutableStateOf(value.sandboxMode) }
     var approval by remember(value) { mutableStateOf(value.approvalPolicy) }
     var approvalReviewer by remember(value) { mutableStateOf(value.approvalsReviewer) }
@@ -606,7 +620,7 @@ private fun ThreadOptionsSheet(
     var developerInstructions by remember(value) { mutableStateOf(value.developerInstructions.orEmpty()) }
     var configJson by remember(value) { mutableStateOf(value.configJson.orEmpty()) }
     var showAdvanced by rememberSaveable { mutableStateOf(false) }
-    val selectedModel = selectableModels.firstOrNull { it.model == modelId }
+    val selectedModel = modelOptions.model?.let { models.resolveModelOption(it) }
 
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surface) {
         Column(
@@ -623,24 +637,52 @@ private fun ThreadOptionsSheet(
                 "未修改的选项将沿用服务器默认值",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Text("模型", style = MaterialTheme.typography.labelLarge)
+            if (isLoadingModels) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Text("正在加载模型", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            modelsError?.let { error ->
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    ExpandableErrorDetails(error)
+                    TextButton(onClick = onRetryModels, enabled = !isLoadingModels) { Text("重试") }
+                }
+            }
             if (selectableModels.isNotEmpty()) {
-                Text("模型", style = MaterialTheme.typography.labelLarge)
                 OptionChipRow(
                     values = selectableModels,
                     selected = selectedModel,
                     label = { it.displayName },
                     onSelect = { model ->
-                        modelId = model.model
-                        serviceTier = model.defaultServiceTier.orEmpty()
+                        modelOptions = modelOptions.selectModel(model)
                     },
                 )
-                selectedModel?.description?.takeIf(String::isNotBlank)?.let { description ->
-                    Text(
-                        description,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+            } else if (!isLoadingModels && modelsError == null) {
+                Text("当前服务端没有可选模型", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            selectedModel?.description?.takeIf(String::isNotBlank)?.let { description ->
+                Text(
+                    description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            selectedModel?.let { model ->
+                ReasoningEffortSelector(
+                    model = model,
+                    selectedEffort = modelOptions.reasoningEffort,
+                    defaultEffort = null,
+                    defaultLabel = "服务端默认",
+                    onSelect = { modelOptions = modelOptions.copy(reasoningEffort = it) },
+                )
+            }
+            if (modelOptions.model == null) {
+                SettingDescription("选择模型后可设置思考深度")
             }
             HorizontalDivider(Modifier.padding(top = 4.dp))
             TextButton(
@@ -651,8 +693,17 @@ private fun ThreadOptionsSheet(
             }
             if (showAdvanced) {
                 OutlinedTextField(
-                    value = modelId.orEmpty(),
-                    onValueChange = { modelId = it.ifBlank { null } },
+                    value = modelOptions.model.orEmpty(),
+                    onValueChange = { value ->
+                        val modelId = value.ifBlank { null }
+                        val model = modelId?.let { models.resolveModelOption(it) }
+                        modelOptions = when {
+                            modelId == null -> modelOptions.selectModel(null)
+                            model != null -> modelOptions.selectModel(model)
+                            modelId == modelOptions.model -> modelOptions
+                            else -> modelOptions.copy(model = modelId, reasoningEffort = null, serviceTier = null)
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("模型 ID，可留空") },
                     singleLine = true,
@@ -665,8 +716,8 @@ private fun ThreadOptionsSheet(
                     singleLine = true,
                 )
                 OutlinedTextField(
-                    value = serviceTier,
-                    onValueChange = { serviceTier = it },
+                    value = modelOptions.serviceTier.orEmpty(),
+                    onValueChange = { modelOptions = modelOptions.copy(serviceTier = it.ifBlank { null }) },
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("服务层级，可留空") },
                     singleLine = true,
@@ -738,9 +789,10 @@ private fun ThreadOptionsSheet(
                 onClick = {
                     onSave(
                         ThreadOptions(
-                            model = modelId,
+                            model = modelOptions.model,
                             modelProvider = modelProvider.ifBlank { null },
-                            serviceTier = serviceTier.ifBlank { null },
+                            serviceTier = modelOptions.serviceTier,
+                            reasoningEffort = modelOptions.reasoningEffort,
                             sandboxMode = sandbox,
                             approvalPolicy = approval,
                             approvalsReviewer = approvalReviewer,

@@ -127,10 +127,15 @@ class AppServerApi(
             options.approvalPolicy?.let { put("approvalPolicy", it.wireValue) }
             options.approvalsReviewer?.let { put("approvalsReviewer", it.wireValue) }
             options.sandboxMode?.let { put("sandbox", it.wireValue) }
-            options.configJson?.takeIf(String::isNotBlank)?.let {
-                val config = Json.parseToJsonElement(it) as? JsonObject
+            val config = options.configJson?.takeIf(String::isNotBlank)?.let {
+                Json.parseToJsonElement(it) as? JsonObject
                     ?: throw IllegalArgumentException("线程配置必须是 JSON 对象")
-                put("config", config)
+            }
+            if (config != null || options.reasoningEffort != null) {
+                put("config", buildJsonObject {
+                    config?.forEach { (key, value) -> put(key, value) }
+                    options.reasoningEffort?.let { put("model_reasoning_effort", it) }
+                })
             }
             options.baseInstructions?.takeIf(String::isNotBlank)?.let { put("baseInstructions", it) }
             options.developerInstructions?.takeIf(String::isNotBlank)?.let { put("developerInstructions", it) }

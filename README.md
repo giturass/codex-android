@@ -33,7 +33,7 @@ Codex Android 是基于 Codex app-server 的非官方原生 Android 客户端，
 - 按文件查看本轮汇总差异，并区分终端输入与命令输出
 - 查看子代理的任务、状态与结果，打开子会话并返回父会话
 - 处理命令、文件、权限审批、用户问题和 MCP 确认请求
-- 配置模型、推理强度、审批策略、审批者和沙箱权限
+- 配置模型、思考深度、审批策略、审批者和沙箱权限
 - 支持设备图片、图片地址、Skills、Apps、Plugins、快捷短语和 Shell 输入
 - 预览、保存和分享服务端文件与图片
 - 查看账号、使用额度和 Token 用量，并管理 Skills、Plugins 与 MCP 服务
@@ -46,6 +46,14 @@ Codex Android 是基于 Codex app-server 的非官方原生 Android 客户端，
 - 服务端需要提供与当前客户端兼容的 Codex app-server
 - Android 设备需要能够访问服务端 WebSocket 地址
 - 跨设备连接使用 TLS（`wss://`）或 SSH 端口转发
+
+## 模型与思考深度
+
+点击输入框旁的模型标签，在新任务的「任务选项」或会话的「下一轮设置」中选择模型和思考深度。可选深度、默认值和说明均来自服务端的模型目录，不固定档位；切换模型时保留仍受支持的深度，否则采用新模型声明的默认值。
+
+会话设置从下一次新回合开始生效，并沿用于后续回合；重新打开会话时恢复服务端实际设置。运行中的补充输入和排队消息沿用会话设置。
+
+参数与生效范围参见 OpenAI 官方文档的 [模型能力查询](https://learn.chatgpt.com/docs/app-server#list-models-modellist) 和 [回合配置](https://learn.chatgpt.com/docs/app-server#turns)。
 
 ## 配置服务端
 

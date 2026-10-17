@@ -180,12 +180,21 @@ class ConversationItemsTest {
             activeTurnId = "turn-1",
         ).copy(
             model = "gpt-5",
+            reasoningEffort = "low",
+            serviceTier = "priority",
             goalLoaded = true,
             notices = listOf(ConversationNotice("notice", "保留提示")),
         )
         val refreshed = conversationState(
             items = listOf(command("command-1", ActivityStatus.COMPLETED)),
-        ).copy(title = "新标题")
+        ).copy(
+            title = "新标题",
+            model = "gpt-6",
+            reasoningEffort = "ultra",
+            approvalPolicy = "on-request",
+            approvalsReviewer = "auto_review",
+            sandbox = "{\"type\":\"workspaceWrite\"}",
+        )
 
         val merged = current.withRefreshedConversation(refreshed)
 
@@ -194,9 +203,32 @@ class ConversationItemsTest {
             ActivityStatus.COMPLETED,
             (merged.items.single() as ConversationItem.CommandExecution).status,
         )
-        assertEquals("gpt-5", merged.model)
+        assertEquals("gpt-6", merged.model)
+        assertEquals("ultra", merged.reasoningEffort)
+        assertEquals(null, merged.serviceTier)
+        assertEquals("on-request", merged.approvalPolicy)
+        assertEquals("auto_review", merged.approvalsReviewer)
+        assertEquals(refreshed.sandbox, merged.sandbox)
         assertEquals(true, merged.goalLoaded)
         assertEquals(listOf(ConversationNotice("notice", "保留提示")), merged.notices)
+    }
+
+    @Test
+    fun `首次恢复填充模型与深度并允许后续快照清除深度`() {
+        val placeholder = conversationState()
+        val resumed = placeholder.withRefreshedConversation(
+            conversationState().copy(model = "gpt-6", reasoningEffort = "custom"),
+        )
+
+        assertEquals("gpt-6", resumed.model)
+        assertEquals("custom", resumed.reasoningEffort)
+
+        val cleared = resumed.withRefreshedConversation(
+            conversationState().copy(model = "gpt-6", reasoningEffort = null),
+        )
+
+        assertEquals("gpt-6", cleared.model)
+        assertEquals(null, cleared.reasoningEffort)
     }
 
     @Test

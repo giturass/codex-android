@@ -15,6 +15,16 @@ internal sealed interface ConversationEvent {
 
     data class NameUpdated(val name: String?) : ConversationEvent
 
+    data class SettingsUpdated(
+        val cwd: String,
+        val model: String,
+        val serviceTier: String?,
+        val reasoningEffort: String?,
+        val approvalPolicy: String,
+        val approvalsReviewer: String,
+        val sandbox: String,
+    ) : ConversationEvent
+
     data class Closed(val notice: ConversationNotice) : ConversationEvent
 
     data class TokenUsageUpdated(val usage: TokenUsage) : ConversationEvent
@@ -65,6 +75,16 @@ internal fun ConversationState.reduceConversationEvent(
     }
 
     is ConversationEvent.NameUpdated -> copy(title = event.name ?: title)
+    is ConversationEvent.SettingsUpdated -> copy(
+        cwd = event.cwd,
+        model = event.model,
+        serviceTier = event.serviceTier,
+        reasoningEffort = event.reasoningEffort,
+        approvalPolicy = event.approvalPolicy,
+        approvalsReviewer = event.approvalsReviewer,
+        sandbox = event.sandbox,
+        settingsRevision = settingsRevision + 1,
+    )
     is ConversationEvent.Closed -> copy(
         activeItemKeys = emptySet(),
         isRunning = false,
@@ -120,6 +140,20 @@ internal fun ConversationState.reduceConversationEvent(
 
     is ConversationEvent.RequestResolved -> copy(
         pendingRequests = pendingRequests.filterNot { it.requestKey == event.requestKey },
+    )
+}
+
+internal fun ConversationState.withAcceptedTurnOptions(
+    options: TurnOptions,
+    expectedSettingsRevision: Long,
+): ConversationState {
+    // 设置通知或恢复快照可能先于 turn/start 响应到达，以服务端确认值为准。
+    if (settingsRevision != expectedSettingsRevision) return this
+    return copy(
+        model = options.model ?: model,
+        serviceTier = options.serviceTier ?: serviceTier,
+        reasoningEffort = options.reasoningEffort ?: reasoningEffort,
+        settingsRevision = settingsRevision + 1,
     )
 }
 

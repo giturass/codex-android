@@ -186,6 +186,8 @@ import com.hebo.codex.domain.TurnOptions
 import com.hebo.codex.domain.UserInputPart
 import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.domain.projectName
+import com.hebo.codex.domain.resolveModelOption
+import com.hebo.codex.domain.selectModel
 import com.hebo.codex.ui.displayDescriptionRes
 import com.hebo.codex.ui.displayLabelRes
 import com.hebo.codex.ui.formatCompactCount
@@ -199,6 +201,7 @@ import com.hebo.codex.ui.components.QuickPhraseManagerDialog
 import com.hebo.codex.ui.components.QuickPhraseMenuContent
 import com.hebo.codex.ui.components.NavigationAttention
 import com.hebo.codex.ui.components.OptionChipRow
+import com.hebo.codex.ui.components.ReasoningEffortSelector
 import com.hebo.codex.ui.components.SettingDescription
 import com.hebo.codex.ui.components.RemainingLinearProgressIndicator
 import com.hebo.codex.ui.components.NoticeHostState
@@ -696,6 +699,8 @@ fun ChatScreen(
                                     model = state.draft.options.model,
                                     reasoningEffort = state.draft.options.reasoningEffort,
                                     models = models,
+                                    defaultModel = conversation.model,
+                                    defaultReasoningEffort = conversation.reasoningEffort,
                                 ),
                                 resources = state.inputResources,
                                 quickPhrases = quickPhraseState.phrases,
@@ -949,6 +954,8 @@ fun ChatScreen(
         TurnOptionsSheet(
             value = state.draft.options,
             modelListState = state.modelListState,
+            defaultModel = state.conversation?.model,
+            defaultReasoningEffort = state.conversation?.reasoningEffort,
             onDismiss = { showTurnOptions = false },
             onRetryModels = { viewModel.loadModels(forceRefresh = true) },
             onSave = {
@@ -2462,11 +2469,14 @@ internal fun composerModelLabel(
     model: String?,
     reasoningEffort: String?,
     models: List<ModelOption>,
+    defaultModel: String? = null,
+    defaultReasoningEffort: String? = null,
 ): String {
-    val selectedModel = models.firstOrNull { it.model == model }
+    val selectedModel = (model ?: defaultModel)?.let { models.resolveModelOption(it) }
+    val inheritsReasoningEffort = model == null || model == defaultModel
     return listOfNotNull(
-        selectedModel?.displayName ?: model ?: "默认模型",
-        reasoningEffort,
+        selectedModel?.displayName ?: model ?: defaultModel ?: "默认模型",
+        reasoningEffort ?: defaultReasoningEffort.takeIf { inheritsReasoningEffort },
     ).joinToString(" · ")
 }
 
@@ -2782,6 +2792,8 @@ private fun ImageAddressDialog(
 private fun TurnOptionsSheet(
     value: TurnOptions,
     modelListState: ModelListState,
+    defaultModel: String?,
+    defaultReasoningEffort: String?,
     onDismiss: () -> Unit,
     onRetryModels: () -> Unit,
     onSave: (TurnOptions) -> Unit,
@@ -2791,7 +2803,7 @@ private fun TurnOptionsSheet(
     var showAdvanced by rememberSaveable(value) { mutableStateOf(false) }
     val models = (modelListState as? ModelListState.Ready)?.models.orEmpty()
     val selectableModels = models.filterNot(ModelOption::hidden)
-    val model = selectableModels.firstOrNull { it.model == options.model }
+    val model = models.resolveModelOption(options.model, defaultModel)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surface,
@@ -2808,7 +2820,7 @@ private fun TurnOptionsSheet(
         ) {
             Text("下一轮设置", style = MaterialTheme.typography.titleLarge)
             Text(
-                "设置仅用于下一次发送，服务端确认接收后恢复会话默认值",
+                "模型和思考深度从下一回合生效，并沿用到后续回合。未修改的选项沿用会话设置。",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text("模型", style = MaterialTheme.typography.labelLarge)
@@ -2832,25 +2844,26 @@ private fun TurnOptionsSheet(
                     Text("当前服务端没有可选模型", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     OptionChipRow(
-                        values = listOf<ModelOption?>(null) + selectableModels,
-                        selected = model,
-                        label = { it?.displayName ?: "会话默认" },
-                        onSelect = { selected ->
-                            options = options.copy(
-                                model = selected?.model,
-                                serviceTier = selected?.defaultServiceTier,
-                                reasoningEffort = selected?.defaultReasoningEffort,
-                            )
+                        values = listOf<String?>(null) + selectableModels.map { it.model },
+                        selected = options.model,
+                        label = { modelId ->
+                            modelId?.let { selected -> selectableModels.first { it.model == selected }.displayName }
+                                ?: "会话默认"
+                        },
+                        onSelect = { modelId ->
+                            val selected = modelId?.let { models.resolveModelOption(it) }
+                            options = options.selectModel(selected, defaultReasoningEffort)
                         },
                     )
                 }
             }
-            model?.reasoningEfforts?.takeIf(List<*>::isNotEmpty)?.let { efforts ->
-                Text("推理强度", style = MaterialTheme.typography.labelLarge)
-                OptionChipRow(
-                    values = listOf<String?>(null) + efforts.map { it.value },
-                    selected = options.reasoningEffort,
-                    label = { effort -> effort ?: "默认" },
+            model?.let {
+                ReasoningEffortSelector(
+                    model = it,
+                    selectedEffort = options.reasoningEffort,
+                    defaultEffort = defaultReasoningEffort,
+                    defaultLabel = "会话默认",
+                    includeDefault = options.model == null || options.model == defaultModel,
                     onSelect = { options = options.copy(reasoningEffort = it) },
                 )
             }
@@ -2900,7 +2913,16 @@ private fun TurnOptionsSheet(
                 )
                 OutlinedTextField(
                     value = options.model.orEmpty(),
-                    onValueChange = { options = options.copy(model = it.ifBlank { null }) },
+                    onValueChange = { value ->
+                        val modelId = value.ifBlank { null }
+                        val selected = modelId?.let { models.resolveModelOption(it) }
+                        options = when {
+                            modelId == null -> options.selectModel(null)
+                            selected != null -> options.selectModel(selected, defaultReasoningEffort)
+                            modelId == options.model -> options
+                            else -> options.copy(model = modelId, reasoningEffort = null, serviceTier = null)
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("模型 ID，可留空") },
                     singleLine = true,

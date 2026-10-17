@@ -73,6 +73,11 @@ fun ConversationDraft.hasContent(): Boolean = when (this) {
     is ConversationDraft.Thread -> message.isNotBlank() || attachments.isNotEmpty()
 }
 
+fun ConversationDraft.shouldPersist(): Boolean = hasContent() || when (this) {
+    is ConversationDraft.NewTask -> options != ThreadOptions()
+    is ConversationDraft.Thread -> options != TurnOptions()
+}
+
 fun ConversationDraft.toSummary(): DraftSummary {
     val attachmentCount = when (this) {
         is ConversationDraft.NewTask -> attachments.size

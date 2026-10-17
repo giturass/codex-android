@@ -68,6 +68,8 @@ data class HomeUiState(
     val recentFeed: ThreadFeed = ThreadFeed(),
     val filteredFeed: ThreadFeed = ThreadFeed(),
     val models: List<ModelOption> = emptyList(),
+    val isLoadingModels: Boolean = false,
+    val modelsError: UserFacingError? = null,
     val serverNotices: List<ConversationNotice> = emptyList(),
     val threadAttention: Map<String, ThreadAttentionState> = emptyMap(),
     val drafts: List<DraftSummary> = emptyList(),
@@ -136,6 +138,7 @@ class HomeViewModel(
     private var searchJob: Job? = null
     private var appendJob: Job? = null
     private var recentProjectsJob: Job? = null
+    private var modelListJob: Job? = null
 
     val state: StateFlow<HomeUiState> = mutableState
     val events = mutableEvents.receiveAsFlow()
@@ -179,6 +182,8 @@ class HomeViewModel(
                 searchJob?.cancel()
                 appendJob?.cancel()
                 recentProjectsJob?.cancel()
+                modelListJob?.cancel()
+                modelListJob = null
                 if (serverId == null) {
                     mutableState.update {
                         it.copy(
@@ -187,6 +192,8 @@ class HomeViewModel(
                             recentFeed = ThreadFeed(),
                             filteredFeed = ThreadFeed(),
                             models = emptyList(),
+                            isLoadingModels = false,
+                            modelsError = null,
                         )
                     }
                 } else {
@@ -197,6 +204,8 @@ class HomeViewModel(
                             recentFeed = ThreadFeed(),
                             filteredFeed = ThreadFeed(),
                             models = emptyList(),
+                            isLoadingModels = false,
+                            modelsError = null,
                         )
                     }
                     requestLoad(serverId)
@@ -224,6 +233,9 @@ class HomeViewModel(
         viewModelScope.launch {
             // ConnectionCoordinator publishes failures to connectionStatuses before rethrowing them.
             runSuspendCatching { repository.connect(serverId) }
+                .onSuccess {
+                    if (mutableState.value.activeServerId == serverId) loadModels(serverId)
+                }
         }
     }
 
@@ -473,11 +485,36 @@ class HomeViewModel(
         }
     }
 
+    fun retryLoadModels() {
+        mutableState.value.activeServerId?.let(::loadModels)
+    }
+
     private fun loadModels(serverId: String) {
-        viewModelScope.launch {
+        if (modelListJob?.isActive == true) return
+        modelListJob = viewModelScope.launch {
+            mutableState.update { it.copy(isLoadingModels = true, modelsError = null) }
             runSuspendCatching { repository.models(serverId) }
                 .onSuccess { models ->
-                    if (mutableState.value.activeServerId == serverId) mutableState.update { it.copy(models = models) }
+                    mutableState.update {
+                        if (it.activeServerId == serverId) {
+                            it.copy(models = models, isLoadingModels = false)
+                        } else {
+                            it
+                        }
+                    }
+                }
+                .onFailure { error ->
+                    mutableState.update {
+                        if (it.activeServerId == serverId) {
+                            it.copy(
+                                models = emptyList(),
+                                isLoadingModels = false,
+                                modelsError = error.toUserFacingError("无法加载模型和思考深度"),
+                            )
+                        } else {
+                            it
+                        }
+                    }
                 }
         }
     }

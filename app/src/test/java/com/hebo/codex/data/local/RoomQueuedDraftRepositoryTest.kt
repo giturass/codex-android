@@ -2,22 +2,151 @@ package com.hebo.codex.data.local
 
 import com.hebo.codex.domain.ConversationDraft
 import com.hebo.codex.domain.DraftAttachment
+import com.hebo.codex.domain.ThreadOptions
 import com.hebo.codex.domain.TurnOptions
 import com.hebo.codex.domain.UserInputPart
+import com.hebo.codex.domain.hasContent
 import java.nio.file.Files
-import java.nio.file.Path
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RoomQueuedDraftRepositoryTest {
     @Test
+    fun restoresSettingsOnlyDraftsWithoutShowingThemInSummaries() = runTest {
+        val directory = Files.createTempDirectory("codex-settings-draft-test-").toFile()
+        val dao = MemoryDraftDao()
+        val drafts = listOf(
+            ConversationDraft.NewTask(
+                serverId = "server-1",
+                draftId = "draft-1",
+                message = "",
+                cwd = "/workspace",
+                options = ThreadOptions(reasoningEffort = "ultra"),
+                attachments = emptyList(),
+                updatedAtMillis = 1_000,
+                revision = "new-task-settings",
+            ),
+            queuedDraft(emptyList()).copy(options = TurnOptions(reasoningEffort = "custom")),
+        )
+
+        try {
+            val repository = RoomDraftRepository(dao, directory, Json, backgroundScope)
+            drafts.forEach { draft ->
+                assertFalse(draft.hasContent())
+                repository.save(draft)
+            }
+            assertEquals(2, dao.entities.value.size)
+            assertTrue(repository.summaries.first().isEmpty())
+
+            val restored = RoomDraftRepository(dao, directory, Json, backgroundScope)
+            drafts.forEach { draft -> assertEquals(draft, restored.load(draft.key)) }
+            assertTrue(restored.summaries.first().isEmpty())
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun clearingContentHidesPendingSummaryAndPersistsRemainingSettings() = runTest {
+        val directory = Files.createTempDirectory("codex-settings-draft-test-").toFile()
+        val dao = MemoryDraftDao()
+        val draft = queuedDraft(listOf(UserInputPart.Text("下一步检查")))
+            .copy(options = TurnOptions(reasoningEffort = "ultra"))
+        val remaining = draft.copy(message = "", revision = "settings-only")
+
+        try {
+            val repository = RoomDraftRepository(dao, directory, Json, backgroundScope)
+            repository.save(draft)
+            assertEquals(draft.message, repository.summaries.first().single().preview)
+
+            repository.schedule(remaining)
+
+            assertEquals(remaining, repository.load(draft.key))
+            assertTrue(repository.summaries.first().isEmpty())
+            assertEquals(draft.message, dao.entities.value.single().message)
+
+            repository.flush(draft.key)
+            dao.entities.first { entities -> entities.singleOrNull()?.revision == remaining.revision }
+            val restored = RoomDraftRepository(dao, directory, Json, backgroundScope)
+
+            assertEquals(remaining, restored.load(draft.key))
+            assertTrue(restored.summaries.first().isEmpty())
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun clearingAppliedOptionsDeletesAnOtherwiseEmptyDraft() = runTest {
+        val directory = Files.createTempDirectory("codex-settings-draft-test-").toFile()
+        val dao = MemoryDraftDao()
+        val pending = queuedDraft(emptyList()).copy(options = TurnOptions(reasoningEffort = "ultra"))
+        val applied = pending.copy(options = TurnOptions(), revision = "options-applied")
+
+        try {
+            val repository = RoomDraftRepository(dao, directory, Json, backgroundScope)
+            repository.save(pending)
+            repository.save(applied)
+
+            assertNull(repository.load(pending.key))
+            assertTrue(dao.entities.value.isEmpty())
+
+            repository.save(pending.copy(revision = "pending-again"))
+            repository.schedule(applied)
+            assertNull(repository.load(pending.key))
+            repository.flush(pending.key)
+            dao.entities.first { it.isEmpty() }
+
+            val restored = RoomDraftRepository(dao, directory, Json, backgroundScope)
+            assertNull(restored.load(pending.key))
+            assertTrue(restored.summaries.first().isEmpty())
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun persistsReasoningEffortInNewTaskAndConversationDrafts() = runTest {
+        val directory = Files.createTempDirectory("codex-reasoning-draft-test-").toFile()
+        val dao = MemoryDraftDao()
+        val drafts = listOf(
+            ConversationDraft.NewTask(
+                serverId = "server-1",
+                draftId = "draft-1",
+                message = "新任务",
+                cwd = "/workspace",
+                options = ThreadOptions(model = "gpt-6", reasoningEffort = "ultra"),
+                attachments = emptyList(),
+                updatedAtMillis = 1_000,
+                revision = "new-task-revision",
+            ),
+            queuedDraft(listOf(UserInputPart.Text("继续检查"))).copy(
+                options = TurnOptions(model = "gpt-6", reasoningEffort = "custom"),
+            ),
+        )
+
+        try {
+            val repository = RoomDraftRepository(dao, directory, Json, backgroundScope)
+            drafts.forEach { repository.save(it) }
+            val restored = RoomDraftRepository(dao, directory, Json, backgroundScope)
+
+            drafts.forEach { draft -> assertEquals(draft, restored.load(draft.key)) }
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
     fun persistsRestoredQueueMessageAndAttachmentsAsOrdinaryDraft() = runTest {
-        val directory = Files.createTempDirectory(Path.of("/tmp"), "codex-queued-draft-test-").toFile()
+        val directory = Files.createTempDirectory("codex-queued-draft-test-").toFile()
         val dao = MemoryDraftDao()
         val input = listOf(
             UserInputPart.Text("检查 [图片]"),
@@ -47,7 +176,7 @@ class RoomQueuedDraftRepositoryTest {
 
     @Test
     fun editingRestoredQueueDraftPersistsOnlyCurrentMessageAndAttachments() = runTest {
-        val directory = Files.createTempDirectory(Path.of("/tmp"), "codex-queued-draft-test-").toFile()
+        val directory = Files.createTempDirectory("codex-queued-draft-test-").toFile()
         val dao = MemoryDraftDao()
         val draft = queuedDraft(
             listOf(UserInputPart.Text("原始输入"), UserInputPart.UploadedImage("file-1", "high")),
@@ -69,7 +198,7 @@ class RoomQueuedDraftRepositoryTest {
 
     @Test
     fun rejectsMalformedDataUrlsAndMediaTypesThatDoNotMatchTheInput() = runTest {
-        val directory = Files.createTempDirectory(Path.of("/tmp"), "codex-queued-draft-test-").toFile()
+        val directory = Files.createTempDirectory("codex-queued-draft-test-").toFile()
         val dao = MemoryDraftDao()
         val invalidInputs = listOf(
             UserInputPart.Image("data:audio/wav;base64,UklGRg=="),

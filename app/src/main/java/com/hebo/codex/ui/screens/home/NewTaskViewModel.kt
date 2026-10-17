@@ -12,12 +12,13 @@ import com.hebo.codex.domain.DraftRepository
 import com.hebo.codex.domain.FeatureEntry
 import com.hebo.codex.domain.ModelOption
 import com.hebo.codex.domain.ThreadOptions
-import com.hebo.codex.domain.TurnOptions
 import com.hebo.codex.domain.UserInputPart
 import com.hebo.codex.domain.UserFacingError
 import com.hebo.codex.domain.newDraftRevision
 import com.hebo.codex.domain.quickPhraseInput
 import com.hebo.codex.domain.loadInputResources
+import com.hebo.codex.domain.selectModel
+import com.hebo.codex.domain.toTurnOptions
 import com.hebo.codex.ui.screens.chat.isShellCommandInput
 import com.hebo.codex.ui.screens.chat.shellCommandBlockReason
 import com.hebo.codex.ui.screens.chat.shellCommandFromInput
@@ -58,6 +59,7 @@ class NewTaskViewModel(
     private val mutableState = MutableStateFlow(NewTaskUiState(cwd = initialCwd.orEmpty()))
     private val mutableEvents = Channel<NewTaskEvent>(Channel.BUFFERED)
     private var createdThreadId: String? = null
+    private var modelSelectionInitialized = false
 
     val state: StateFlow<NewTaskUiState> = mutableState
     val events = mutableEvents.receiveAsFlow()
@@ -78,6 +80,7 @@ class NewTaskViewModel(
     }
 
     fun updateOptions(options: ThreadOptions) {
+        modelSelectionInitialized = true
         updateEditor { it.copy(options = options) }
     }
 
@@ -133,13 +136,8 @@ class NewTaskViewModel(
 
     fun applyDefaultModel(model: ModelOption) {
         val current = mutableState.value
-        if (current.options.model != null) return
-        updateOptions(
-            current.options.copy(
-                model = model.model,
-                serviceTier = model.defaultServiceTier,
-            ),
-        )
+        if (modelSelectionInitialized || current.options.model != null) return
+        updateOptions(current.options.selectModel(model))
     }
 
     fun startConversation() {
@@ -297,11 +295,3 @@ private fun NewTaskUiState.conversationTitle(): String = message.lineSequence()
     .firstOrNull(String::isNotEmpty)
     ?.take(72)
     ?: "附件任务"
-
-private fun ThreadOptions.toTurnOptions(): TurnOptions = TurnOptions(
-    model = model,
-    serviceTier = serviceTier,
-    approvalPolicy = approvalPolicy,
-    approvalsReviewer = approvalsReviewer,
-    sandboxMode = sandboxMode,
-)

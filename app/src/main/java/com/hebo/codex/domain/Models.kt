@@ -250,6 +250,7 @@ data class ConversationState(
     val agentNickname: String? = null,
     val agentRole: String? = null,
     val canAcceptDirectInput: Boolean? = null,
+    internal val settingsRevision: Long = 0,
 ) {
     val items: List<ConversationItem>
         get() = history.items
@@ -716,6 +717,7 @@ data class ThreadOptions(
     val model: String? = null,
     val modelProvider: String? = null,
     val serviceTier: String? = null,
+    val reasoningEffort: String? = null,
     val approvalPolicy: ApprovalPolicy? = null,
     val approvalsReviewer: ApprovalReviewer? = null,
     val sandboxMode: SandboxMode? = null,
@@ -724,6 +726,11 @@ data class ThreadOptions(
     val developerInstructions: String? = null,
     val ephemeral: Boolean = false,
 )
+
+enum class MessageSubmission {
+    TURN_STARTED,
+    TURN_STEERED,
+}
 
 data class TurnOptions(
     val cwd: String? = null,
