@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -39,6 +38,7 @@ internal fun DrawerConversationItem(
     leadingContent: (@Composable () -> Unit)? = null,
     trailingContent: (@Composable () -> Unit)? = null,
 ) {
+    val containerShape = MaterialTheme.shapes.small
     val containerColor = if (selected) {
         MaterialTheme.colorScheme.secondaryContainer
     } else {
@@ -59,7 +59,7 @@ internal fun DrawerConversationItem(
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = if (nested) 32.dp else 4.dp, end = 4.dp, bottom = 4.dp)
-            .clip(CircleShape)
+            .clip(containerShape)
             .semantics { this.selected = selected }
             .combinedClickable(
                 role = Role.Button,
@@ -67,7 +67,7 @@ internal fun DrawerConversationItem(
                 onLongClickLabel = onLongClickLabel,
                 onLongClick = onLongClick,
             ),
-        shape = CircleShape,
+        shape = containerShape,
         color = containerColor,
         contentColor = contentColor,
     ) {
