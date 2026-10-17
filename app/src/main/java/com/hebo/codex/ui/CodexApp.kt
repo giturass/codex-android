@@ -78,6 +78,7 @@ import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.serialization.Serializable
 
 private val MainContentMinWidth = 600.dp
+private val ModalDrawerMinScrimWidth = 56.dp
 private val WideDrawerThreshold = CodexNavigationDrawerWidth + MainContentMinWidth
 
 @Serializable
@@ -218,6 +219,11 @@ fun CodexApp(
         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
     ) {
         val isWideLayout = maxWidth >= WideDrawerThreshold
+        val drawerWidth = if (isWideLayout) {
+            CodexNavigationDrawerWidth
+        } else {
+            (maxWidth - ModalDrawerMinScrimWidth).coerceIn(0.dp, CodexNavigationDrawerWidth)
+        }
         val drawerState = if (isWideLayout) wideDrawerState else modalDrawerState
         val drawerVisible = drawerState.isOpen || drawerState.targetValue == DrawerValue.Open
         val wideDrawerOffset = wideDrawerState.currentOffset
@@ -267,7 +273,7 @@ fun CodexApp(
                 hasMore = homeState.nextCursor != null,
                 activeTarget = activeDrawerTarget,
                 isWideLayout = isWideLayout,
-                modifier = if (isWideLayout) Modifier.width(CodexNavigationDrawerWidth) else Modifier,
+                modifier = Modifier.width(drawerWidth),
                 onNewConversation = {
                     dismissModalDrawer()
                     openNewTask(homeState.activeServerId)
