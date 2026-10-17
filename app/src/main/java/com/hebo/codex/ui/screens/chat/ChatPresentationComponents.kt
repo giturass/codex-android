@@ -58,10 +58,11 @@ internal fun UserMessage(
         Surface(
             modifier = Modifier.widthIn(max = 320.dp),
             shape = MaterialTheme.shapes.extraLarge,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
         ) {
             Column(
-                modifier = Modifier.padding(horizontal = 17.dp, vertical = 11.dp),
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (text.isNotBlank()) {
@@ -114,7 +115,7 @@ private fun SelectableUserMessageText(text: String) {
         }
     }
     SelectionContainer(state = selectionState) {
-        Text(text, color = MaterialTheme.colorScheme.onSurface)
+        Text(text, color = MaterialTheme.colorScheme.onSecondaryContainer)
     }
 }
 

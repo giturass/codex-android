@@ -18,12 +18,14 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Folder
@@ -375,20 +377,42 @@ private fun NewTaskContent(
         ) {
             Column(
                 modifier = Modifier
-                    .widthIn(max = 760.dp)
+                    .widthIn(max = 520.dp)
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
+                    .padding(vertical = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text("今天想处理什么？", style = MaterialTheme.typography.headlineSmall)
-                Spacer(Modifier.height(8.dp))
+                Surface(
+                    modifier = Modifier.size(72.dp),
+                    shape = MaterialTheme.shapes.extraLarge,
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.Code, contentDescription = null, modifier = Modifier.size(32.dp))
+                    }
+                }
+                Spacer(Modifier.height(24.dp))
+                Text(
+                    "今天想处理什么？",
+                    style = MaterialTheme.typography.headlineSmall,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(12.dp))
                 Text(
                     "选择项目并描述任务，Codex 会立即开始处理",
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
-                Spacer(Modifier.height(28.dp))
+                Spacer(Modifier.height(32.dp))
+                Text(
+                    "工作项目",
+                    modifier = Modifier.fillMaxWidth().padding(start = 4.dp, bottom = 8.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 ProjectSelector(
                     cwd = cwd,
                     projects = projects,
@@ -491,13 +515,25 @@ private fun ProjectSelector(
                 .fillMaxWidth(),
             shape = MaterialTheme.shapes.large,
             color = MaterialTheme.colorScheme.surfaceContainerLow,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            border = BorderStroke(
+                1.dp,
+                if (expanded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+            ),
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Rounded.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Surface(
+                    modifier = Modifier.size(40.dp),
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.Folder, contentDescription = null, modifier = Modifier.size(22.dp))
+                    }
+                }
                 Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                     Text(
                         if (cwd.isBlank()) "选择项目" else projectName(cwd),
@@ -513,7 +549,11 @@ private fun ProjectSelector(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                Icon(Icons.Rounded.ExpandMore, contentDescription = "选择项目")
+                Icon(
+                    Icons.Rounded.ExpandMore,
+                    contentDescription = "选择项目",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
         ExposedDropdownMenu(
@@ -814,21 +854,43 @@ private fun ThreadOptionsSheet(
 
 @Composable
 private fun NoServers(modifier: Modifier, onAddServer: () -> Unit) {
-    Column(
-        modifier = modifier.padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Icon(Icons.Rounded.Dns, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.height(16.dp))
-        Text("连接 Codex 服务端", style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "添加服务端地址和能力令牌后即可开始任务",
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-        )
-        Spacer(Modifier.height(24.dp))
-        Button(onClick = onAddServer) { Text("添加服务器") }
+    Box(modifier = modifier.padding(24.dp), contentAlignment = Alignment.Center) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = 440.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(vertical = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Surface(
+                modifier = Modifier.size(80.dp),
+                shape = MaterialTheme.shapes.extraLarge,
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Rounded.Dns, contentDescription = null, modifier = Modifier.size(32.dp))
+                }
+            }
+            Spacer(Modifier.height(24.dp))
+            Text(
+                "连接 Codex 服务端",
+                style = MaterialTheme.typography.headlineSmall,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "添加服务端地址和能力令牌后即可开始任务",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(32.dp))
+            Button(onClick = onAddServer) {
+                Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("添加服务器")
+            }
+        }
     }
 }

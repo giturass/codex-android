@@ -2,8 +2,11 @@
 
 package com.hebo.codex.ui.components
 
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -11,19 +14,21 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -42,6 +47,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hebo.codex.domain.ConnectionStatus
@@ -77,20 +86,34 @@ fun ServerSelector(
             modifier = Modifier
                 .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
                 .fillMaxWidth()
-                .heightIn(min = 56.dp),
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                .heightIn(min = 72.dp),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surfaceContainerHighest,
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (activeStatus !is ConnectionStatus.Connected) {
-                    ConnectionIndicator(activeStatus)
-                    Spacer(Modifier.width(12.dp))
+                Box(Modifier.size(40.dp)) {
+                    Surface(
+                        modifier = Modifier.size(40.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Rounded.Dns, contentDescription = null, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    if (activeStatus !is ConnectionStatus.Connected) {
+                        ConnectionIndicator(activeStatus, Modifier.align(Alignment.BottomEnd))
+                    }
                 }
-                Column(Modifier.weight(1f)) {
+                Spacer(Modifier.width(12.dp))
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
                     Text(
                         text = activeServer?.name ?: "请选择服务器",
                         style = MaterialTheme.typography.titleSmall,
@@ -106,7 +129,11 @@ fun ServerSelector(
                     )
                 }
                 Spacer(Modifier.width(8.dp))
-                Icon(Icons.Rounded.ExpandMore, contentDescription = "切换服务器")
+                Icon(
+                    imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                    contentDescription = "切换服务器",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
         ExposedDropdownMenu(
@@ -115,35 +142,42 @@ fun ServerSelector(
                 expanded = false
                 actionsServer = null
             },
+            shape = MaterialTheme.shapes.extraLarge,
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
         ) {
             servers.forEach { server ->
                 val status = statuses[server.id] ?: ConnectionStatus.Disconnected
+                val isSelected = server.id == activeServer?.id
                 DropdownMenuItem(
                     text = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = server.name,
-                                modifier = Modifier.widthIn(max = ServerNameMaxWidth),
-                                style = MaterialTheme.typography.bodyMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = server.webSocketUrl,
+                            Column(
                                 modifier = Modifier.weight(1f),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            if (server.id == activeServer?.id) {
-                                Spacer(Modifier.width(4.dp))
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Text(
+                                    text = server.name,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer
+                                        else MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    text = server.webSocketUrl,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            if (isSelected) {
+                                Spacer(Modifier.width(8.dp))
                                 Icon(
                                     Icons.Rounded.Check,
                                     contentDescription = "当前服务器",
                                     modifier = Modifier.size(18.dp),
-                                    tint = MaterialTheme.colorScheme.primary,
+                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
                                 )
                             }
                         }
@@ -186,9 +220,21 @@ fun ServerSelector(
                         expanded = false
                         onSelect(server.id)
                     },
+                    modifier = Modifier
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                        .clip(MaterialTheme.shapes.large)
+                        .background(
+                            if (isSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                        )
+                        .heightIn(min = 64.dp)
+                        .semantics { selected = isSelected },
+                    contentPadding = PaddingValues(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
                 )
             }
-            HorizontalDivider()
+            HorizontalDivider(
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                color = MaterialTheme.colorScheme.outlineVariant,
+            )
             DropdownMenuItem(
                 text = { Text("添加服务器") },
                 leadingIcon = { Icon(Icons.Rounded.Add, contentDescription = null) },
@@ -196,6 +242,7 @@ fun ServerSelector(
                     expanded = false
                     onAdd()
                 },
+                modifier = Modifier.padding(horizontal = 8.dp).clip(MaterialTheme.shapes.large),
             )
         }
     }
@@ -211,6 +258,10 @@ fun ServerSelector(
                         deletingServer = null
                         onDelete(server.id)
                     },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                    ),
                 ) { Text("删除") }
             },
             dismissButton = {
@@ -232,7 +283,12 @@ private fun ServerActionsMenu(
 ) {
     val settingsEnabled = isServerSettingsEnabled(status)
 
-    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+        shape = MaterialTheme.shapes.large,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+    ) {
         DropdownMenuItem(
             text = {
                 Column {
@@ -276,5 +332,3 @@ private fun ServerActionsMenu(
 
 internal fun isServerSettingsEnabled(status: ConnectionStatus): Boolean =
     status is ConnectionStatus.Connected
-
-private val ServerNameMaxWidth = 112.dp

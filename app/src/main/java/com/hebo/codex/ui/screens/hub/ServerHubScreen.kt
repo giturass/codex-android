@@ -3,7 +3,6 @@
 package com.hebo.codex.ui.screens.hub
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -43,6 +42,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -52,6 +52,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -147,6 +148,9 @@ fun ServerHubScreen(
                             onDialog = { dialog = it },
                         )
                     },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                    ),
                 )
             },
         ) { padding ->
@@ -253,7 +257,7 @@ private fun SettingsIndex(
     LazyColumn(
         modifier = modifier,
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
         item("scope-header") {
             ScopeHeader(state = state, onReconnect = onReconnect)
@@ -263,18 +267,22 @@ private fun SettingsIndex(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         text = group.title,
-                        modifier = Modifier.padding(horizontal = 4.dp),
+                        modifier = Modifier.padding(horizontal = 8.dp),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Surface(
-                        shape = MaterialTheme.shapes.large,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        shape = MaterialTheme.shapes.extraLarge,
                         color = MaterialTheme.colorScheme.surfaceContainerLow,
                     ) {
                         Column {
                             group.sections.forEachIndexed { index, section ->
-                                if (index > 0) HorizontalDivider()
+                                if (index > 0) {
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(start = 72.dp, end = 16.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f),
+                                    )
+                                }
                                 val selected = state.selectedSection == section
                                 ListItem(
                                     selected = selected,
@@ -287,17 +295,22 @@ private fun SettingsIndex(
                                         )
                                     },
                                     leadingContent = {
-                                        Icon(section.icon, contentDescription = null)
+                                        HubSectionIcon(section.icon, selected = selected)
                                     },
                                     trailingContent = {
-                                        Icon(Icons.Rounded.ChevronRight, contentDescription = null)
+                                        Icon(
+                                            Icons.Rounded.ChevronRight,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(20.dp),
+                                        )
                                     },
                                     colors = androidx.compose.material3.ListItemDefaults.colors(
                                         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                                         selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
                                     ),
                                 ) {
-                                    Text(section.title)
+                                    Text(section.title, style = MaterialTheme.typography.titleSmall)
                                 }
                             }
                         }
@@ -312,17 +325,16 @@ private fun SettingsIndex(
 @Composable
 private fun ScopeHeader(state: ServerHubUiState, onReconnect: () -> Unit) {
     val reconnecting = ServerHubViewModel.RECONNECT_ACTION_KEY in state.pendingActions
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+    Card(
+        shape = MaterialTheme.shapes.extraLarge,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+    ) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (state.cwd != null) {
-                    Icon(Icons.Rounded.Folder, contentDescription = null, modifier = Modifier.size(28.dp))
-                } else {
-                    Icon(Icons.Rounded.Dns, contentDescription = null, modifier = Modifier.size(28.dp))
-                }
+                HubSectionIcon(if (state.cwd != null) Icons.Rounded.Folder else Icons.Rounded.Dns)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -334,7 +346,7 @@ private fun ScopeHeader(state: ServerHubUiState, onReconnect: () -> Unit) {
                     Text(
                         text = state.scopeDescription(),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.78f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -346,7 +358,8 @@ private fun ScopeHeader(state: ServerHubUiState, onReconnect: () -> Unit) {
                 Text(
                     text = "${state.server?.name ?: "服务器"} · ${state.connectionStatus.label()}",
                     modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 TextButton(onClick = onReconnect, enabled = !reconnecting) {
                     if (reconnecting) {
@@ -356,6 +369,19 @@ private fun ScopeHeader(state: ServerHubUiState, onReconnect: () -> Unit) {
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+internal fun HubSectionIcon(icon: ImageVector, selected: Boolean = false) {
+    Surface(
+        shape = MaterialTheme.shapes.medium,
+        color = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+        contentColor = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+    ) {
+        Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp))
         }
     }
 }

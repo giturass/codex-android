@@ -1,88 +1,22 @@
 package com.hebo.codex.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 
-internal val LightColors = lightColorScheme(
-    primary = Ink,
-    onPrimary = Paper,
-    primaryContainer = LightSurfaceStrong,
-    onPrimaryContainer = Ink,
-    secondary = LightMuted,
-    onSecondary = Paper,
-    secondaryContainer = LightSurface,
-    onSecondaryContainer = Ink,
-    tertiary = LightMuted,
-    onTertiary = Paper,
-    tertiaryContainer = LightSurface,
-    onTertiaryContainer = Ink,
-    background = Paper,
-    onBackground = Ink,
-    surface = Paper,
-    onSurface = Ink,
-    surfaceVariant = LightSurface,
-    onSurfaceVariant = LightMuted,
-    surfaceContainerLowest = Paper,
-    surfaceContainerLow = LightSurfaceSubtle,
-    surfaceContainer = LightSurface,
-    surfaceContainerHigh = LightSurfaceStrong,
-    surfaceContainerHighest = LightSurfaceStrong,
-    outline = LightOutline,
-    outlineVariant = LightOutlineSubtle,
-    inverseSurface = DarkSurface,
-    inverseOnSurface = Paper,
-    inversePrimary = Paper,
-    scrim = Color.Black,
-)
-
-internal val DarkColors = darkColorScheme(
-    primary = DarkText,
-    onPrimary = Ink,
-    primaryContainer = DarkSurfaceStrong,
-    onPrimaryContainer = DarkText,
-    secondary = DarkMuted,
-    onSecondary = Ink,
-    secondaryContainer = DarkSurface,
-    onSecondaryContainer = DarkText,
-    tertiary = DarkMuted,
-    onTertiary = Ink,
-    tertiaryContainer = DarkSurface,
-    onTertiaryContainer = DarkText,
-    background = DarkBackground,
-    onBackground = DarkText,
-    surface = DarkBackground,
-    onSurface = DarkText,
-    surfaceVariant = DarkSurface,
-    onSurfaceVariant = DarkMuted,
-    surfaceContainerLowest = DarkBackground,
-    surfaceContainerLow = DarkSurfaceSubtle,
-    surfaceContainer = DarkSurface,
-    surfaceContainerHigh = DarkSurfaceStrong,
-    surfaceContainerHighest = DarkSurfaceStrong,
-    outline = DarkOutline,
-    outlineVariant = DarkOutlineSubtle,
-    inverseSurface = LightSurface,
-    inverseOnSurface = Ink,
-    inversePrimary = Ink,
-    scrim = Color.Black,
-)
-
 internal val CodexShapes = Shapes(
-    extraSmall = RoundedCornerShape(8.dp),
-    small = RoundedCornerShape(12.dp),
-    medium = RoundedCornerShape(16.dp),
-    large = RoundedCornerShape(22.dp),
+    extraSmall = RoundedCornerShape(4.dp),
+    small = RoundedCornerShape(8.dp),
+    medium = RoundedCornerShape(12.dp),
+    large = RoundedCornerShape(16.dp),
     extraLarge = RoundedCornerShape(28.dp),
 )
 
@@ -109,6 +43,10 @@ private val LocalCodexStatusColors = staticCompositionLocalOf<CodexStatusColors>
     error("CodexStatusColors 未提供")
 }
 
+internal val LocalCodexDarkTheme = staticCompositionLocalOf<Boolean> {
+    error("CodexTheme 未提供")
+}
+
 internal val MaterialTheme.statusColors: CodexStatusColors
     @Composable
     @ReadOnlyComposable
@@ -120,7 +58,10 @@ fun CodexTheme(
     content: @Composable () -> Unit,
 ) {
     val statusColors = if (darkTheme) DarkStatusColors else LightStatusColors
-    CompositionLocalProvider(LocalCodexStatusColors provides statusColors) {
+    CompositionLocalProvider(
+        LocalCodexDarkTheme provides darkTheme,
+        LocalCodexStatusColors provides statusColors,
+    ) {
         MaterialTheme(
             colorScheme = if (darkTheme) DarkColors else LightColors,
             typography = CodexTypography,

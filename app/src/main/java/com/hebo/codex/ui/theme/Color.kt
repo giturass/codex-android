@@ -1,24 +1,110 @@
 package com.hebo.codex.ui.theme
 
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
 
-internal val Ink = Color(0xFF101010)
 internal val Paper = Color(0xFFFFFFFF)
-
-internal val LightSurfaceSubtle = Color(0xFFF7F7F7)
-internal val LightSurface = Color(0xFFF1F1F1)
-internal val LightSurfaceStrong = Color(0xFFE8E8E8)
-internal val LightOutline = Color(0xFF747474)
-internal val LightOutlineSubtle = Color(0xFFD9D9D9)
-internal val LightMuted = Color(0xFF5F5F5F)
-
-internal val DarkBackground = Color(0xFF000000)
-internal val DarkSurfaceSubtle = Color(0xFF1D1D1D)
-internal val DarkSurface = Color(0xFF242424)
-internal val DarkSurfaceStrong = Color(0xFF373737)
-internal val DarkOutline = Color(0xFFA1A1A1)
-internal val DarkOutlineSubtle = Color(0xFF454545)
-internal val DarkText = Color(0xFFF4F4F4)
-internal val DarkMuted = Color(0xFFAAAAAA)
-
 internal val ActionBlue = Color(0xFF2F80ED)
+
+internal val LightColors = lightColorScheme(
+    primary = Color(0xFF245EA6),
+    onPrimary = Paper,
+    primaryContainer = Color(0xFFD5E3FF),
+    onPrimaryContainer = Color(0xFF001B3D),
+    secondary = Color(0xFF535F73),
+    onSecondary = Paper,
+    secondaryContainer = Color(0xFFDCE3F5),
+    onSecondaryContainer = Color(0xFF142033),
+    tertiary = Color(0xFF46636B),
+    onTertiary = Paper,
+    tertiaryContainer = Color(0xFFC9E7EF),
+    onTertiaryContainer = Color(0xFF001F26),
+    background = Color(0xFFF8F9FE),
+    onBackground = Color(0xFF191C20),
+    surface = Color(0xFFF8F9FE),
+    onSurface = Color(0xFF191C20),
+    surfaceVariant = Color(0xFFDEE3EB),
+    onSurfaceVariant = Color(0xFF43474F),
+    surfaceContainerLowest = Paper,
+    surfaceContainerLow = Color(0xFFF1F4F9),
+    surfaceContainer = Color(0xFFECEFF5),
+    surfaceContainerHigh = Color(0xFFE6E9EF),
+    surfaceContainerHighest = Color(0xFFE0E3E9),
+    surfaceDim = Color(0xFFD8DBE2),
+    surfaceBright = Color(0xFFF8F9FE),
+    surfaceTint = Color(0xFF245EA6),
+    outline = Color(0xFF737780),
+    outlineVariant = Color(0xFFC3C7D0),
+    inverseSurface = Color(0xFF2E3136),
+    inverseOnSurface = Color(0xFFEFF0F7),
+    inversePrimary = Color(0xFFA7C8FF),
+    error = Color(0xFFBA1A1A),
+    onError = Paper,
+    errorContainer = Color(0xFFFFDAD6),
+    onErrorContainer = Color(0xFF410002),
+    primaryFixed = Color(0xFFD5E3FF),
+    primaryFixedDim = Color(0xFFA7C8FF),
+    onPrimaryFixed = Color(0xFF001B3D),
+    onPrimaryFixedVariant = Color(0xFF13477D),
+    secondaryFixed = Color(0xFFDCE3F5),
+    secondaryFixedDim = Color(0xFFBCC7DB),
+    onSecondaryFixed = Color(0xFF142033),
+    onSecondaryFixedVariant = Color(0xFF3D4858),
+    tertiaryFixed = Color(0xFFC9E7EF),
+    tertiaryFixedDim = Color(0xFFAECBD3),
+    onTertiaryFixed = Color(0xFF001F26),
+    onTertiaryFixedVariant = Color(0xFF2E4B53),
+    scrim = Color.Black,
+)
+
+internal val DarkColors = darkColorScheme(
+    primary = Color(0xFFA7C8FF),
+    onPrimary = Color(0xFF003060),
+    primaryContainer = Color(0xFF13477D),
+    onPrimaryContainer = Color(0xFFD5E3FF),
+    secondary = Color(0xFFBCC7DB),
+    onSecondary = Color(0xFF263141),
+    secondaryContainer = Color(0xFF3D4858),
+    onSecondaryContainer = Color(0xFFDCE3F5),
+    tertiary = Color(0xFFAECBD3),
+    onTertiary = Color(0xFF16343B),
+    tertiaryContainer = Color(0xFF2E4B53),
+    onTertiaryContainer = Color(0xFFC9E7EF),
+    background = Color(0xFF111318),
+    onBackground = Color(0xFFE2E2E9),
+    surface = Color(0xFF111318),
+    onSurface = Color(0xFFE2E2E9),
+    surfaceVariant = Color(0xFF43474F),
+    onSurfaceVariant = Color(0xFFC3C7D0),
+    surfaceContainerLowest = Color(0xFF0C0E13),
+    surfaceContainerLow = Color(0xFF191C20),
+    surfaceContainer = Color(0xFF1D2024),
+    surfaceContainerHigh = Color(0xFF272A2F),
+    surfaceContainerHighest = Color(0xFF32353A),
+    surfaceDim = Color(0xFF111318),
+    surfaceBright = Color(0xFF373A40),
+    surfaceTint = Color(0xFFA7C8FF),
+    outline = Color(0xFF8D9199),
+    outlineVariant = Color(0xFF43474F),
+    inverseSurface = Color(0xFFE2E2E9),
+    inverseOnSurface = Color(0xFF2E3136),
+    inversePrimary = Color(0xFF245EA6),
+    error = Color(0xFFFFB4AB),
+    onError = Color(0xFF690005),
+    errorContainer = Color(0xFF93000A),
+    onErrorContainer = Color(0xFFFFDAD6),
+    primaryFixed = Color(0xFFD5E3FF),
+    primaryFixedDim = Color(0xFFA7C8FF),
+    onPrimaryFixed = Color(0xFF001B3D),
+    onPrimaryFixedVariant = Color(0xFF13477D),
+    secondaryFixed = Color(0xFFDCE3F5),
+    secondaryFixedDim = Color(0xFFBCC7DB),
+    onSecondaryFixed = Color(0xFF142033),
+    onSecondaryFixedVariant = Color(0xFF3D4858),
+    tertiaryFixed = Color(0xFFC9E7EF),
+    tertiaryFixedDim = Color(0xFFAECBD3),
+    onTertiaryFixed = Color(0xFF001F26),
+    onTertiaryFixedVariant = Color(0xFF2E4B53),
+    scrim = Color.Black,
+)

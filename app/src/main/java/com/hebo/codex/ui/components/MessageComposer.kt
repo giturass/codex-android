@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp as lerpDp
 import androidx.compose.ui.unit.offset
 import com.hebo.codex.ui.theme.ActionBlue
+import com.hebo.codex.ui.theme.ComposerTheme
 import kotlin.math.roundToInt
 
 private val ComposerCompactCornerRadius = 30.dp
@@ -64,6 +65,7 @@ private val ComposerTextFieldHeight = 48.dp
 private val ComposerExpandedTextFieldMaxHeight = 140.dp
 private const val ComposerExpansionDurationMillis = 200
 private const val ComposerCollapseDurationMillis = 160
+private val ComposerSendColor = Color(0xFF2196F3)
 
 internal enum class MessageComposerAction {
     EXECUTE,
@@ -85,7 +87,7 @@ internal fun MessageComposer(
     compactEndExtra: Dp = 0.dp,
     shadowElevation: Dp = 2.dp,
     focusRequester: FocusRequester? = null,
-) {
+) = ComposerTheme {
     val density = LocalDensity.current
     val imeAnimationTarget = WindowInsets.imeAnimationTarget
     val hasText = value.text.isNotEmpty()
@@ -320,7 +322,7 @@ internal fun MessageComposerActionButton(
         enabled = enabled,
         modifier = Modifier.size(48.dp),
         colors = IconButtonDefaults.filledIconButtonColors(
-            containerColor = ActionBlue,
+            containerColor = if (action == MessageComposerAction.SEND) ComposerSendColor else ActionBlue,
             contentColor = Color.White,
             disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,

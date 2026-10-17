@@ -35,7 +35,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -48,6 +49,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.hebo.codex.domain.FeatureAction
@@ -240,7 +242,7 @@ private fun ModelsContent(
                             )
                         }
                     },
-                    leadingContent = { Icon(Icons.Rounded.SmartToy, contentDescription = null) },
+                    leadingContent = { HubSectionIcon(Icons.Rounded.SmartToy) },
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(model.displayName, modifier = Modifier.weight(1f))
@@ -251,7 +253,7 @@ private fun ModelsContent(
                         }
                     }
                 }
-                HorizontalDivider(Modifier.padding(start = 56.dp))
+                HorizontalDivider(Modifier.padding(start = 72.dp, end = 16.dp))
             }
         }
     }
@@ -275,7 +277,7 @@ private fun PermissionContent(
                 supportingContent = {
                     if (entry.description.isNotBlank()) Text(entry.description)
                 },
-                leadingContent = { Icon(Icons.Rounded.Policy, contentDescription = null) },
+                leadingContent = { HubSectionIcon(Icons.Rounded.Policy) },
                 trailingContent = {
                     StatusBadge(
                         label = when (allowed) {
@@ -293,7 +295,7 @@ private fun PermissionContent(
             ) {
                 Text(entry.title)
             }
-            HorizontalDivider(Modifier.padding(start = 56.dp))
+            HorizontalDivider(Modifier.padding(start = 72.dp, end = 16.dp))
         }
     }
 }
@@ -336,7 +338,7 @@ private fun SkillsContent(
                             FilterChip(
                                 selected = selectedScope == scope,
                                 onClick = { selectedScope = scope },
-                            label = { Text(featureScopeLabel(scope)) },
+                                label = { Text(featureScopeLabel(scope)) },
                             )
                         }
                     }
@@ -362,7 +364,7 @@ private fun SkillsContent(
                         }
                     }
                 },
-                leadingContent = { Icon(Icons.Rounded.AutoAwesome, contentDescription = null) },
+                leadingContent = { HubSectionIcon(Icons.Rounded.AutoAwesome) },
                 trailingContent = {
                     if (pending) {
                         CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
@@ -383,7 +385,7 @@ private fun SkillsContent(
             ) {
                 Text(entry.title)
             }
-            HorizontalDivider(Modifier.padding(start = 56.dp))
+            HorizontalDivider(Modifier.padding(start = 72.dp, end = 16.dp))
         }
     }
 }
@@ -417,7 +419,7 @@ private fun HooksContent(
                         )
                     }
                 },
-                leadingContent = { Icon(Icons.Rounded.Webhook, contentDescription = null) },
+                leadingContent = { HubSectionIcon(Icons.Rounded.Webhook) },
                 trailingContent = {
                     StatusBadge(
                         if (entry.enabled == false) "停用" else "启用",
@@ -427,7 +429,7 @@ private fun HooksContent(
             ) {
                 Text(entry.title)
             }
-            HorizontalDivider(Modifier.padding(start = 56.dp))
+            HorizontalDivider(Modifier.padding(start = 72.dp, end = 16.dp))
         }
     }
 }
@@ -470,7 +472,7 @@ private fun AppsContent(
                         )
                     }
                 },
-                leadingContent = { Icon(Icons.Rounded.Apps, contentDescription = null) },
+                leadingContent = { HubSectionIcon(Icons.Rounded.Apps) },
                 trailingContent = {
                     when {
                         pending -> CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
@@ -499,7 +501,7 @@ private fun AppsContent(
             ) {
                 Text(entry.title)
             }
-            HorizontalDivider(Modifier.padding(start = 56.dp))
+            HorizontalDivider(Modifier.padding(start = 72.dp, end = 16.dp))
         }
     }
 }
@@ -511,7 +513,7 @@ fun CatalogSearchField(
     label: String,
     modifier: Modifier = Modifier,
 ) {
-    OutlinedTextField(
+    TextField(
         value = query,
         onValueChange = onQueryChange,
         modifier = modifier.fillMaxWidth(),
@@ -525,7 +527,13 @@ fun CatalogSearchField(
             }
         },
         singleLine = true,
-        shape = MaterialTheme.shapes.large,
+        shape = MaterialTheme.shapes.extraLarge,
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent,
+        ),
     )
 }
 
@@ -547,7 +555,11 @@ fun EmptyState(message: String, modifier: Modifier = Modifier) {
 fun WarningsPanel(warnings: List<String>) {
     if (warnings.isEmpty()) return
     var expanded by rememberSaveable { mutableStateOf(false) }
-    Surface(color = MaterialTheme.colorScheme.errorContainer) {
+    Surface(
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.errorContainer,
+    ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.ErrorOutline, contentDescription = null)
@@ -583,9 +595,9 @@ enum class StatusTone {
 @Composable
 fun StatusBadge(label: String, tone: StatusTone) {
     val colors = when (tone) {
-        StatusTone.POSITIVE -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
+        StatusTone.POSITIVE -> MaterialTheme.colorScheme.secondaryContainer to MaterialTheme.colorScheme.onSecondaryContainer
         StatusTone.NEGATIVE -> MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
-        StatusTone.NEUTRAL -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
+        StatusTone.NEUTRAL -> MaterialTheme.colorScheme.surfaceContainerHigh to MaterialTheme.colorScheme.onSurfaceVariant
     }
     Surface(shape = CircleShape, color = colors.first, contentColor = colors.second) {
         Text(

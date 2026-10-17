@@ -8,13 +8,16 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -25,25 +28,34 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.Lan
+import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -57,6 +69,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -70,6 +83,7 @@ import com.hebo.codex.domain.addressSummary
 import com.hebo.codex.domain.typeLabel
 import com.hebo.codex.ui.components.NoticeHostState
 import com.hebo.codex.ui.components.NoticeScaffold
+import com.hebo.codex.ui.components.SettingsSectionCard
 
 @Composable
 fun ProxyListScreen(
@@ -99,30 +113,82 @@ fun ProxyListScreen(
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
                     }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                ),
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onAdd) {
-                Icon(Icons.Rounded.Add, contentDescription = "添加代理")
-            }
+            ExtendedFloatingActionButton(
+                onClick = onAdd,
+                icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
+                text = { Text("添加代理") },
+            )
         },
     ) { padding ->
         if (state.proxies.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text("尚未添加代理", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentPadding = PaddingValues(start = 32.dp, top = 32.dp, end = 32.dp, bottom = 104.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                item {
+                    Column(
+                        modifier = Modifier.widthIn(max = 320.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Surface(
+                            shape = MaterialTheme.shapes.extraLarge,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        ) {
+                            Icon(
+                                Icons.Rounded.Lan,
+                                contentDescription = null,
+                                modifier = Modifier.padding(24.dp).size(32.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Text("尚未添加代理", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "添加代理后，可在服务器设置中选择使用",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                }
             }
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
+                contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 104.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 items(state.proxies, key = ProxyProfile::id) { proxy ->
-                    Card(onClick = { onEdit(proxy.id) }, modifier = Modifier.fillMaxWidth()) {
+                    Card(
+                        onClick = { onEdit(proxy.id) },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.large,
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                    ) {
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(16.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
+                            Surface(
+                                shape = MaterialTheme.shapes.medium,
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Lan,
+                                    contentDescription = null,
+                                    modifier = Modifier.padding(12.dp).size(24.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                 Text(proxy.name, style = MaterialTheme.typography.titleMedium)
                                 Text(
@@ -222,6 +288,9 @@ fun ProxyEditorScreen(
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
                     }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                ),
             )
         },
     ) { padding ->
@@ -235,74 +304,81 @@ fun ProxyEditorScreen(
                     .fillMaxSize()
                     .padding(padding)
                     .verticalScroll(rememberScrollState())
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                TextField(state.name, viewModel::updateName, "名称", state.isBusy)
-                EnumDropdown(
-                    label = "类型",
-                    selected = state.type,
-                    options = listOf(
-                        ProxyType.HTTP_CONNECT to "HTTP CONNECT",
-                        ProxyType.SOCKS5 to "SOCKS5",
-                        ProxyType.SSH to "SSH",
-                    ),
-                    enabled = !state.isBusy,
-                    onSelect = viewModel::updateType,
-                )
-
-                when (state.type) {
-                    ProxyType.HTTP_CONNECT -> HttpFields(state, viewModel, showCredential) {
-                        showCredential = !showCredential
-                    }
-                    ProxyType.SOCKS5 -> SocksFields(state, viewModel, showCredential) {
-                        showCredential = !showCredential
-                    }
-                    ProxyType.SSH -> SshFields(
-                        state = state,
-                        viewModel = viewModel,
-                        showCredential = showCredential,
-                        onToggleCredential = { showCredential = !showCredential },
-                        onSelectPrivateKey = { privateKeyLauncher.launch(arrayOf("*/*")) },
+                SettingsSectionCard("代理信息", Icons.Rounded.Lan) {
+                    TextField(state.name, viewModel::updateName, "名称", state.isBusy)
+                    EnumDropdown(
+                        label = "类型",
+                        selected = state.type,
+                        options = listOf(
+                            ProxyType.HTTP_CONNECT to "HTTP CONNECT",
+                            ProxyType.SOCKS5 to "SOCKS5",
+                            ProxyType.SSH to "SSH",
+                        ),
+                        enabled = !state.isBusy,
+                        onSelect = viewModel::updateType,
                     )
                 }
 
-                NumberField(state.timeoutSeconds, viewModel::updateTimeoutSeconds, "连接超时（秒）", state.isBusy)
+                SettingsSectionCard("连接与认证", Icons.Rounded.Key) {
+                    when (state.type) {
+                        ProxyType.HTTP_CONNECT -> HttpFields(state, viewModel, showCredential) {
+                            showCredential = !showCredential
+                        }
+                        ProxyType.SOCKS5 -> SocksFields(state, viewModel, showCredential) {
+                            showCredential = !showCredential
+                        }
+                        ProxyType.SSH -> SshFields(
+                            state = state,
+                            viewModel = viewModel,
+                            showCredential = showCredential,
+                            onToggleCredential = { showCredential = !showCredential },
+                            onSelectPrivateKey = { privateKeyLauncher.launch(arrayOf("*/*")) },
+                        )
+                    }
+                }
 
-                if (state.isEditing) {
-                    if (state.servers.isEmpty()) {
+                SettingsSectionCard("连接测试", Icons.Rounded.Speed) {
+                    NumberField(state.timeoutSeconds, viewModel::updateTimeoutSeconds, "连接超时（秒）", state.isBusy)
+
+                    if (state.isEditing) {
+                        if (state.servers.isEmpty()) {
+                            Text(
+                                "添加服务器后可进行端到端代理测试",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            EnumDropdown(
+                                label = "测试目标服务器",
+                                selected = requireNotNull(state.testServerId),
+                                options = state.servers.map { it.id to it.name },
+                                enabled = !state.isBusy,
+                                onSelect = viewModel::updateTestServer,
+                            )
+                        }
+                        FilledTonalButton(
+                            onClick = viewModel::test,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                            enabled = state.canTest,
+                        ) {
+                            BusyButtonContent(state.isTesting, "正在测试", "测试代理")
+                        }
+                    } else {
                         Text(
-                            "添加服务器后可进行端到端代理测试",
+                            "保存后可选择一个服务器做端到端测试",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                    } else {
-                        EnumDropdown(
-                            label = "测试目标服务器",
-                            selected = requireNotNull(state.testServerId),
-                            options = state.servers.map { it.id to it.name },
-                            enabled = !state.isBusy,
-                            onSelect = viewModel::updateTestServer,
-                        )
                     }
-                    OutlinedButton(
-                        onClick = viewModel::test,
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = state.canTest,
-                    ) {
-                        BusyButtonContent(state.isTesting, "正在测试", "测试代理")
-                    }
-                } else {
-                    Text(
-                        "保存后可选择一个服务器做端到端测试",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
 
                 Button(
                     onClick = viewModel::save,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.widthIn(max = 640.dp).fillMaxWidth().heightIn(min = 48.dp),
                     enabled = state.canSave,
                 ) {
                     BusyButtonContent(state.isSaving, "正在保存", if (state.isEditing) "更新" else "保存")
@@ -369,6 +445,7 @@ private fun HttpFields(
         placeholder = { Text("X-Proxy-Header: value") },
         minLines = 2,
         enabled = !state.isBusy,
+        shape = MaterialTheme.shapes.medium,
     )
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
@@ -535,6 +612,7 @@ private fun TextField(
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
         singleLine = true,
         enabled = !busy,
+        shape = MaterialTheme.shapes.medium,
     )
 }
 
@@ -563,6 +641,7 @@ private fun CredentialField(
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
         singleLine = true,
         enabled = enabled,
+        shape = MaterialTheme.shapes.medium,
         trailingIcon = {
             IconButton(onClick = onToggle) {
                 Icon(
@@ -597,6 +676,8 @@ private fun <T> EnumDropdown(
             label = { Text(label) },
             readOnly = true,
             enabled = enabled,
+            shape = MaterialTheme.shapes.medium,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
         )
         ExposedDropdownMenu(
             expanded = expanded,
@@ -619,7 +700,7 @@ private fun <T> EnumDropdown(
 private fun BusyButtonContent(busy: Boolean, busyText: String, idleText: String) {
     if (busy) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            CircularProgressIndicator(Modifier.size(20.dp), color = LocalContentColor.current, strokeWidth = 2.dp)
             Spacer(Modifier.width(10.dp))
             Text(busyText)
         }

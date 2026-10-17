@@ -7,7 +7,7 @@ package com.hebo.codex.ui.components
 
 import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -28,6 +29,7 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
@@ -50,6 +52,7 @@ import androidx.compose.material3.DismissibleDrawerSheet
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -58,6 +61,7 @@ import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -75,6 +79,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -89,6 +94,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import com.hebo.codex.R
@@ -193,13 +199,13 @@ fun CodexNavigationDrawer(
     if (isWideLayout) {
         DismissibleDrawerSheet(
             modifier = sheetModifier,
-            drawerContainerColor = MaterialTheme.colorScheme.surface,
+            drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             content = content,
         )
     } else {
         ModalDrawerSheet(
             modifier = sheetModifier,
-            drawerContainerColor = MaterialTheme.colorScheme.surface,
+            drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             content = content,
         )
     }
@@ -532,7 +538,7 @@ private fun ColumnScope.DrawerContent(
                 resetKey = activeServer?.id,
                 forceVisible = !drawerListState.canScrollBackward,
                 footer = { footerModifier ->
-                    Column(footerModifier) {
+                    Column(footerModifier.background(MaterialTheme.colorScheme.surfaceContainerLow)) {
                         Spacer(Modifier.height(8.dp))
                         ServerSelector(
                             servers = servers,
@@ -746,17 +752,17 @@ private fun DrawerRecentHeader(
     var menuExpanded by remember { mutableStateOf(false) }
 
     Row(
-        modifier = Modifier.fillMaxWidth().padding(start = 12.dp),
+        modifier = Modifier.fillMaxWidth().padding(start = 12.dp, top = 4.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = "最近会话",
             modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
         )
-        IconButton(onClick = onNewConversation) {
-            Icon(Icons.Rounded.Add, contentDescription = "新建任务")
+        FilledTonalIconButton(onClick = onNewConversation) {
+            Icon(Icons.Rounded.Add, contentDescription = "新建任务", modifier = Modifier.size(22.dp))
         }
         if (groupByProject) {
             IconButton(onClick = { onGroupByProjectChange(false) }) {
@@ -817,7 +823,7 @@ private fun DrawerSearchHeader(
         focusRequester.requestFocus()
     }
 
-    Column {
+    Column(Modifier.padding(top = 4.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -838,7 +844,13 @@ private fun DrawerSearchHeader(
                     }
                 },
                 singleLine = true,
-                shape = MaterialTheme.shapes.large,
+                shape = CircleShape,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    focusedBorderColor = Color.Transparent,
+                    unfocusedBorderColor = Color.Transparent,
+                ),
             )
         }
         Row(
@@ -867,46 +879,59 @@ private fun ProjectHeader(
     onToggle: () -> Unit,
     onNewTask: () -> Unit,
 ) {
-    Row(
+    Surface(
+        onClick = onToggle,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onToggle)
-            .padding(start = 8.dp, top = 9.dp, bottom = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(horizontal = 4.dp, vertical = 2.dp),
+        shape = MaterialTheme.shapes.large,
+        color = if (active) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent,
     ) {
-        Icon(
-            imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-            contentDescription = if (expanded) "收起项目" else "展开项目",
-            modifier = Modifier.size(20.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Icon(
-            Icons.Rounded.Folder,
-            contentDescription = null,
-            modifier = Modifier.padding(horizontal = 8.dp),
-            tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Column(Modifier.weight(1f)) {
-            Text(
-                project.name,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.titleSmall,
-                color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                project.path,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        IconButton(onClick = onNewTask) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 64.dp)
+                .padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Icon(
-                Icons.Rounded.Add,
-                contentDescription = "在「${project.name}」中新建会话",
+                imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                contentDescription = if (expanded) "收起项目" else "展开项目",
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Icon(
+                Icons.Rounded.Folder,
+                contentDescription = null,
+                modifier = Modifier.padding(horizontal = 8.dp).size(20.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    project.name,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    project.path,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = onNewTask) {
+                Icon(
+                    Icons.Rounded.Add,
+                    contentDescription = "在「${project.name}」中新建会话",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -1038,7 +1063,7 @@ private fun ThreadStatusIndicator(attention: ThreadAttention?) {
         when (attention) {
             ThreadAttention.RUNNING -> CircularProgressIndicator(
                 modifier = Modifier.size(18.dp),
-                color = MaterialTheme.colorScheme.onSurface,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 strokeWidth = 2.dp,
             )
 
@@ -1101,11 +1126,19 @@ private fun DrawerSectionTitle(
 
 @Composable
 private fun DrawerEmptyMessage(text: String) {
-    Text(
-        text = text,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 28.dp),
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 16.dp),
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 32.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+    }
 }
 
 @Composable

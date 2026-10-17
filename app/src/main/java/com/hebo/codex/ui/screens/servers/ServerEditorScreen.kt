@@ -9,14 +9,19 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Dns
+import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.Lan
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Button
@@ -24,13 +29,16 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -49,6 +57,7 @@ import com.hebo.codex.R
 import com.hebo.codex.domain.typeLabel
 import com.hebo.codex.ui.components.NoticeHostState
 import com.hebo.codex.ui.components.NoticeScaffold
+import com.hebo.codex.ui.components.SettingsSectionCard
 
 @Composable
 fun ServerEditorScreen(
@@ -86,6 +95,9 @@ fun ServerEditorScreen(
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "返回")
                     }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+                ),
             )
         },
     ) { padding ->
@@ -102,121 +114,137 @@ fun ServerEditorScreen(
                     .fillMaxSize()
                     .padding(padding)
                     .verticalScroll(rememberScrollState())
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                OutlinedTextField(
-                    value = state.name,
-                    onValueChange = viewModel::updateName,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("名称") },
-                    placeholder = { Text("Office Server") },
-                    singleLine = true,
-                    enabled = state.isReady && !state.isBusy,
-                )
-                OutlinedTextField(
-                    value = state.endpoint,
-                    onValueChange = viewModel::updateEndpoint,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("WebSocket URL") },
-                    placeholder = { Text("ws://10.150.99.201:8390") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                    singleLine = true,
-                    enabled = state.isReady && !state.isBusy,
-                )
-                OutlinedTextField(
-                    value = stringResource(R.string.server_auth_capability_token),
-                    onValueChange = {},
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("认证方式") },
-                    readOnly = true,
-                    enabled = state.isReady && !state.isBusy,
-                )
-                OutlinedTextField(
-                    value = state.token,
-                    onValueChange = viewModel::updateToken,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text(stringResource(R.string.server_auth_capability_token)) },
-                    visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    singleLine = true,
-                    enabled = state.isReady && !state.isBusy,
-                    trailingIcon = {
-                        IconButton(onClick = { showToken = !showToken }) {
-                            Icon(
-                                if (showToken) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                                contentDescription = stringResource(
-                                    if (showToken) R.string.server_auth_hide_capability_token
-                                    else R.string.server_auth_show_capability_token,
-                                ),
-                            )
-                        }
-                    },
-                )
-                Text(
-                    stringResource(R.string.server_auth_capability_token_storage),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                ExposedDropdownMenuBox(
-                    expanded = proxyMenuExpanded,
-                    onExpandedChange = { if (!state.isBusy) proxyMenuExpanded = it },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    val selectedProxy = state.proxies.singleOrNull { it.id == state.proxyId }
+                SettingsSectionCard("连接信息", Icons.Rounded.Dns) {
                     OutlinedTextField(
-                        value = selectedProxy?.name ?: "直连",
+                        value = state.name,
+                        onValueChange = viewModel::updateName,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("名称") },
+                        placeholder = { Text("Office Server") },
+                        singleLine = true,
+                        enabled = state.isReady && !state.isBusy,
+                        shape = MaterialTheme.shapes.medium,
+                    )
+                    OutlinedTextField(
+                        value = state.endpoint,
+                        onValueChange = viewModel::updateEndpoint,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("WebSocket URL") },
+                        placeholder = { Text("ws://10.150.99.201:8390") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        singleLine = true,
+                        enabled = state.isReady && !state.isBusy,
+                        shape = MaterialTheme.shapes.medium,
+                    )
+                }
+                SettingsSectionCard("访问认证", Icons.Rounded.Key) {
+                    OutlinedTextField(
+                        value = stringResource(R.string.server_auth_capability_token),
                         onValueChange = {},
-                        modifier = Modifier
-                            .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
-                            .fillMaxWidth(),
-                        label = { Text("代理") },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("认证方式") },
                         readOnly = true,
                         enabled = state.isReady && !state.isBusy,
+                        shape = MaterialTheme.shapes.medium,
                     )
-                    ExposedDropdownMenu(
+                    OutlinedTextField(
+                        value = state.token,
+                        onValueChange = viewModel::updateToken,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text(stringResource(R.string.server_auth_capability_token)) },
+                        visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        singleLine = true,
+                        enabled = state.isReady && !state.isBusy,
+                        shape = MaterialTheme.shapes.medium,
+                        trailingIcon = {
+                            IconButton(onClick = { showToken = !showToken }) {
+                                Icon(
+                                    if (showToken) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                    contentDescription = stringResource(
+                                        if (showToken) R.string.server_auth_hide_capability_token
+                                        else R.string.server_auth_show_capability_token,
+                                    ),
+                                )
+                            }
+                        },
+                    )
+                    Text(
+                        stringResource(R.string.server_auth_capability_token_storage),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                SettingsSectionCard("网络代理", Icons.Rounded.Lan) {
+                    ExposedDropdownMenuBox(
                         expanded = proxyMenuExpanded,
-                        onDismissRequest = { proxyMenuExpanded = false },
+                        onExpandedChange = { if (!state.isBusy) proxyMenuExpanded = it },
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
-                        DropdownMenuItem(
-                            text = { Text("直连") },
-                            onClick = {
-                                viewModel.updateProxy(null)
-                                proxyMenuExpanded = false
+                        val selectedProxy = state.proxies.singleOrNull { it.id == state.proxyId }
+                        OutlinedTextField(
+                            value = selectedProxy?.name ?: "直连",
+                            onValueChange = {},
+                            modifier = Modifier
+                                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)
+                                .fillMaxWidth(),
+                            label = { Text("代理") },
+                            readOnly = true,
+                            enabled = state.isReady && !state.isBusy,
+                            shape = MaterialTheme.shapes.medium,
+                            trailingIcon = {
+                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = proxyMenuExpanded)
                             },
                         )
-                        state.proxies.forEach { proxy ->
+                        ExposedDropdownMenu(
+                            expanded = proxyMenuExpanded,
+                            onDismissRequest = { proxyMenuExpanded = false },
+                        ) {
                             DropdownMenuItem(
-                                text = { Text("${proxy.name} · ${proxy.configuration.typeLabel()}") },
+                                text = { Text("直连") },
                                 onClick = {
-                                    viewModel.updateProxy(proxy.id)
+                                    viewModel.updateProxy(null)
                                     proxyMenuExpanded = false
                                 },
                             )
+                            state.proxies.forEach { proxy ->
+                                DropdownMenuItem(
+                                    text = { Text("${proxy.name} · ${proxy.configuration.typeLabel()}") },
+                                    onClick = {
+                                        viewModel.updateProxy(proxy.id)
+                                        proxyMenuExpanded = false
+                                    },
+                                )
+                            }
                         }
                     }
-                }
-                OutlinedButton(
-                    onClick = onManageProxies,
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !state.isBusy,
-                ) {
-                    Text("管理代理")
+                    TextButton(
+                        onClick = onManageProxies,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !state.isBusy,
+                    ) {
+                        Text("管理代理")
+                    }
                 }
                 if (state.endpoint.startsWith("ws://")) {
                     Text(
                         "ws:// 不提供端到端传输加密，仅应连接可信网络；HTTP/SOCKS 代理能够读取通信内容",
+                        modifier = Modifier.widthIn(max = 640.dp).fillMaxWidth().padding(horizontal = 4.dp),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
-                OutlinedButton(
+                FilledTonalButton(
                     onClick = viewModel::testConnection,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.widthIn(max = 640.dp).fillMaxWidth().heightIn(min = 48.dp),
                     enabled = state.canTest,
                 ) {
                     if (state.isTesting) {
-                        Row {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             CircularProgressIndicator(
                                 Modifier.size(20.dp),
                                 strokeWidth = 2.dp,
@@ -230,11 +258,11 @@ fun ServerEditorScreen(
                 }
                 Button(
                     onClick = viewModel::save,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.widthIn(max = 640.dp).fillMaxWidth().heightIn(min = 48.dp),
                     enabled = state.canSave,
                 ) {
                     if (state.isSaving) {
-                        Row {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             CircularProgressIndicator(
                                 Modifier.size(20.dp),
                                 color = MaterialTheme.colorScheme.onPrimary,

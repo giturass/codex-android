@@ -1058,8 +1058,8 @@ internal fun ConversationFloatingHeader(
                 onClick = onToggleNavigation,
                 modifier = Modifier.size(ConversationHeaderItemMinHeight),
                 shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 shadowElevation = shadowElevation,
             ) {
                 Box(contentAlignment = Alignment.Center) {
@@ -1071,9 +1071,8 @@ internal fun ConversationFloatingHeader(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = ConversationHeaderItemMinHeight),
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.72f)),
+                shape = MaterialTheme.shapes.extraLarge,
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
                 shadowElevation = shadowElevation,
             ) {
                 Row(
@@ -1091,7 +1090,7 @@ internal fun ConversationFloatingHeader(
                         Column(Modifier.weight(1f)) {
                             Text(
                                 headerTitle,
-                                style = MaterialTheme.typography.titleSmall,
+                                style = MaterialTheme.typography.titleMedium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -1117,7 +1116,12 @@ internal fun ConversationFloatingHeader(
                         onConsumeResetCredit = onConsumeRateLimitReset,
                     )
                     if (actions != null && showNewTaskShortcut) {
-                        IconButton(onClick = actions.onNewTask) {
+                        IconButton(
+                            onClick = actions.onNewTask,
+                            colors = IconButtonDefaults.iconButtonColors(
+                                contentColor = MaterialTheme.colorScheme.primary,
+                            ),
+                        ) {
                             Icon(Icons.Rounded.Add, contentDescription = "新建任务")
                         }
                     }
