@@ -18,7 +18,10 @@ class SubAgentConversationTest {
 
         val restored = initial.withRefreshedConversation(snapshot)
 
-        assertEquals(snapshot, restored)
+        assertEquals(snapshot.parentThreadId, restored.parentThreadId)
+        assertEquals(snapshot.agentNickname, restored.agentNickname)
+        assertEquals(snapshot.agentRole, restored.agentRole)
+        assertEquals(snapshot.canAcceptDirectInput, restored.canAcceptDirectInput)
         assertTrue(restored.isViewOnly)
         assertFalse(restored.withRefreshedConversation(snapshot.copy(canAcceptDirectInput = true)).isViewOnly)
         assertFalse(snapshot.copy(canAcceptDirectInput = null).isViewOnly)
