@@ -301,7 +301,6 @@ private fun NewTaskUiState.conversationTitle(): String = message.lineSequence()
 private fun ThreadOptions.toTurnOptions(): TurnOptions = TurnOptions(
     model = model,
     serviceTier = serviceTier,
-    personality = personality,
     approvalPolicy = approvalPolicy,
     approvalsReviewer = approvalsReviewer,
     sandboxMode = sandboxMode,

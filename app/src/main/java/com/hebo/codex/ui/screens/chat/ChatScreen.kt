@@ -63,6 +63,7 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Circle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Code
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ErrorOutline
@@ -73,6 +74,7 @@ import androidx.compose.material.icons.rounded.Image
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Menu
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PriorityHigh
@@ -156,6 +158,7 @@ import com.hebo.codex.domain.isAsyncQuestion
 import com.hebo.codex.domain.recentAsyncQuestion
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import com.hebo.codex.domain.ApprovalDecision
+import com.hebo.codex.domain.ApprovalOption
 import com.hebo.codex.domain.ApprovalPolicy
 import com.hebo.codex.domain.ApprovalReviewer
 import com.hebo.codex.domain.ApprovalType
@@ -167,11 +170,10 @@ import com.hebo.codex.domain.FeatureEntry
 import com.hebo.codex.domain.ModelOption
 import com.hebo.codex.domain.NetworkPolicyRuleAction
 import com.hebo.codex.domain.PendingServerRequest
-import com.hebo.codex.domain.Personality
 import com.hebo.codex.domain.PlanStepStatus
 import com.hebo.codex.domain.QuickPhrase
 import com.hebo.codex.domain.ReasoningSummary
-import com.hebo.codex.domain.ReviewDelivery
+import com.hebo.codex.domain.ReviewDestination
 import com.hebo.codex.domain.ReviewTarget
 import com.hebo.codex.domain.SandboxMode
 import com.hebo.codex.domain.ThreadGoal
@@ -225,10 +227,8 @@ import com.mikepenz.markdown.compose.elements.highlightedCodeFence
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.model.rememberMarkdownState
 import com.mikepenz.markdown.model.ImageWidth
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
-import kotlin.math.max
 
 private fun chatMarkdownComponents(
     onRunShellCommand: (suspend (String) -> Boolean)?,
@@ -307,6 +307,7 @@ fun ChatScreen(
     onNewTask: (String) -> Unit,
     onReconnect: () -> Unit,
     onOpenConversation: (String, String?) -> Unit,
+    onCopyConversationId: (String) -> Unit,
     onOpenRelatedConversation: (String) -> Unit,
     onRefreshRateLimits: () -> Unit,
     onConsumeRateLimitReset: (String?) -> Unit,
@@ -502,6 +503,7 @@ fun ChatScreen(
                 actions = ConversationHeaderActions(
                     onNewTask = { conversation?.let { onNewTask(it.cwd) } },
                     onRename = { dialog = ChatDialog.Rename },
+                    onCopyId = { conversation?.let { onCopyConversationId(it.threadId) } },
                     onFork = { dialog = ChatDialog.Fork },
                     onOpenGoal = { dialog = ChatDialog.Goal },
                 ),
@@ -791,8 +793,8 @@ fun ChatScreen(
 
         ChatDialog.Review -> ReviewDialog(
             onDismiss = { dialog = null },
-            onSubmit = { target, delivery ->
-                viewModel.review(target, delivery)
+            onSubmit = { target, destination ->
+                viewModel.review(target, destination)
                 dialog = null
             },
         )
@@ -999,6 +1001,7 @@ internal fun chatBottomContentPadding(
 internal data class ConversationHeaderActions(
     val onNewTask: () -> Unit,
     val onRename: () -> Unit,
+    val onCopyId: () -> Unit,
     val onFork: () -> Unit,
     val onOpenGoal: () -> Unit,
 )
@@ -1136,6 +1139,14 @@ internal fun ConversationFloatingHeader(
                                     onClick = {
                                         actionsExpanded = false
                                         actions.onRename()
+                                    },
+                                )
+                                ChatActionMenuItem(
+                                    text = stringResource(R.string.conversation_copy_id),
+                                    icon = { Icon(Icons.Rounded.ContentCopy, contentDescription = null) },
+                                    onClick = {
+                                        actionsExpanded = false
+                                        actions.onCopyId()
                                     },
                                 )
                                 ChatActionMenuItem(
@@ -1614,10 +1625,11 @@ internal fun PendingRequestBanner(
 ) {
     val isCritical = request is PendingServerRequest.Permissions
     val icon = when (request) {
-        is PendingServerRequest.Approval -> if (request.type == ApprovalType.COMMAND_EXECUTION) {
-            Icons.Rounded.Code
-        } else {
-            Icons.Rounded.Description
+        is PendingServerRequest.Approval -> when (request.type) {
+            ApprovalType.COMMAND_EXECUTION -> Icons.Rounded.Code
+            ApprovalType.TERMINAL_INPUT -> Icons.Rounded.Terminal
+            ApprovalType.NETWORK_ACCESS -> Icons.Rounded.Language
+            ApprovalType.FILE_CHANGE -> Icons.Rounded.Description
         }
         is PendingServerRequest.Questions -> Icons.AutoMirrored.Rounded.HelpOutline
         is PendingServerRequest.McpElicitation -> Icons.Rounded.Extension
@@ -1659,19 +1671,14 @@ internal fun PendingRequestBanner(
 }
 
 private fun pendingRequestTitle(request: PendingServerRequest): String = when (request) {
-    is PendingServerRequest.Approval -> if (request.type == ApprovalType.COMMAND_EXECUTION) {
-        "命令等待确认"
-    } else {
-        "文件修改等待确认"
-    }
-
-    is PendingServerRequest.Questions -> "Codex 需要你的回答"
+    is PendingServerRequest.Approval -> request.title
+    is PendingServerRequest.Questions -> request.title
     is PendingServerRequest.McpElicitation -> "${request.serverName} 请求确认"
     is PendingServerRequest.Permissions -> "权限请求"
 }
 
 private fun pendingRequestSummary(request: PendingServerRequest): String = when (request) {
-    is PendingServerRequest.Approval -> request.reason ?: request.command ?: request.cwd ?: "查看详情后决定"
+    is PendingServerRequest.Approval -> request.summary
     is PendingServerRequest.Questions -> request.questions.firstOrNull()?.question ?: "请补充信息"
     is PendingServerRequest.McpElicitation -> request.message
     is PendingServerRequest.Permissions -> request.reason ?: request.cwd
@@ -1732,60 +1739,69 @@ private fun ApprovalCard(
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
-                if (approval.type == ApprovalType.COMMAND_EXECUTION) "命令等待审批" else "文件修改等待审批",
+                approval.title,
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.error,
             )
             approval.reason?.takeIf(String::isNotBlank)?.let { Text(it) }
-            approval.command?.takeIf(String::isNotBlank)?.let { ShellCommandBlock(it) }
+            if (approval.type == ApprovalType.TERMINAL_INPUT) {
+                Text("请求向正在运行的终端发送输入", style = MaterialTheme.typography.bodySmall)
+            }
+            approval.commandPreview?.let { ShellCommandBlock(it) }
             approval.cwd?.takeIf(String::isNotBlank)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-            approval.networkHost?.let { Text("网络主机：$it") }
+            approval.networkContext?.let { Text("访问目标：${it.description}") }
             approval.grantRoot?.let { Text("授权目录：$it") }
-            if (approval.commandActions.isNotEmpty()) {
+            if (approval.type == ApprovalType.COMMAND_EXECUTION && approval.commandActions.isNotEmpty()) {
                 Text("这条命令将执行", style = MaterialTheme.typography.labelLarge)
                 approval.commandActions.forEach { CommandActionView(it) }
             }
-            approval.proposedExecPolicy?.let { amendment ->
-                PolicyProposal(
-                    title = "以后允许执行同类命令",
-                    description = amendment.command.joinToString(" "),
-                    technicalDetails = amendment.responseJson,
-                )
-                OutlinedButton(
-                    onClick = { onExecPolicy(amendment.responseJson) },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("保存命令规则并允许本次操作")
+            approval.availableDecisions.forEach { option ->
+                when (option) {
+                    is ApprovalOption.Decision -> when (option.decision) {
+                        ApprovalDecision.ACCEPT -> Button(
+                            onClick = { onDecision(option.decision) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(option.buttonLabel) }
+
+                        ApprovalDecision.ACCEPT_FOR_SESSION -> OutlinedButton(
+                            onClick = { onDecision(option.decision) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(option.buttonLabel) }
+
+                        ApprovalDecision.DECLINE, ApprovalDecision.CANCEL -> TextButton(
+                            onClick = { onDecision(option.decision) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(option.buttonLabel) }
+                    }
+
+                    is ApprovalOption.ExecPolicy -> {
+                        PolicyProposal(
+                            title = "以后允许执行同类命令",
+                            description = option.amendment.command.joinToString(" "),
+                            technicalDetails = option.amendment.responseJson,
+                        )
+                        OutlinedButton(
+                            onClick = { onExecPolicy(option.amendment.responseJson) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(option.buttonLabel) }
+                    }
+
+                    is ApprovalOption.NetworkPolicy -> {
+                        PolicyProposal(
+                            title = if (option.amendment.action == NetworkPolicyRuleAction.ALLOW) {
+                                "以后允许访问此主机"
+                            } else {
+                                "以后阻止访问此主机"
+                            },
+                            description = option.amendment.host,
+                            technicalDetails = option.amendment.responseJson,
+                        )
+                        OutlinedButton(
+                            onClick = { onNetworkPolicy(option.amendment.responseJson) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(option.buttonLabel) }
+                    }
                 }
-            }
-            approval.proposedNetworkPolicies.forEach { amendment ->
-                PolicyProposal(
-                    title = if (amendment.action == NetworkPolicyRuleAction.ALLOW) {
-                        "以后允许访问此主机"
-                    } else {
-                        "以后阻止访问此主机"
-                    },
-                    description = amendment.host,
-                    technicalDetails = amendment.responseJson,
-                )
-                OutlinedButton(
-                    onClick = { onNetworkPolicy(amendment.responseJson) },
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("保存网络规则并允许本次操作") }
-            }
-            Button(
-                onClick = { onDecision(ApprovalDecision.ACCEPT) },
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("允许一次") }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    onClick = { onDecision(ApprovalDecision.ACCEPT_FOR_SESSION) },
-                    modifier = Modifier.weight(1f),
-                ) { Text("本会话允许") }
-                TextButton(
-                    onClick = { onDecision(ApprovalDecision.DECLINE) },
-                    modifier = Modifier.weight(1f),
-                ) { Text("拒绝") }
             }
         }
     }
@@ -1803,28 +1819,15 @@ private fun QuestionsCard(
     var otherQuestions by remember(request.requestKey) {
         mutableStateOf(request.questions.filter { it.options.isEmpty() }.map { it.id }.toSet())
     }
-    var remainingMillis by remember(request.requestKey) {
-        mutableStateOf(
-            request.autoResolutionMillis?.let {
-                max(0L, it - (System.currentTimeMillis() - request.receivedAtMillis))
-            },
-        )
-    }
-    LaunchedEffect(request.requestKey, request.autoResolutionMillis) {
-        if (request.autoResolutionMillis != null) {
-            while ((remainingMillis ?: 0L) > 0L) {
-                delay(1_000)
-                remainingMillis = max(
-                    0L,
-                    request.autoResolutionMillis - (System.currentTimeMillis() - request.receivedAtMillis),
-                )
-            }
-        }
-    }
-    val canSubmit = allQuestionsAnswered(request.questions, answers) && remainingMillis != 0L
+    val canSubmit = allQuestionsAnswered(request.questions, answers)
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Codex 需要你的回答", style = MaterialTheme.typography.titleMedium)
+            Text(request.title, style = MaterialTheme.typography.titleMedium)
+            Text(
+                if (request.isBlocking) "回答后将继续任务" else "Codex 会继续处理任务，你可以稍后回答",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             request.questions.forEach { question ->
                 Text(question.header, style = MaterialTheme.typography.labelLarge)
                 SelectionContainer {
@@ -1912,13 +1915,6 @@ private fun QuestionsCard(
                         )
                     }
                 }
-            }
-            remainingMillis?.let {
-                Text(
-                    if (it > 0L) "将在 ${(it + 999L) / 1_000L} 秒后自动处理" else "该请求正在自动处理",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
             Button(
                 onClick = { onSubmit(answers) },
@@ -2933,16 +2929,6 @@ private fun TurnOptionsSheet(
                         ?: stringResource(R.string.common_default) },
                     onSelect = { options = options.copy(reasoningSummary = it) },
                 )
-                if (model == null || model.supportsPersonality) {
-                    Text("人格", style = MaterialTheme.typography.labelLarge)
-                    OptionChipRow(
-                        values = listOf<Personality?>(null) + Personality.entries,
-                        selected = options.personality,
-                        label = { it?.let { value -> stringResource(value.displayLabelRes) }
-                            ?: stringResource(R.string.common_default) },
-                        onSelect = { options = options.copy(personality = it) },
-                    )
-                }
                 if (options.sandboxMode == SandboxMode.READ_ONLY || options.sandboxMode == SandboxMode.WORKSPACE_WRITE) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("允许网络访问", modifier = Modifier.weight(1f))
@@ -3328,11 +3314,11 @@ internal fun tokenUsageComparisonRows(usage: TokenUsage): List<TokenUsageCompari
 @Composable
 private fun ReviewDialog(
     onDismiss: () -> Unit,
-    onSubmit: (ReviewTarget, ReviewDelivery) -> Unit,
+    onSubmit: (ReviewTarget, ReviewDestination) -> Unit,
 ) {
     var type by rememberSaveable { mutableStateOf(ReviewType.UNCOMMITTED) }
     var value by rememberSaveable { mutableStateOf("") }
-    var detached by rememberSaveable { mutableStateOf(false) }
+    var destination by rememberSaveable { mutableStateOf(ReviewDestination.CURRENT_THREAD) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("代码审查") },
@@ -3355,7 +3341,12 @@ private fun ReviewDialog(
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("在独立会话中审查", modifier = Modifier.weight(1f))
-                    Switch(checked = detached, onCheckedChange = { detached = it })
+                    Switch(
+                        checked = destination == ReviewDestination.NEW_THREAD,
+                        onCheckedChange = {
+                            destination = if (it) ReviewDestination.NEW_THREAD else ReviewDestination.CURRENT_THREAD
+                        },
+                    )
                 }
             }
         },
@@ -3368,7 +3359,7 @@ private fun ReviewDialog(
                         ReviewType.COMMIT -> ReviewTarget.Commit(value.trim())
                         ReviewType.CUSTOM -> ReviewTarget.Custom(value.trim())
                     }
-                    onSubmit(target, if (detached) ReviewDelivery.DETACHED else ReviewDelivery.INLINE)
+                    onSubmit(target, destination)
                 },
                 enabled = type == ReviewType.UNCOMMITTED || value.isNotBlank(),
             ) { Text("开始") }

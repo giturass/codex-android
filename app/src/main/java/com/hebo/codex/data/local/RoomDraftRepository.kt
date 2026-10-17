@@ -12,7 +12,6 @@ import com.hebo.codex.domain.DraftKey
 import com.hebo.codex.domain.DraftRepository
 import com.hebo.codex.domain.DraftSummary
 import com.hebo.codex.domain.DraftTarget
-import com.hebo.codex.domain.Personality
 import com.hebo.codex.domain.ReasoningSummary
 import com.hebo.codex.domain.SandboxMode
 import com.hebo.codex.domain.ThreadOptions
@@ -471,7 +470,6 @@ private data class StoredThreadOptions(
     val configJson: String?,
     val baseInstructions: String?,
     val developerInstructions: String?,
-    val personality: String?,
     val ephemeral: Boolean,
 ) {
     fun toDomain(): ThreadOptions = ThreadOptions(
@@ -484,7 +482,6 @@ private data class StoredThreadOptions(
         configJson = configJson,
         baseInstructions = baseInstructions,
         developerInstructions = developerInstructions,
-        personality = personality?.let(Personality::valueOf),
         ephemeral = ephemeral,
     )
 
@@ -499,7 +496,6 @@ private data class StoredThreadOptions(
             configJson = value.configJson,
             baseInstructions = value.baseInstructions,
             developerInstructions = value.developerInstructions,
-            personality = value.personality?.name,
             ephemeral = value.ephemeral,
         )
     }
@@ -512,7 +508,6 @@ private data class StoredTurnOptions(
     val serviceTier: String?,
     val reasoningEffort: String?,
     val reasoningSummary: String?,
-    val personality: String?,
     val approvalPolicy: String?,
     val approvalsReviewer: String?,
     val sandboxMode: String?,
@@ -528,7 +523,6 @@ private data class StoredTurnOptions(
         serviceTier = serviceTier,
         reasoningEffort = reasoningEffort,
         reasoningSummary = reasoningSummary?.let(ReasoningSummary::valueOf),
-        personality = personality?.let(Personality::valueOf),
         approvalPolicy = approvalPolicy?.let(ApprovalPolicy::valueOf),
         approvalsReviewer = approvalsReviewer?.let(ApprovalReviewer::valueOf),
         sandboxMode = sandboxMode?.let(SandboxMode::valueOf),
@@ -546,7 +540,6 @@ private data class StoredTurnOptions(
             serviceTier = value.serviceTier,
             reasoningEffort = value.reasoningEffort,
             reasoningSummary = value.reasoningSummary?.name,
-            personality = value.personality?.name,
             approvalPolicy = value.approvalPolicy?.name,
             approvalsReviewer = value.approvalsReviewer?.name,
             sandboxMode = value.sandboxMode?.name,

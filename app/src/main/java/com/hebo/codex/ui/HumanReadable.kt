@@ -5,7 +5,6 @@ import com.hebo.codex.domain.AccountPlan
 import com.hebo.codex.domain.AccountType
 import com.hebo.codex.domain.ApprovalPolicy
 import com.hebo.codex.domain.ApprovalReviewer
-import com.hebo.codex.domain.Personality
 import com.hebo.codex.domain.RateLimitReachedType
 import com.hebo.codex.domain.RateLimitResetCreditStatus
 import com.hebo.codex.domain.RateLimitResetType
@@ -60,13 +59,6 @@ val ApprovalReviewer.displayDescriptionRes: Int
         ApprovalReviewer.AUTO_REVIEW -> R.string.approval_reviewer_auto_description
     }
 
-val Personality.displayLabelRes: Int
-    get() = when (this) {
-        Personality.NONE -> R.string.personality_default
-        Personality.FRIENDLY -> R.string.personality_friendly
-        Personality.PRAGMATIC -> R.string.personality_pragmatic
-    }
-
 val ReasoningSummary.displayLabelRes: Int
     get() = when (this) {
         ReasoningSummary.AUTO -> R.string.reasoning_summary_auto
@@ -99,6 +91,7 @@ val AccountPlan.displayLabelRes: Int
         AccountPlan.PLUS -> R.string.account_plan_plus
         AccountPlan.PRO -> R.string.account_plan_pro
         AccountPlan.PRO_LITE -> R.string.account_plan_pro_lite
+        AccountPlan.PRO_MAX -> R.string.account_plan_pro_max
         AccountPlan.TEAM -> R.string.account_plan_team
         AccountPlan.SELF_SERVE_BUSINESS_PRO_LITE -> R.string.account_plan_self_serve_business_pro_lite
         AccountPlan.BUSINESS_USAGE_BASED -> R.string.account_plan_business_usage_based
@@ -219,23 +212,27 @@ fun featureScopeLabel(value: String): String = when (value.lowercase()) {
     else -> "其他作用域"
 }
 
-fun featureTrustLabel(value: String): String = when (value.lowercase()) {
+fun featureTrustLabel(value: String): String = when (value) {
+    "managed" -> "由管理员管理"
     "trusted" -> "可信"
     "untrusted" -> "不可信"
+    "modified" -> "内容已修改"
     else -> "信任状态未知"
 }
 
 fun hookEventLabel(value: String): String = when (value) {
-    "PreToolUse" -> "工具调用前"
-    "PermissionRequest" -> "权限请求时"
-    "PostToolUse" -> "工具调用后"
-    "PreCompact" -> "上下文压缩前"
-    "PostCompact" -> "上下文压缩后"
-    "SessionStart" -> "会话开始时"
-    "UserPromptSubmit" -> "用户提交消息时"
-    "SubagentStart" -> "子代理开始时"
-    "SubagentStop" -> "子代理结束时"
-    "Stop" -> "任务停止时"
+    "preToolUse" -> "工具调用前"
+    "permissionRequest" -> "权限请求时"
+    "postToolUse" -> "工具调用后"
+    "preCompact" -> "上下文压缩前"
+    "postCompact" -> "上下文压缩后"
+    "sessionStart" -> "会话开始时"
+    "sessionEnd" -> "会话结束时"
+    "userPromptSubmit" -> "用户提交消息时"
+    "subagentStart" -> "子代理开始时"
+    "subagentStop" -> "子代理结束时"
+    "stop" -> "任务停止时"
+    "interrupt" -> "任务中断时"
     else -> "未知事件"
 }
 

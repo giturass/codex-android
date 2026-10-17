@@ -27,6 +27,8 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
@@ -83,11 +85,13 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
+import com.hebo.codex.R
 import com.hebo.codex.domain.ConnectionStatus
 import com.hebo.codex.domain.DraftKey
 import com.hebo.codex.domain.DraftSummary
@@ -133,6 +137,7 @@ fun CodexNavigationDrawer(
     onRefresh: () -> Unit,
     onLoadMore: () -> Unit,
     onRenameConversation: (threadId: String, name: String) -> Unit,
+    onCopyConversationId: (String) -> Unit,
     onForkConversation: (String) -> Unit,
     onArchiveConversation: (String) -> Unit,
     onDeleteConversation: (String) -> Unit,
@@ -172,6 +177,7 @@ fun CodexNavigationDrawer(
             onRefresh = onRefresh,
             onLoadMore = onLoadMore,
             onRenameConversation = onRenameConversation,
+            onCopyConversationId = onCopyConversationId,
             onForkConversation = onForkConversation,
             onArchiveConversation = onArchiveConversation,
             onDeleteConversation = onDeleteConversation,
@@ -247,6 +253,7 @@ private fun ColumnScope.DrawerContent(
     onRefresh: () -> Unit,
     onLoadMore: () -> Unit,
     onRenameConversation: (threadId: String, name: String) -> Unit,
+    onCopyConversationId: (String) -> Unit,
     onForkConversation: (String) -> Unit,
     onArchiveConversation: (String) -> Unit,
     onDeleteConversation: (String) -> Unit,
@@ -558,6 +565,10 @@ private fun ColumnScope.DrawerContent(
             onDismiss = { selectedThread = null },
             onRename = {
                 onRenameConversation(thread.threadId, it)
+                selectedThread = null
+            },
+            onCopyId = {
+                onCopyConversationId(thread.threadId)
                 selectedThread = null
             },
             onFork = {
@@ -1104,6 +1115,7 @@ private fun ThreadActionsDialog(
     archived: Boolean,
     onDismiss: () -> Unit,
     onRename: (String) -> Unit,
+    onCopyId: () -> Unit,
     onFork: () -> Unit,
     onArchive: () -> Unit,
     onDelete: () -> Unit,
@@ -1146,7 +1158,10 @@ private fun ThreadActionsDialog(
             onDismissRequest = onDismiss,
             title = { Text("会话操作") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     OutlinedTextField(
                         value = name,
                         onValueChange = { name = it },
@@ -1163,6 +1178,9 @@ private fun ThreadActionsDialog(
                     }
                     OutlinedButton(onClick = onFork, modifier = Modifier.fillMaxWidth()) {
                         Text("分叉会话")
+                    }
+                    OutlinedButton(onClick = onCopyId, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.conversation_copy_id))
                     }
                     OutlinedButton(onClick = onArchive, modifier = Modifier.fillMaxWidth()) {
                         Text(if (archived) "恢复归档" else "归档")

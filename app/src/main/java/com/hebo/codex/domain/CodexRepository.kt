@@ -763,11 +763,19 @@ class CodexRepository(
         serverId: String,
         threadId: String,
         target: ReviewTarget,
-        delivery: ReviewDelivery,
-    ): String {
-        val response = api(serverId).review(threadId, target, delivery)
-        return response.requiredString("reviewThreadId")
-    }
+        destination: ReviewDestination,
+    ): String = startConversationReview(
+        threadId = threadId,
+        cwd = requireConversation(serverId, threadId).value.cwd,
+        target = target,
+        destination = destination,
+        createConversation = { cwd ->
+            startConversation(serverId, cwd).also { bumpThreadRevision(serverId) }
+        },
+        reviewInline = { reviewThreadId, reviewTarget ->
+            api(serverId).review(reviewThreadId, reviewTarget).requiredString("reviewThreadId")
+        },
+    )
 
     suspend fun getGoal(serverId: String, threadId: String): ThreadGoal? {
         val targetApi = api(serverId)
@@ -1239,7 +1247,6 @@ class CodexRepository(
             method = request.method,
             params = request.params,
             requestKey = requestKey,
-            receivedAtMillis = System.currentTimeMillis(),
         )
         pendingRequestRoutes[requestKey] = PendingRequestRoute(request.id, threadId)
         conversation.updateState { current ->
@@ -1902,13 +1909,14 @@ class CodexRepository(
     }
 
     private fun PendingServerRequest.notificationMessage(): String = when (this) {
-        is PendingServerRequest.Approval -> if (type == ApprovalType.COMMAND_EXECUTION) {
-            "命令等待确认"
-        } else {
-            "文件修改等待确认"
+        is PendingServerRequest.Approval -> when (type) {
+            ApprovalType.COMMAND_EXECUTION -> "命令等待确认"
+            ApprovalType.TERMINAL_INPUT -> "终端输入等待确认"
+            ApprovalType.NETWORK_ACCESS -> "网络访问等待确认"
+            ApprovalType.FILE_CHANGE -> "文件修改等待确认"
         }
 
-        is PendingServerRequest.Questions -> "Codex 需要你的回答"
+        is PendingServerRequest.Questions -> if (isBlocking) "Codex 正在等待你的回答" else "Codex 有一个问题"
         is PendingServerRequest.McpElicitation -> "$serverName 请求确认"
         is PendingServerRequest.Permissions -> "权限请求等待处理"
     }

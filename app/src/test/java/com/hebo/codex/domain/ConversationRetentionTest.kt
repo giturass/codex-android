@@ -33,8 +33,7 @@ class ConversationRetentionTest {
             itemId = "item-1",
             turnId = "turn-1",
             questions = emptyList(),
-            autoResolutionMillis = null,
-            receivedAtMillis = 0,
+            isBlocking = true,
         )
 
         assertTrue(conversationState(pendingRequests = listOf(request)).requiresRuntimeRetention)

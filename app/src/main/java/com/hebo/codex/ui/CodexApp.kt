@@ -1,5 +1,6 @@
 package com.hebo.codex.ui
 
+import android.content.ClipData
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -23,7 +24,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -34,6 +38,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.hebo.codex.ConversationTarget
+import com.hebo.codex.R
 import com.hebo.codex.domain.CodexRepository
 import com.hebo.codex.domain.DraftRepository
 import com.hebo.codex.domain.QuickPhraseRepository
@@ -126,6 +131,9 @@ fun CodexApp(
     val noticeState = rememberNoticeHostState()
     NoticeHostEffect(noticeState)
     val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboard.current
+    val copyConversationIdLabel = stringResource(R.string.conversation_copy_id)
+    val conversationIdCopiedMessage = stringResource(R.string.conversation_id_copied)
     val currentBackStackEntry by navController.currentBackStackEntryAsState()
     val activeDrawerTarget = currentBackStackEntry?.arguments?.let { arguments ->
         val serverId = arguments.getString("serverId") ?: homeState.activeServerId
@@ -137,6 +145,13 @@ fun CodexApp(
             )
 
             else -> null
+        }
+    }
+
+    fun copyConversationId(threadId: String) {
+        scope.launch {
+            clipboard.setClipEntry(ClipEntry(ClipData.newPlainText(copyConversationIdLabel, threadId)))
+            noticeState.showMessage(conversationIdCopiedMessage)
         }
     }
 
@@ -272,6 +287,7 @@ fun CodexApp(
                 onRefresh = homeViewModel::refresh,
                 onLoadMore = homeViewModel::loadMore,
                 onRenameConversation = homeViewModel::renameConversation,
+                onCopyConversationId = ::copyConversationId,
                 onForkConversation = homeViewModel::forkConversation,
                 onArchiveConversation = homeViewModel::archiveConversation,
                 onDeleteConversation = homeViewModel::deleteConversation,
@@ -421,6 +437,7 @@ fun CodexApp(
                             onOpenConversation = { threadId, announcement ->
                                 openConversation(route.serverId, threadId, announcement)
                             },
+                            onCopyConversationId = ::copyConversationId,
                             onOpenRelatedConversation = { threadId ->
                                 if (threadId != route.threadId) {
                                     val previous = navController.previousBackStackEntry?.arguments

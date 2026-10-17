@@ -27,6 +27,7 @@ internal object AccountFeatureMapper {
         "plus" -> AccountPlan.PLUS
         "pro" -> AccountPlan.PRO
         "prolite" -> AccountPlan.PRO_LITE
+        "promax" -> AccountPlan.PRO_MAX
         "team" -> AccountPlan.TEAM
         "self_serve_business_prolite" -> AccountPlan.SELF_SERVE_BUSINESS_PRO_LITE
         "self_serve_business_usage_based" -> AccountPlan.BUSINESS_USAGE_BASED

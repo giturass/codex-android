@@ -52,7 +52,11 @@ class HumanReadableTest {
     @Test
     fun protocolMetadataUsesHumanLabels() {
         assertEquals("个人", featureScopeLabel("user"))
-        assertEquals("工具调用前", hookEventLabel("PreToolUse"))
+        assertEquals("工具调用前", hookEventLabel("preToolUse"))
+        assertEquals("会话结束时", hookEventLabel("sessionEnd"))
+        assertEquals("任务中断时", hookEventLabel("interrupt"))
+        assertEquals("由管理员管理", featureTrustLabel("managed"))
+        assertEquals("内容已修改", featureTrustLabel("modified"))
         assertEquals("OAuth 已认证", mcpAuthStatusLabel("oAuth"))
         assertEquals("仅指定成员访问", pluginDiscoverabilityLabel("PRIVATE"))
     }

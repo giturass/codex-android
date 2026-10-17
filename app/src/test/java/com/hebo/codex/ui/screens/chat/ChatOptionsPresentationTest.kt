@@ -35,7 +35,6 @@ class ChatOptionsPresentationTest {
         description = "",
         isDefault = true,
         hidden = false,
-        supportsPersonality = true,
         inputModalities = listOf("text"),
         reasoningEfforts = reasoningEfforts,
         defaultReasoningEffort = "medium",

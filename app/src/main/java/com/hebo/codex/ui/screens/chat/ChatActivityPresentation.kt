@@ -867,7 +867,7 @@ private fun activityTypeIcon(item: ConversationItem): ImageVector = when (item) 
     is ConversationItem.AgentCollaboration -> Icons.Rounded.AccountTree
     is ConversationItem.SubAgentActivity -> Icons.Rounded.SmartToy
     is ConversationItem.Activity -> when (item.kind) {
-        ActivityKind.MCP_TOOL, ActivityKind.DYNAMIC_TOOL -> Icons.Rounded.Extension
+        ActivityKind.MCP_TOOL, ActivityKind.DYNAMIC_TOOL, ActivityKind.TOOL_OUTPUT -> Icons.Rounded.Extension
         ActivityKind.WEB_SEARCH -> Icons.Rounded.TravelExplore
         ActivityKind.CONTEXT_COMPACTION -> Icons.Rounded.Compress
         ActivityKind.REVIEW -> Icons.AutoMirrored.Rounded.FactCheck
@@ -892,6 +892,7 @@ private fun activityTypeDescription(item: ConversationItem): String = when (item
     is ConversationItem.SubAgentActivity -> "子代理"
     is ConversationItem.Activity -> when (item.kind) {
         ActivityKind.MCP_TOOL, ActivityKind.DYNAMIC_TOOL -> "工具调用"
+        ActivityKind.TOOL_OUTPUT -> "工具输出"
         ActivityKind.WEB_SEARCH -> "网页搜索"
         ActivityKind.CONTEXT_COMPACTION -> "上下文压缩"
         ActivityKind.REVIEW -> "审查"

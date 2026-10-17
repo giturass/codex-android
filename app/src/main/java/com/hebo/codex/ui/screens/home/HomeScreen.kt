@@ -72,7 +72,6 @@ import com.hebo.codex.domain.ConnectionStatus
 import com.hebo.codex.domain.DraftAttachment
 import com.hebo.codex.domain.FeatureEntry
 import com.hebo.codex.domain.ModelOption
-import com.hebo.codex.domain.Personality
 import com.hebo.codex.domain.RecentProject
 import com.hebo.codex.domain.QuickPhrase
 import com.hebo.codex.domain.SandboxMode
@@ -602,7 +601,6 @@ private fun ThreadOptionsSheet(
     var sandbox by remember(value) { mutableStateOf(value.sandboxMode) }
     var approval by remember(value) { mutableStateOf(value.approvalPolicy) }
     var approvalReviewer by remember(value) { mutableStateOf(value.approvalsReviewer) }
-    var personality by remember(value) { mutableStateOf(value.personality) }
     var ephemeral by remember(value) { mutableStateOf(value.ephemeral) }
     var baseInstructions by remember(value) { mutableStateOf(value.baseInstructions.orEmpty()) }
     var developerInstructions by remember(value) { mutableStateOf(value.developerInstructions.orEmpty()) }
@@ -701,16 +699,6 @@ private fun ThreadOptionsSheet(
                     onSelect = { approval = it },
                 )
                 approval?.let { SettingDescription(stringResource(it.displayDescriptionRes)) }
-                if (selectedModel?.supportsPersonality == true) {
-                    Text("人格", style = MaterialTheme.typography.labelLarge)
-                    OptionChipRow(
-                        values = listOf(null, Personality.FRIENDLY, Personality.PRAGMATIC, Personality.NONE),
-                        selected = personality,
-                        label = { it?.let { value -> stringResource(value.displayLabelRes) }
-                            ?: stringResource(R.string.common_server_default) },
-                        onSelect = { personality = it },
-                    )
-                }
                 Text("审批者", style = MaterialTheme.typography.labelLarge)
                 OptionChipRow(
                     values = listOf<ApprovalReviewer?>(null) + ApprovalReviewer.entries,
@@ -757,7 +745,6 @@ private fun ThreadOptionsSheet(
                             approvalPolicy = approval,
                             approvalsReviewer = approvalReviewer,
                             configJson = configJson.ifBlank { null },
-                            personality = personality,
                             baseInstructions = baseInstructions.ifBlank { null },
                             developerInstructions = developerInstructions.ifBlank { null },
                             ephemeral = ephemeral,

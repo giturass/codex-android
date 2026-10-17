@@ -7,6 +7,8 @@
     <string name="common_hide_technical_details">隐藏技术详情</string>
     <string name="common_default">默认</string>
     <string name="common_server_default">服务器默认</string>
+    <string name="conversation_copy_id">复制会话 ID</string>
+    <string name="conversation_id_copied">已复制会话 ID</string>
 
     <string name="message_attachment_image">图片</string>
     <string name="message_attachment_audio">音频</string>
@@ -43,9 +45,6 @@
     <string name="approval_reviewer_auto">自动审查</string>
     <string name="approval_reviewer_auto_description">由自动审查器评估请求，必要时仍会询问你</string>
 
-    <string name="personality_default">默认</string>
-    <string name="personality_friendly">友好</string>
-    <string name="personality_pragmatic">务实</string>
     <string name="reasoning_summary_auto">自动（推荐）</string>
     <string name="reasoning_summary_concise">简洁</string>
     <string name="reasoning_summary_detailed">详细</string>
@@ -69,6 +68,7 @@
     <string name="account_plan_plus">Plus</string>
     <string name="account_plan_pro">Pro</string>
     <string name="account_plan_pro_lite">Pro Lite</string>
+    <string name="account_plan_pro_max">Pro Max</string>
     <string name="account_plan_team">团队版</string>
     <string name="account_plan_business_usage_based">按量计费商业版</string>
     <string name="account_plan_business">商业版</string>

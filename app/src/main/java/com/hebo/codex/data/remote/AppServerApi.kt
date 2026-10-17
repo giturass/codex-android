@@ -1,6 +1,5 @@
 package com.hebo.codex.data.remote
 
-import com.hebo.codex.domain.ReviewDelivery
 import com.hebo.codex.domain.ReviewTarget
 import com.hebo.codex.domain.RemoteFileMetadata
 import com.hebo.codex.domain.SandboxMode
@@ -135,7 +134,6 @@ class AppServerApi(
             }
             options.baseInstructions?.takeIf(String::isNotBlank)?.let { put("baseInstructions", it) }
             options.developerInstructions?.takeIf(String::isNotBlank)?.let { put("developerInstructions", it) }
-            options.personality?.let { put("personality", it.wireValue) }
             if (options.ephemeral) put("ephemeral", true)
         },
     ).jsonObject
@@ -308,12 +306,11 @@ class AppServerApi(
     suspend fun review(
         threadId: String,
         target: ReviewTarget,
-        delivery: ReviewDelivery,
     ): JsonObject = request(
         StableRpcMethod.REVIEW_START,
         buildJsonObject {
             put("threadId", threadId)
-            put("delivery", delivery.wireValue)
+            put("delivery", "inline")
             put("target", target.toWire())
         },
     ).jsonObject
@@ -378,7 +375,6 @@ class AppServerApi(
         options.serviceTier?.let { put("serviceTier", it) }
         options.reasoningEffort?.let { put("effort", it) }
         options.reasoningSummary?.let { put("summary", it.wireValue) }
-        options.personality?.let { put("personality", it.wireValue) }
         options.approvalPolicy?.let { put("approvalPolicy", it.wireValue) }
         options.approvalsReviewer?.let { put("approvalsReviewer", it.wireValue) }
         options.sandboxMode?.let { put("sandboxPolicy", options.toSandboxPolicyWire(it)) }

@@ -414,6 +414,7 @@ data class AsyncUserInputQuestion(
 enum class ActivityKind {
     MCP_TOOL,
     DYNAMIC_TOOL,
+    TOOL_OUTPUT,
     WEB_SEARCH,
     CONTEXT_COMPACTION,
     REVIEW,
@@ -487,11 +488,10 @@ sealed interface PendingServerRequest {
         val command: String?,
         val cwd: String?,
         val environmentId: String?,
-        val networkHost: String?,
+        val networkContext: NetworkApprovalContext?,
         val commandActions: List<CommandAction>,
         val grantRoot: String?,
-        val proposedExecPolicy: ExecPolicyAmendment?,
-        val proposedNetworkPolicies: List<NetworkPolicyAmendment>,
+        val availableDecisions: List<ApprovalOption>,
     ) : PendingServerRequest
 
     data class Questions(
@@ -499,8 +499,7 @@ sealed interface PendingServerRequest {
         val itemId: String,
         override val turnId: String,
         val questions: List<UserQuestion>,
-        val autoResolutionMillis: Long?,
-        val receivedAtMillis: Long,
+        val isBlocking: Boolean,
     ) : PendingServerRequest
 
     data class McpElicitation(
@@ -557,6 +556,18 @@ data class NetworkPolicyAmendment(
     val action: NetworkPolicyRuleAction,
     val responseJson: String,
 )
+
+data class NetworkApprovalContext(
+    val host: String,
+    val protocol: NetworkApprovalProtocol,
+)
+
+enum class NetworkApprovalProtocol(val wireValue: String) {
+    HTTP("http"),
+    HTTPS("https"),
+    SOCKS5_TCP("socks5Tcp"),
+    SOCKS5_UDP("socks5Udp"),
+}
 
 enum class NetworkPolicyRuleAction {
     ALLOW,
@@ -619,7 +630,17 @@ data class UserQuestionOption(
 
 enum class ApprovalType {
     COMMAND_EXECUTION,
+    TERMINAL_INPUT,
+    NETWORK_ACCESS,
     FILE_CHANGE,
+}
+
+sealed interface ApprovalOption {
+    data class Decision(val decision: ApprovalDecision) : ApprovalOption
+
+    data class ExecPolicy(val amendment: ExecPolicyAmendment) : ApprovalOption
+
+    data class NetworkPolicy(val amendment: NetworkPolicyAmendment) : ApprovalOption
 }
 
 enum class ApprovalDecision(val wireValue: String) {
@@ -684,12 +705,6 @@ enum class SandboxMode(val wireValue: String) {
     DANGER_FULL_ACCESS("danger-full-access"),
 }
 
-enum class Personality(val wireValue: String) {
-    NONE("none"),
-    FRIENDLY("friendly"),
-    PRAGMATIC("pragmatic"),
-}
-
 enum class ReasoningSummary(val wireValue: String) {
     AUTO("auto"),
     CONCISE("concise"),
@@ -707,7 +722,6 @@ data class ThreadOptions(
     val configJson: String? = null,
     val baseInstructions: String? = null,
     val developerInstructions: String? = null,
-    val personality: Personality? = null,
     val ephemeral: Boolean = false,
 )
 
@@ -717,7 +731,6 @@ data class TurnOptions(
     val serviceTier: String? = null,
     val reasoningEffort: String? = null,
     val reasoningSummary: ReasoningSummary? = null,
-    val personality: Personality? = null,
     val approvalPolicy: ApprovalPolicy? = null,
     val approvalsReviewer: ApprovalReviewer? = null,
     val sandboxMode: SandboxMode? = null,
@@ -738,9 +751,9 @@ sealed interface ReviewTarget {
     data class Custom(val instructions: String) : ReviewTarget
 }
 
-enum class ReviewDelivery(val wireValue: String) {
-    INLINE("inline"),
-    DETACHED("detached"),
+enum class ReviewDestination {
+    CURRENT_THREAD,
+    NEW_THREAD,
 }
 
 data class ThreadGoal(

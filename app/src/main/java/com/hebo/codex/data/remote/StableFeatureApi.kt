@@ -736,7 +736,6 @@ class StableFeatureApi(
         description = requiredString("description"),
         isDefault = optionalBoolean("isDefault") ?: false,
         hidden = optionalBoolean("hidden") ?: false,
-        supportsPersonality = optionalBoolean("supportsPersonality") ?: false,
         inputModalities = array("inputModalities").map { it.primitiveContent() },
         reasoningEfforts = array("supportedReasoningEfforts").map { element ->
             val value = element.jsonObject

@@ -18,7 +18,7 @@ import com.hebo.codex.domain.FeatureEntry
 import com.hebo.codex.domain.ModelOption
 import com.hebo.codex.domain.QueueWithdrawalCoordinator
 import com.hebo.codex.domain.QueueWithdrawalState
-import com.hebo.codex.domain.ReviewDelivery
+import com.hebo.codex.domain.ReviewDestination
 import com.hebo.codex.domain.ReviewTarget
 import com.hebo.codex.domain.RemoteFileMetadata
 import com.hebo.codex.domain.SubAgentsState
@@ -552,10 +552,10 @@ class ChatViewModel(
         }
     }
 
-    fun review(target: ReviewTarget, delivery: ReviewDelivery) {
+    fun review(target: ReviewTarget, destination: ReviewDestination) {
         if (mutableState.value.conversation?.isViewOnly == true) return
         viewModelScope.launch {
-            runSuspendCatching { repository.reviewConversation(serverId, threadId, target, delivery) }
+            runSuspendCatching { repository.reviewConversation(serverId, threadId, target, destination) }
                 .onSuccess { reviewThreadId ->
                     if (reviewThreadId != threadId) mutableEvents.send(ChatEvent.OpenConversation(reviewThreadId))
                 }

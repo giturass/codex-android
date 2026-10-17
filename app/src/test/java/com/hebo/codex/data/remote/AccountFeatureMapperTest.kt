@@ -18,6 +18,7 @@ class AccountFeatureMapperTest {
     @Test
     fun preservesNewPlanTypesWhenReadingRateLimits() {
         val plans = mapOf(
+            "promax" to AccountPlan.PRO_MAX,
             "self_serve_business_prolite" to AccountPlan.SELF_SERVE_BUSINESS_PRO_LITE,
             "ent26" to AccountPlan.ENT26,
             "enterprise_cbp_automation" to AccountPlan.ENTERPRISE_CBP_AUTOMATION,

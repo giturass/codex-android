@@ -10,6 +10,8 @@ import com.hebo.codex.domain.AgentState
 import com.hebo.codex.domain.AgentStatus
 import com.hebo.codex.domain.SubAgentActivityKind
 import com.hebo.codex.domain.SubAgentEvent
+import com.hebo.codex.domain.ApprovalDecision
+import com.hebo.codex.domain.ApprovalOption
 import com.hebo.codex.domain.ApprovalType
 import com.hebo.codex.domain.BackgroundTerminal
 import com.hebo.codex.domain.ChangedFile
@@ -28,6 +30,8 @@ import com.hebo.codex.domain.FileSystemPermissionEntry
 import com.hebo.codex.domain.FileSystemPermissionTarget
 import com.hebo.codex.domain.NetworkPolicyAmendment
 import com.hebo.codex.domain.NetworkPolicyRuleAction
+import com.hebo.codex.domain.NetworkApprovalContext
+import com.hebo.codex.domain.NetworkApprovalProtocol
 import com.hebo.codex.domain.PendingServerRequest
 import com.hebo.codex.domain.ThreadHistoryMode
 import com.hebo.codex.domain.ThreadRuntimeStatus
@@ -270,23 +274,36 @@ object ProtocolMapper {
         method: String,
         params: JsonObject,
         requestKey: String,
-        receivedAtMillis: Long,
     ): PendingServerRequest = when (method) {
-        "item/commandExecution/requestApproval" -> PendingServerRequest.Approval(
-            requestKey = requestKey,
-            itemId = params.requiredString("itemId"),
-            turnId = params.requiredString("turnId"),
-            type = ApprovalType.COMMAND_EXECUTION,
-            reason = params.optionalString("reason"),
-            command = params.optionalString("command"),
-            cwd = params.optionalString("cwd"),
-            environmentId = params.optionalString("environmentId"),
-            networkHost = (params["networkApprovalContext"] as? JsonObject)?.optionalString("host"),
-            commandActions = commandActions(params["commandActions"]),
-            grantRoot = null,
-            proposedExecPolicy = execPolicyAmendment(params["proposedExecpolicyAmendment"]),
-            proposedNetworkPolicies = networkPolicyAmendments(params["proposedNetworkPolicyAmendments"]),
-        )
+        "item/commandExecution/requestApproval" -> {
+            val networkContext = params.optionalObject("networkApprovalContext")?.let { context ->
+                NetworkApprovalContext(
+                    host = context.requiredString("host"),
+                    protocol = NetworkApprovalProtocol.entries.singleOrNull {
+                        it.wireValue == context.requiredString("protocol")
+                    } ?: throw ProtocolException("未知网络审批协议：${context.requiredString("protocol")}"),
+                )
+            }
+            val commandType = when (val kind = if ("kind" in params) params.requiredString("kind") else "command") {
+                "command" -> ApprovalType.COMMAND_EXECUTION
+                "writeStdin" -> ApprovalType.TERMINAL_INPUT
+                else -> throw ProtocolException("未知命令审批类型：$kind")
+            }
+            PendingServerRequest.Approval(
+                requestKey = requestKey,
+                itemId = params.requiredString("itemId"),
+                turnId = params.requiredString("turnId"),
+                type = if (networkContext != null) ApprovalType.NETWORK_ACCESS else commandType,
+                reason = params.optionalString("reason"),
+                command = params.optionalString("command"),
+                cwd = params.optionalString("cwd"),
+                environmentId = params.optionalString("environmentId"),
+                networkContext = networkContext,
+                commandActions = commandActions(params["commandActions"]),
+                grantRoot = null,
+                availableDecisions = commandApprovalOptions(params),
+            )
+        }
 
         "item/fileChange/requestApproval" -> PendingServerRequest.Approval(
             requestKey = requestKey,
@@ -297,11 +314,10 @@ object ProtocolMapper {
             command = null,
             cwd = null,
             environmentId = null,
-            networkHost = null,
+            networkContext = null,
             commandActions = emptyList(),
             grantRoot = params.optionalString("grantRoot"),
-            proposedExecPolicy = null,
-            proposedNetworkPolicies = emptyList(),
+            availableDecisions = ApprovalDecision.entries.map { ApprovalOption.Decision(it) },
         )
 
         "item/tool/requestUserInput" -> PendingServerRequest.Questions(
@@ -325,8 +341,7 @@ object ProtocolMapper {
                     isSecret = question.optionalBoolean("isSecret") ?: false,
                 )
             },
-            autoResolutionMillis = params.optionalLong("autoResolutionMs"),
-            receivedAtMillis = receivedAtMillis,
+            isBlocking = params.requiredBoolean("isBlocking"),
         )
 
         "mcpServer/elicitation/request" -> PendingServerRequest.McpElicitation(
@@ -619,19 +634,68 @@ object ProtocolMapper {
         return ExecPolicyAmendment(commands, value.toString())
     }
 
+    private fun commandApprovalOptions(params: JsonObject): List<ApprovalOption> =
+        when (val decisions = params["availableDecisions"]) {
+            null, JsonNull -> buildList {
+                add(ApprovalOption.Decision(ApprovalDecision.ACCEPT))
+                add(ApprovalOption.Decision(ApprovalDecision.ACCEPT_FOR_SESSION))
+                execPolicyAmendment(params["proposedExecpolicyAmendment"])?.let {
+                    add(ApprovalOption.ExecPolicy(it))
+                }
+                networkPolicyAmendments(params["proposedNetworkPolicyAmendments"]).forEach {
+                    add(ApprovalOption.NetworkPolicy(it))
+                }
+                add(ApprovalOption.Decision(ApprovalDecision.DECLINE))
+                add(ApprovalOption.Decision(ApprovalDecision.CANCEL))
+            }
+
+            is JsonArray -> decisions.map(::approvalOption)
+            else -> throw ProtocolException("可用审批决策必须是数组")
+        }
+
+    private fun approvalOption(value: JsonElement): ApprovalOption = when (value) {
+        is JsonPrimitive -> {
+            val decision = ApprovalDecision.entries.singleOrNull { it.wireValue == value.content }
+                ?: throw ProtocolException("未知审批决策：$value")
+            ApprovalOption.Decision(decision)
+        }
+
+        is JsonObject -> {
+            if (value.size != 1) throw ProtocolException("审批决策必须只包含一种操作")
+            when (value.keys.single()) {
+                "acceptWithExecpolicyAmendment" -> ApprovalOption.ExecPolicy(
+                    execPolicyAmendment(
+                        value.requiredObject("acceptWithExecpolicyAmendment").requiredArray("execpolicy_amendment"),
+                    ) ?: throw ProtocolException("审批决策缺少命令规则修订"),
+                )
+
+                "applyNetworkPolicyAmendment" -> ApprovalOption.NetworkPolicy(
+                    networkPolicyAmendment(
+                        value.requiredObject("applyNetworkPolicyAmendment").requiredObject("network_policy_amendment"),
+                    ),
+                )
+
+                else -> throw ProtocolException("未知审批决策：${value.keys.single()}")
+            }
+        }
+
+        else -> throw ProtocolException("审批决策必须是字符串或对象")
+    }
+
     fun networkPolicyAmendments(value: JsonElement?): List<NetworkPolicyAmendment> =
         value.optionalArray("proposedNetworkPolicyAmendments").map { element ->
-            val amendment = element.jsonObject
-            NetworkPolicyAmendment(
-                host = amendment.requiredString("host"),
-                action = when (amendment.requiredString("action")) {
-                    "allow" -> NetworkPolicyRuleAction.ALLOW
-                    "deny" -> NetworkPolicyRuleAction.DENY
-                    else -> throw ProtocolException("未知网络规则操作：${amendment.requiredString("action")}")
-                },
-                responseJson = element.toString(),
-            )
+            networkPolicyAmendment(element.jsonObject)
         }
+
+    private fun networkPolicyAmendment(value: JsonObject): NetworkPolicyAmendment = NetworkPolicyAmendment(
+        host = value.requiredString("host"),
+        action = when (value.requiredString("action")) {
+            "allow" -> NetworkPolicyRuleAction.ALLOW
+            "deny" -> NetworkPolicyRuleAction.DENY
+            else -> throw ProtocolException("未知网络规则操作：${value.requiredString("action")}")
+        },
+        responseJson = value.toString(),
+    )
 
     fun requestedPermissions(value: JsonObject): RequestedPermissions = RequestedPermissions(
         networkEnabled = value.optionalObject("network")?.optionalBoolean("enabled"),
@@ -669,6 +733,8 @@ object ProtocolMapper {
             )
 
             "commandExecution" -> commandExecution(item, id, turnId)
+
+            "functionCallOutput" -> functionCallOutput(item, turnId)
 
             "fileChange" -> ConversationItem.FileChange(
                 id = id,
