@@ -5,9 +5,7 @@
 
 package com.hebo.codex.ui.components
 
-import androidx.compose.animation.core.animate
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,7 +39,6 @@ import androidx.compose.material.icons.rounded.EditNote
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Folder
-import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PriorityHigh
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
@@ -49,10 +46,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DismissibleDrawerSheet
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -72,30 +67,21 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import com.hebo.codex.R
 import com.hebo.codex.domain.ConnectionStatus
@@ -110,8 +96,6 @@ import com.hebo.codex.domain.ThreadAttentionState
 import com.hebo.codex.domain.ThreadSummary
 import com.hebo.codex.domain.projectName
 import com.hebo.codex.ui.theme.statusColors
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
 
 internal val CodexNavigationDrawerWidth = 360.dp
 
@@ -332,7 +316,6 @@ private fun ColumnScope.DrawerContent(
                     DrawerRecentHeader(
                         groupByProject = groupByProject,
                         refreshEnabled = !isLoading && !isLoadingMore,
-                        onNewConversation = onNewConversation,
                         onSearch = { drawerPage = DrawerPage.SEARCH },
                         onGroupByProjectChange = { enabled ->
                             groupByProject = enabled
@@ -531,35 +514,37 @@ private fun ColumnScope.DrawerContent(
                 onClick = onAddServer,
                 icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
             )
-            drawerBody(PaddingValues())
+            Column(Modifier.weight(1f)) {
+                drawerBody(PaddingValues())
+            }
         } else {
-            CollapsibleDrawerServerFooter(
-                modifier = Modifier.weight(1f),
-                resetKey = activeServer?.id,
-                forceVisible = !drawerListState.canScrollBackward,
-                footer = { footerModifier ->
-                    Column(footerModifier.background(MaterialTheme.colorScheme.surfaceContainerLow)) {
-                        Spacer(Modifier.height(8.dp))
-                        ServerSelector(
-                            servers = servers,
-                            activeServer = activeServer,
-                            statuses = connectionStatuses,
-                            onSelect = onSelectServer,
-                            onReconnect = onReconnectServer,
-                            onEdit = onEditServer,
-                            onDelete = onRemoveServer,
-                            onOpenSettings = { serverId ->
-                                leaveTransientPage()
-                                onOpenSettings(serverId)
-                            },
-                            onAdd = onAddServer,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Spacer(Modifier.height(12.dp))
-                    }
+            ServerSelector(
+                servers = servers,
+                activeServer = activeServer,
+                statuses = connectionStatuses,
+                onSelect = onSelectServer,
+                onReconnect = onReconnectServer,
+                onEdit = onEditServer,
+                onDelete = onRemoveServer,
+                onOpenSettings = { serverId ->
+                    leaveTransientPage()
+                    onOpenSettings(serverId)
                 },
-                content = drawerBody,
+                onAdd = onAddServer,
+                modifier = Modifier.fillMaxWidth(),
             )
+            Spacer(Modifier.height(12.dp))
+            Column(Modifier.weight(1f)) {
+                drawerBody(PaddingValues())
+            }
+        }
+        if (activeServer != null) {
+            FloatingActionButton(
+                onClick = onNewConversation,
+                modifier = Modifier.align(Alignment.End).padding(vertical = 12.dp),
+            ) {
+                Icon(Icons.Rounded.Add, contentDescription = "新建任务")
+            }
         }
     }
 
@@ -595,114 +580,6 @@ private fun ColumnScope.DrawerContent(
                     selectedThread = null
                 }
             },
-        )
-    }
-}
-
-private const val DRAWER_SERVER_FOOTER_SETTLE_DURATION_MILLIS = 160
-
-internal fun ScrollChromeState.afterDrawerUserScroll(
-    deltaY: Float,
-    hideDistance: Float,
-): ScrollChromeState = afterUserScroll(
-    hideDelta = -deltaY,
-    hideDistance = hideDistance,
-)
-
-@Composable
-private fun CollapsibleDrawerServerFooter(
-    resetKey: Any?,
-    forceVisible: Boolean,
-    footer: @Composable (Modifier) -> Unit,
-    modifier: Modifier = Modifier,
-    content: @Composable ColumnScope.(PaddingValues) -> Unit,
-) {
-    var footerHeightPx by remember { mutableStateOf(0) }
-    var scrollState by remember(resetKey) { mutableStateOf(ScrollChromeState()) }
-    var settleJob by remember(resetKey) { mutableStateOf<Job?>(null) }
-    val scrollScope = rememberCoroutineScope()
-    val density = LocalDensity.current
-
-    LaunchedEffect(forceVisible) {
-        if (forceVisible) {
-            settleJob?.cancel()
-            settleJob = null
-            scrollState = ScrollChromeState()
-        }
-    }
-    LaunchedEffect(footerHeightPx) {
-        val hideDistance = footerHeightPx.toFloat()
-        scrollState = if (scrollState.fullyHidden) {
-            scrollState.copy(offset = hideDistance)
-        } else {
-            scrollState.copy(offset = scrollState.offset.coerceAtMost(hideDistance))
-        }
-    }
-
-    val scrollConnection = remember(resetKey, footerHeightPx) {
-        object : NestedScrollConnection {
-            override fun onPostScroll(
-                consumed: Offset,
-                available: Offset,
-                source: NestedScrollSource,
-            ): Offset {
-                if (source == NestedScrollSource.UserInput && consumed.y != 0f) {
-                    settleJob?.cancel()
-                    settleJob = null
-                    scrollState = scrollState.afterDrawerUserScroll(
-                        deltaY = consumed.y,
-                        hideDistance = footerHeightPx.toFloat(),
-                    )
-                }
-                return Offset.Zero
-            }
-
-            override suspend fun onPreFling(available: Velocity): Velocity {
-                val hideDistance = footerHeightPx.toFloat()
-                val targetOffset = scrollState.settleTarget(hideDistance)
-                val targetHidden = hideDistance > 0f && targetOffset == hideDistance
-                scrollState = scrollState.copy(settledHidden = targetHidden)
-                if (targetOffset != scrollState.offset) {
-                    val initialOffset = scrollState.offset
-                    settleJob?.cancel()
-                    settleJob = scrollScope.launch {
-                        animate(
-                            initialValue = initialOffset,
-                            targetValue = targetOffset,
-                            animationSpec = tween(DRAWER_SERVER_FOOTER_SETTLE_DURATION_MILLIS),
-                        ) { value, _ ->
-                            scrollState = scrollState.copy(offset = value)
-                        }
-                        scrollState = if (targetOffset == 0f) {
-                            ScrollChromeState()
-                        } else {
-                            ScrollChromeState(
-                                fullyHidden = true,
-                                offset = targetOffset,
-                                settledHidden = true,
-                            )
-                        }
-                    }
-                }
-                return Velocity.Zero
-            }
-        }
-    }
-    val footerHeight = with(density) { footerHeightPx.toDp() }
-    val listContentPadding = PaddingValues(
-        bottom = footerHeight.takeUnless { scrollState.fullyHidden } ?: 0.dp,
-    )
-
-    Box(modifier.clipToBounds().nestedScroll(scrollConnection)) {
-        Column(Modifier.fillMaxSize()) {
-            content(listContentPadding)
-        }
-        footer(
-            Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .onSizeChanged { footerHeightPx = it.height }
-                .graphicsLayer { translationY = scrollState.offset },
         )
     }
 }
@@ -744,13 +621,10 @@ private fun RefreshableDrawerList(
 private fun DrawerRecentHeader(
     groupByProject: Boolean,
     refreshEnabled: Boolean,
-    onNewConversation: () -> Unit,
     onSearch: () -> Unit,
     onGroupByProjectChange: (Boolean) -> Unit,
     onRefresh: () -> Unit,
 ) {
-    var menuExpanded by remember { mutableStateOf(false) }
-
     Row(
         modifier = Modifier.fillMaxWidth().padding(start = 12.dp, top = 4.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -761,50 +635,25 @@ private fun DrawerRecentHeader(
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )
-        FilledTonalIconButton(onClick = onNewConversation) {
-            Icon(Icons.Rounded.Add, contentDescription = "新建任务", modifier = Modifier.size(22.dp))
+        IconButton(onClick = onRefresh, enabled = refreshEnabled) {
+            Icon(Icons.Rounded.Refresh, contentDescription = "刷新会话列表")
         }
-        if (groupByProject) {
-            IconButton(onClick = { onGroupByProjectChange(false) }) {
-                Icon(Icons.Rounded.Folder, contentDescription = "关闭按项目分组")
-            }
+        IconButton(
+            onClick = { onGroupByProjectChange(!groupByProject) },
+            modifier = Modifier.semantics { selected = groupByProject },
+        ) {
+            Icon(
+                Icons.Rounded.Folder,
+                contentDescription = if (groupByProject) "关闭按项目分组" else "按项目分组",
+                tint = if (groupByProject) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
         }
-        Box {
-            IconButton(onClick = { menuExpanded = true }) {
-                Icon(Icons.Rounded.MoreVert, contentDescription = "更多会话操作")
-            }
-            DropdownMenu(
-                expanded = menuExpanded,
-                onDismissRequest = { menuExpanded = false },
-            ) {
-                DropdownMenuItem(
-                    text = { Text("搜索会话") },
-                    leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-                    onClick = {
-                        menuExpanded = false
-                        onSearch()
-                    },
-                )
-                if (!groupByProject) {
-                    DropdownMenuItem(
-                        text = { Text("按项目分组") },
-                        leadingIcon = { Icon(Icons.Rounded.Folder, contentDescription = null) },
-                        onClick = {
-                            menuExpanded = false
-                            onGroupByProjectChange(true)
-                        },
-                    )
-                }
-                DropdownMenuItem(
-                    text = { Text("刷新会话列表") },
-                    leadingIcon = { Icon(Icons.Rounded.Refresh, contentDescription = null) },
-                    enabled = refreshEnabled,
-                    onClick = {
-                        menuExpanded = false
-                        onRefresh()
-                    },
-                )
-            }
+        IconButton(onClick = onSearch) {
+            Icon(Icons.Rounded.Search, contentDescription = "搜索会话")
         }
     }
 }
