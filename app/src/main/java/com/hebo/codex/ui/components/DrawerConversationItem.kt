@@ -38,7 +38,7 @@ internal fun DrawerConversationItem(
     leadingContent: (@Composable () -> Unit)? = null,
     trailingContent: (@Composable () -> Unit)? = null,
 ) {
-    val containerShape = MaterialTheme.shapes.small
+    val containerShape = MaterialTheme.shapes.large
     val containerColor = if (selected) {
         MaterialTheme.colorScheme.secondaryContainer
     } else {
