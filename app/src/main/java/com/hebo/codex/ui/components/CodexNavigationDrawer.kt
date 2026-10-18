@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyListScope
@@ -71,6 +70,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -139,7 +139,7 @@ fun CodexNavigationDrawer(
     onOpenSettings: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val sheetModifier = modifier.fillMaxHeight().widthIn(max = CodexNavigationDrawerWidth)
+    val sheetModifier = modifier.fillMaxHeight()
     val content: @Composable ColumnScope.() -> Unit = {
         DrawerContent(
             servers = servers,
@@ -189,6 +189,7 @@ fun CodexNavigationDrawer(
     } else {
         ModalDrawerSheet(
             modifier = sheetModifier,
+            drawerShape = RectangleShape,
             drawerContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             content = content,
         )
@@ -541,6 +542,7 @@ private fun ColumnScope.DrawerContent(
         if (activeServer != null) {
             FloatingActionButton(
                 onClick = onNewConversation,
+                shape = CircleShape,
                 modifier = Modifier.align(Alignment.End).padding(vertical = 12.dp),
             ) {
                 Icon(Icons.Rounded.Add, contentDescription = "新建任务")

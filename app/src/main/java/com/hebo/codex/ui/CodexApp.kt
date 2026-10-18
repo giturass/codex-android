@@ -78,7 +78,6 @@ import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.serialization.Serializable
 
 private val MainContentMinWidth = 600.dp
-private val ModalDrawerMinScrimWidth = 56.dp
 private val WideDrawerThreshold = CodexNavigationDrawerWidth + MainContentMinWidth
 
 @Serializable
@@ -222,7 +221,7 @@ fun CodexApp(
         val drawerWidth = if (isWideLayout) {
             CodexNavigationDrawerWidth
         } else {
-            (maxWidth - ModalDrawerMinScrimWidth).coerceIn(0.dp, CodexNavigationDrawerWidth)
+            maxWidth
         }
         val drawerState = if (isWideLayout) wideDrawerState else modalDrawerState
         val drawerVisible = drawerState.isOpen || drawerState.targetValue == DrawerValue.Open

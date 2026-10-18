@@ -385,7 +385,7 @@ private fun NewTaskContent(
             ) {
                 Surface(
                     modifier = Modifier.size(72.dp),
-                    shape = MaterialTheme.shapes.extraLarge,
+                    shape = MaterialTheme.shapes.large,
                     color = MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                 ) {

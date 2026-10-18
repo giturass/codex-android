@@ -1,15 +1,20 @@
 package com.hebo.codex.ui.theme
 
+import android.content.Context
+import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
 internal val CodexShapes = Shapes(
@@ -52,18 +57,29 @@ internal val MaterialTheme.statusColors: CodexStatusColors
     @ReadOnlyComposable
     get() = LocalCodexStatusColors.current
 
+private fun dynamicColorScheme(
+    context: Context,
+    darkTheme: Boolean,
+) = if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+
 @Composable
 fun CodexTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
+    val context = LocalContext.current
     val statusColors = if (darkTheme) DarkStatusColors else LightStatusColors
+    val colorScheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        dynamicColorScheme(context, darkTheme)
+    } else {
+        if (darkTheme) DarkColors else LightColors
+    }
     CompositionLocalProvider(
         LocalCodexDarkTheme provides darkTheme,
         LocalCodexStatusColors provides statusColors,
     ) {
         MaterialTheme(
-            colorScheme = if (darkTheme) DarkColors else LightColors,
+            colorScheme = colorScheme,
             typography = CodexTypography,
             shapes = CodexShapes,
             content = content,
