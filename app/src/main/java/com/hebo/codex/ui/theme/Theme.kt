@@ -16,6 +16,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.annotation.RequiresApi
 
 internal val CodexShapes = Shapes(
     extraSmall = RoundedCornerShape(4.dp),
@@ -57,6 +58,7 @@ internal val MaterialTheme.statusColors: CodexStatusColors
     @ReadOnlyComposable
     get() = LocalCodexStatusColors.current
 
+@RequiresApi(Build.VERSION_CODES.S)
 private fun dynamicColorScheme(
     context: Context,
     darkTheme: Boolean,
